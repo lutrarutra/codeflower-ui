@@ -115,7 +115,7 @@
   }
 </script>
 
-<main class="flex h-full flex-col">
+<div class="flex h-full flex-col">
   {#if preview}
     <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5">
       <span class="grid size-8 shrink-0 place-items-center rounded-lg border-[1.5px] border-line bg-teal-soft">
@@ -277,4 +277,4 @@
       <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading…
     </div>
   {/if}
-</main>
+</div>

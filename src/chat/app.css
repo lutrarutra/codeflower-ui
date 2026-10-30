@@ -9,7 +9,8 @@
    hard offset shadows, pill buttons, and a playful palette. Light themes get
    the paper, dark themes a deep ink, and high-contrast themes fall back to
    the theme's own colors without decoration. The host sets `cf-dark` on an
-   ancestor (the body) for dark themes. */
+   ancestor (the body) for dark themes. Outside VS Code its --vscode-*
+   variables are missing, so each use has a fallback. */
 :root {
   --cf-paper: #f6efd9;
   --cf-card: #fffaf0;
@@ -96,9 +97,9 @@ body.vscode-high-contrast-light {
 }
 
 @theme inline {
-  --font-sans: 'DM Sans Variable', var(--vscode-font-family), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'DM Sans Variable', var(--vscode-font-family, ui-sans-serif), ui-sans-serif, system-ui, sans-serif;
   --font-display: 'Fredoka Variable', 'Trebuchet MS', sans-serif;
-  --font-mono: var(--vscode-editor-font-family), ui-monospace, monospace;
+  --font-mono: var(--vscode-editor-font-family, ui-monospace), ui-monospace, monospace;
   --color-paper: var(--cf-paper);
   --color-card: var(--cf-card);
   --color-ink: var(--cf-ink);
@@ -122,7 +123,7 @@ body.vscode-high-contrast-light {
   --color-violet-soft: var(--cf-violet-soft);
   --color-cyan: var(--cf-cyan);
   --color-on-accent: var(--cf-on-accent);
-  --color-focus: var(--vscode-focusBorder);
+  --color-focus: var(--vscode-focusBorder, var(--cf-indigo));
 }
 
 html,

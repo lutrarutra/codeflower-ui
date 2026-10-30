@@ -1,0 +1,114 @@
+/* The app's page: what the chat's look (../chat/app.css) does not already have. */
+@source './';
+
+#app {
+  height: 100%;
+}
+
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.field {
+  width: 100%;
+  border: 1.5px solid var(--cf-soft-line);
+  border-radius: 10px;
+  background: var(--cf-card);
+  padding: 0.4rem 0.7rem;
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--cf-indigo);
+}
+
+dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  max-width: min(42rem, calc(100vw - 2rem));
+  width: 100%;
+  /* Tailwind's reset removes the margin that centres a modal dialog. */
+  margin: auto;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  font-size: 0.75em;
+  font-weight: 700;
+}
+
+/* htop-like meters: segments of one bar. */
+.meter {
+  position: relative;
+  display: flex;
+  height: 0.6rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cf-soft-line);
+}
+
+.meter > span {
+  height: 100%;
+}
+
+.meter .user,
+.meter .used,
+.key-user {
+  background: var(--cf-teal);
+}
+
+.meter .system,
+.key-system {
+  background: var(--cf-pink);
+}
+
+.meter .iowait,
+.key-iowait {
+  background: var(--cf-orange);
+}
+
+.meter .cache,
+.key-cache {
+  background: var(--cf-yellow);
+}
+
+.key {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  vertical-align: -0.05rem;
+  margin: 0 0.25rem 0 0.6rem;
+}
+
+.key:first-child {
+  margin-left: 0;
+}
+
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid var(--cf-soft-line);
+  border-top-color: var(--cf-indigo);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -0.1em;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

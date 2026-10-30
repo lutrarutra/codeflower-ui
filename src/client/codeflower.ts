@@ -91,7 +91,7 @@ export interface ShowRequest {
 
 export interface DshCredentials {
   deepseekApiKey?: string;
-  openaiCompatible?: { baseURL: string; models: string[]; apiKey: string };
+  openaiCompatible?: { baseURL: string; models: string[]; reasoningEfforts?: string[]; apiKey: string };
 }
 
 export interface CodeflowerHandlers {
