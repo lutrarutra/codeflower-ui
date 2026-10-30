@@ -6,8 +6,15 @@
   // and effort get their own pickers; anything else goes under "More".
   let {
     options,
-    set
-  }: { options: SessionConfigOption[]; set: (configId: string, value: string | boolean) => void } = $props();
+    set,
+    autoApprove,
+    setAutoApprove
+  }: {
+    options: SessionConfigOption[];
+    set: (configId: string, value: string | boolean) => void;
+    autoApprove?: boolean;
+    setAutoApprove?: (enabled: boolean) => void;
+  } = $props();
 
   const isSelect = (option: SessionConfigOption | undefined): option is SelectOption => option?.type === 'select';
   const byCategory = (category: string) => options.find((option) => option.category === category);
@@ -58,6 +65,21 @@
     if (moreOpen && more && !more.contains(event.target as Node)) moreOpen = false;
   }}
 />
+
+{#if autoApprove !== undefined}
+  <button
+    type="button"
+    role="switch"
+    aria-checked={autoApprove}
+    class="chip {autoApprove ? 'border-teal! text-teal' : ''}"
+    title="Automatically allow all DSH tool approval requests in this chat"
+    onclick={() => setAutoApprove?.(!autoApprove)}
+  >
+    <span class="codicon codicon-shield"></span>
+    Auto-approve
+    <span class="rounded-full bg-soft-line px-1.5 text-[0.8em]">{autoApprove ? 'on' : 'off'}</span>
+  </button>
+{/if}
 
 {#if isSelect(mode)}
   {@const [icon, tint] = modeLook[String(mode.currentValue)] ?? ['shield', '']}

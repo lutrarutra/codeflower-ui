@@ -169,10 +169,35 @@ export interface ChatState {
   subtitle: string;
   /** The agent's name and color in the header; unknown while the worker connects. */
   agent?: AgentPresentation;
+  /** Actions this worker image offers; absent when its bridge predates actions. */
+  actions?: ChatAction[];
+  /** DSH permission requests are approved automatically unless the user turns this off. */
+  autoApprove?: boolean;
   /** The session runs on the connected worker and accepts prompts. */
   live: boolean;
   busy: boolean;
 }
+
+export interface ChatAction {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  mode: 'queue' | 'interrupt';
+  prompt: string;
+}
+
+export interface ActionPromptMeta {
+  id: string;
+  title: string;
+}
+
+export interface QueuedPromptSummary {
+  id: string;
+  title: string;
+}
+
+export const ACTION_PROMPT_META = 'codeflower/action';
 
 /** What the session is doing, shown on its tab and in its header. */
 export type SessionStatus = 'ready' | 'waiting' | 'working' | 'offline';
@@ -194,6 +219,7 @@ export type HostMessage =
   /** The chat's tokens and cost, and its worker's quota. */
   | { type: 'usage'; usage: ChatUsage }
   | { type: 'notice'; level: 'info' | 'error'; message: string; action?: { id: 'signIn'; label: string } }
+  | { type: 'queue'; items: QueuedPromptSummary[] }
   /** A file from the sandbox the chat asked for, e.g. a figure the agent looked at; null if unavailable. */
   | { type: 'fileData'; key: string; dataUrl: string | null };
 
@@ -209,7 +235,9 @@ export type WebviewMessage =
   /** A file path in the chat was clicked: show it in a preview tab. */
   | { type: 'openFile'; path: string }
   | { type: 'fileData'; path: string; key: string }
-  | { type: 'action'; id: 'signIn' };
+  | { type: 'setAutoApprove'; enabled: boolean }
+  | { type: 'action'; id: string }
+  | { type: 'removeQueued'; id: string };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

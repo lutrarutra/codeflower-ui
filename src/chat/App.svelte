@@ -5,12 +5,14 @@
     type HostMessage,
     type PendingPermission,
     type PendingQuestion,
+    type QueuedPromptSummary,
     type SessionStatus,
     type TranscriptEntry
   } from '../protocol/messages.ts';
   import type { ChatUsage } from '../protocol/usage.ts';
   import type { AvailableCommand, SessionConfigOption } from '@agentclientprotocol/sdk';
   import CommandMenu from './lib/CommandMenu.svelte';
+  import ActionsMenu from './lib/ActionsMenu.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
   import { provideSandboxFiles, SandboxFiles } from './lib/sandboxFiles.svelte.ts';
   import PermissionPrompt from './lib/PermissionPrompt.svelte';
@@ -36,6 +38,7 @@
   let draft = $state('');
   let config = $state<SessionConfigOption[]>([]);
   let usage = $state<ChatUsage>({ session: null, account: null });
+  let queued = $state<QueuedPromptSummary[]>([]);
   let settings: SettingsBar | undefined = $state();
 
   /** Shows the choice at once; the agent's reply confirms or corrects it. */
@@ -71,6 +74,9 @@
         break;
       case 'usage':
         usage = message.usage;
+        break;
+      case 'queue':
+        queued = message.items;
         break;
       case 'fileData':
         files.received(message.key, message.dataUrl);
@@ -188,6 +194,14 @@
         {#if location}<span class="truncate font-mono">{location}</span>{/if}
       </div>
     </div>
+    {#if chat.actions?.length}
+      <ActionsMenu
+        actions={chat.actions}
+        busy={chat.busy}
+        live={chat.live}
+        choose={(id) => send({ type: 'action', id })}
+      />
+    {/if}
     <span
       class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[0.8em] font-semibold {statusLook[status][1]}"
       title={statusLook[status][2]}
@@ -226,6 +240,25 @@
     {#key question.requestId}
       <QuestionCard request={question} />
     {/key}
+  {/if}
+
+  {#if queued.length}
+    <div class="mx-4 mb-2 flex flex-wrap items-center gap-1.5 text-[0.8em]" aria-live="polite">
+      <span class="text-muted">Queued:</span>
+      {#each queued as item (item.id)}
+        <span class="chip gap-1.5" title="Sent after the current turn">
+          {item.title}
+          <button
+            type="button"
+            class="link -mr-1"
+            aria-label="Remove {item.title} from queue"
+            onclick={() => send({ type: 'removeQueued', id: item.id })}
+          >
+            <span class="codicon codicon-close"></span>
+          </button>
+        </span>
+      {/each}
+    </div>
   {/if}
 
   <form
@@ -295,7 +328,13 @@
             {#if typedCommand.input?.hint}<span class="truncate font-mono text-muted">{typedCommand.input.hint}</span>{/if}
           </span>
         {:else if chat.live}
-          <SettingsBar bind:this={settings} options={config} set={setConfig} />
+          <SettingsBar
+            bind:this={settings}
+            options={config}
+            set={setConfig}
+            autoApprove={chat.agent?.id === 'dsh' ? (chat.autoApprove ?? true) : undefined}
+            setAutoApprove={(enabled) => send({ type: 'setAutoApprove', enabled })}
+          />
         {/if}
       </div>
       {#if chat.busy && !shellMode}

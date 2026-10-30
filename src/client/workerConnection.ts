@@ -10,9 +10,12 @@ import type {
   StopReason
 } from '@agentclientprotocol/sdk';
 import {
+  ACTION_PROMPT_META,
   agentPresentation,
   SHELL_CONTEXT_META,
+  type ActionPromptMeta,
   type AgentName,
+  type ChatAction,
   type AgentPresentation,
   type FormContent,
   type PendingPermission,
@@ -187,6 +190,10 @@ export class WorkerConnection {
     return status;
   }
 
+  actions(): Promise<ChatAction[] | undefined> {
+    return this.bridge.actions();
+  }
+
   usage(): Promise<WorkerUsage | undefined> {
     return this.bridge.usage();
   }
@@ -262,8 +269,18 @@ export class WorkerConnection {
     return this.acp.setConfigOption(key, configId, value);
   }
 
-  prompt(key: string, text: string): Promise<StopReason> {
-    const shown = [{ type: 'text' as const, text }];
+  setAutoApprove(key: string, enabled: boolean): void {
+    if (this.agent === 'dsh') this.acp.setAutoApprove(key, enabled);
+  }
+
+  prompt(key: string, text: string, action?: ActionPromptMeta): Promise<StopReason> {
+    const shown = [
+      {
+        type: 'text' as const,
+        text,
+        ...(action ? { _meta: { [ACTION_PROMPT_META]: action } } : {})
+      }
+    ];
     // Like Claude Code's `!` commands: the agent sees what the user ran with the next message.
     // A slash command must stay the first block for the agent to run it, so the
     // commands wait for the next message instead.

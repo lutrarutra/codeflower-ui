@@ -2,7 +2,9 @@
 import type { ContentBlock, PlanEntry, ToolCallContent, ToolCallLocation } from '@agentclientprotocol/sdk';
 import { looksLikeFile } from './files.ts';
 import {
+  ACTION_PROMPT_META,
   SHELL_CONTEXT_META,
+  type ActionPromptMeta,
   formFields,
   type FormContent,
   type FormField,
@@ -11,6 +13,7 @@ import {
 
 export type ChatItem =
   | { kind: 'user'; id: string; text: string }
+  | { kind: 'action'; id: string; title: string; text: string }
   | { kind: 'assistant'; id: string; text: string; messageId?: string | null }
   | { kind: 'thought'; id: string; text: string }
   | {
@@ -69,6 +72,22 @@ function blockText(block: ContentBlock): string {
   }
 }
 
+function promptAction(prompt: ContentBlock[]): ActionPromptMeta | undefined {
+  for (const block of prompt) {
+    const meta = block._meta?.[ACTION_PROMPT_META];
+    if (
+      typeof meta === 'object' &&
+      meta !== null &&
+      'id' in meta &&
+      typeof meta.id === 'string' &&
+      'title' in meta &&
+      typeof meta.title === 'string'
+    ) {
+      return { id: meta.id, title: meta.title };
+    }
+  }
+}
+
 const tokens = (count: number) => (count >= 1000 ? `${(count / 1000).toFixed(1)}k` : `${count}`);
 
 /** Claude Code's `/compact` reports the context it freed as the tool call's output. */
@@ -109,15 +128,13 @@ export function buildItems(entries: TranscriptEntry[]): ChatItem[] {
     const last = items.at(-1);
     switch (entry.kind) {
       case 'prompt':
-        items.push({
-          kind: 'user',
-          id,
+        {
           // The agent also got the user's earlier shell commands; the chat shows them as their own cards.
-          text: entry.prompt
-            .filter((block) => !block._meta?.[SHELL_CONTEXT_META])
-            .map(blockText)
-            .join('\n')
-        });
+          const prompt = entry.prompt.filter((block) => !block._meta?.[SHELL_CONTEXT_META]);
+          const text = prompt.map(blockText).join('\n');
+          const action = promptAction(prompt);
+          items.push(action ? { kind: 'action', id, title: action.title, text } : { kind: 'user', id, text });
+        }
         break;
       case 'turn_end':
         if (entry.stopReason && entry.stopReason !== 'end_turn') {

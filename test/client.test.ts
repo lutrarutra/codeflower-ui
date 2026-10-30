@@ -109,6 +109,7 @@ test('asks the user for permission and answers the agent', async () => {
   const { entries, events, handlers } = recorder();
   const connection = await WorkerConnection.connect(agent.transport, handlers, client);
   const key = await connection.newSession();
+  connection.setAutoApprove(key, true);
   const answer = agent.request('session/request_permission', {
     sessionId: 'one',
     toolCall: { toolCallId: 't', title: 'rm -rf data' },
@@ -119,6 +120,54 @@ test('asks the user for permission and answers the agent', async () => {
   connection.answerPermission(1, 'yes');
   assert.deepEqual((await answer).result, { outcome: { outcome: 'selected', optionId: 'yes' } });
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['permission', 'permission_outcome']);
+});
+
+test('auto-approves DSH permission requests when enabled', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'dsh', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' })
+  });
+  const { entries, events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const key = await connection.newSession();
+  connection.setAutoApprove(key, true);
+
+  const answer = agent.request('session/request_permission', {
+    sessionId: 'one',
+    toolCall: { toolCallId: 't' },
+    options: [
+      { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+      { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }
+    ]
+  });
+  assert.deepEqual((await answer).result, {
+    outcome: { outcome: 'selected', optionId: 'allow-once' }
+  });
+  assert.ok(!events.includes(`permission ${key} allow-once,reject-once`));
+  assert.deepEqual(entries.map(([, entry]) => entry.kind), ['permission', 'permission_outcome']);
+});
+
+test('turning on DSH auto-approval answers an open request', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'dsh', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' })
+  });
+  const { events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const key = await connection.newSession();
+  const answer = agent.request('session/request_permission', {
+    sessionId: 'one',
+    toolCall: { toolCallId: 't' },
+    options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }]
+  });
+  await tick();
+  assert.ok(events.includes(`permission ${key} allow-once`));
+
+  connection.setAutoApprove(key, true);
+  assert.deepEqual((await answer).result, {
+    outcome: { outcome: 'selected', optionId: 'allow-once' }
+  });
+  assert.ok(events.includes(`permission ${key} none`));
 });
 
 test('tells the host when another window takes the worker over', async () => {
@@ -144,4 +193,42 @@ test('session keys match the bridge', () => {
   const unreadable = 'ses/with spaces';
   assert.equal(sessionKey('dsh', unreadable), `dsh-${createHash('sha256').update(unreadable).digest('hex').slice(0, 32)}`);
   assert.equal(sessionKey('codex', 'x'.repeat(97)), `codex-${createHash('sha256').update('x'.repeat(97)).digest('hex').slice(0, 32)}`);
+});
+
+test('reads worker actions and keeps old bridge images compatible', async () => {
+  const action = {
+    id: 'checkpoint',
+    title: 'Checkpoint',
+    description: 'Save progress',
+    icon: 'save',
+    mode: 'queue' as const,
+    prompt: 'Save progress.'
+  };
+  const agent = new FakeAgent({
+    '_codeflower/actions/list': () => ({ actions: [action] }),
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi' } })
+  });
+  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
+  assert.deepEqual(await connection.actions(), [action]);
+
+  const olderAgent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi' } })
+  });
+  const olderConnection = await WorkerConnection.connect(olderAgent.transport, recorder().handlers, client);
+  assert.equal(await olderConnection.actions(), undefined);
+});
+
+test('records action prompt metadata without changing its text', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi' } }),
+    'session/new': () => ({ sessionId: 'one' }),
+    'session/prompt': () => ({ stopReason: 'end_turn' })
+  });
+  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
+  const key = await connection.newSession();
+  await connection.prompt(key, 'Make a checkpoint.', { id: 'checkpoint', title: 'Checkpoint' });
+  const request = agent.received.findLast((message) => message.method === 'session/prompt');
+  assert.deepEqual(request?.params?.prompt, [
+    { type: 'text', text: 'Make a checkpoint.', _meta: { 'codeflower/action': { id: 'checkpoint', title: 'Checkpoint' } } }
+  ]);
 });

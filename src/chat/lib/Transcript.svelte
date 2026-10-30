@@ -29,7 +29,7 @@
     void items.length;
     void busy;
     if (!container) return;
-    const lastUser = items.findLast((item) => item.kind === 'user')?.id;
+    const lastUser = items.findLast((item) => item.kind === 'user' || item.kind === 'action')?.id;
     const sent = lastUserItem !== undefined && lastUser !== lastUserItem;
     lastUserItem = lastUser;
     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
@@ -74,6 +74,16 @@
       >
         {item.text}
       </div>
+    {:else if item.kind === 'action'}
+      <details
+        class="bubble-user group max-w-[85%] self-end rounded-[18px] rounded-br-md border-2 border-line bg-indigo px-3.5 py-2 text-on-accent shadow-[3px_3px_0_var(--cf-shadow)]"
+      >
+        <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
+          <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
+          {item.title}
+        </summary>
+        <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
+      </details>
     {:else if item.kind === 'assistant'}
       <div class="max-w-[95%]"><Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} /></div>
     {:else if item.kind === 'thought'}

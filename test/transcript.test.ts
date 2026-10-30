@@ -36,3 +36,22 @@ test('joins the chunks of one message', () => {
     ['Hello there!']
   );
 });
+
+test('renders action prompts compactly and falls back when metadata is missing', () => {
+  const action = buildItems([
+    {
+      t: '',
+      kind: 'prompt',
+      prompt: [
+        {
+          type: 'text',
+          text: 'Make a checkpoint.',
+          _meta: { 'codeflower/action': { id: 'checkpoint', title: 'Checkpoint' } }
+        }
+      ]
+    }
+  ]);
+  const plain = buildItems([{ t: '', kind: 'prompt', prompt: [{ type: 'text', text: 'Make a checkpoint.' }] }]);
+  assert.deepEqual(action, [{ kind: 'action', id: '0', title: 'Checkpoint', text: 'Make a checkpoint.' }]);
+  assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.' }]);
+});

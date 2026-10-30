@@ -2,7 +2,7 @@
 // notifications for the worker's status, recorded sessions, files, the
 // user's shell commands, sign-in terminals and usage. An agent reached without
 // the bridge answers none of them, and the chat works without them.
-import type { AgentName, AgentPresentation, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
+import type { AgentName, AgentPresentation, ChatAction, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import { isMethodNotFound, type RpcConnection } from './rpc.ts';
 
@@ -144,6 +144,16 @@ export class CodeflowerExtensions {
   async usage(): Promise<WorkerUsage | undefined> {
     try {
       return await this.rpc.request<WorkerUsage>('_codeflower/usage', {});
+    } catch (error) {
+      if (isMethodNotFound(error)) return undefined;
+      throw error;
+    }
+  }
+
+  /** Undefined when no bridge answers or when its image predates chat actions. */
+  async actions(): Promise<ChatAction[] | undefined> {
+    try {
+      return (await this.rpc.request<{ actions: ChatAction[] }>('_codeflower/actions/list', {})).actions;
     } catch (error) {
       if (isMethodNotFound(error)) return undefined;
       throw error;

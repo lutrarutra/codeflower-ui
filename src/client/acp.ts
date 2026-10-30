@@ -131,6 +131,7 @@ export class AcpClient {
       request: PendingQuestion;
     }
   >();
+  private readonly autoApprovedSessions = new Set<string>();
   /** Sessions with a prompt in flight. */
   private readonly busySessions = new Set<string>();
   /** Sessions with a turn an earlier connection started, as the worker reports. */
@@ -309,6 +310,17 @@ export class AcpClient {
     pending.resolve({ outcome });
   }
 
+  setAutoApprove(key: string, enabled: boolean): void {
+    if (!enabled) {
+      this.autoApprovedSessions.delete(key);
+      return;
+    }
+    this.autoApprovedSessions.add(key);
+    for (const [requestId, pending] of this.permissions) {
+      if (pending.sessionKey === key) this.autoApprovePermission(requestId, pending.request);
+    }
+  }
+
   answerQuestion(requestId: number, action: QuestionAction, content: FormContent | null): void {
     const pending = this.questions.get(requestId);
     if (!pending) return;
@@ -396,8 +408,16 @@ export class AcpClient {
     return new Promise<RequestPermissionResponse>((resolve) => {
       const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options };
       this.permissions.set(requestId, { resolve, sessionKey: key, request: pending });
+      if (this.autoApprovedSessions.has(key) && this.autoApprovePermission(requestId, pending)) return;
       this.handlers.permission(key, pending);
     });
+  }
+
+  private autoApprovePermission(requestId: number, request: PendingPermission): boolean {
+    const allow = request.options.find((option) => option.kind === 'allow_once');
+    if (!allow) return false;
+    this.answerPermission(requestId, allow.optionId);
+    return true;
   }
 
   private async elicit(request: ElicitationRequest): Promise<unknown> {
