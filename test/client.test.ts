@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import type { TranscriptEntry } from '../src/protocol/messages.ts';
+import { agentPresentation, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { sessionKey } from '../src/client/sessionKey.ts';
 import { TAKEN_OVER, WorkerConnection, type WorkerHandlers } from '../src/client/workerConnection.ts';
 import { FakeAgent, tick } from './fakeAgent.ts';
@@ -89,6 +89,9 @@ test('falls back from resume to load when the agent advertises neither', async (
   const { events, handlers } = recorder();
   const connection = await WorkerConnection.connect(agent.transport, handlers, client);
   assert.deepEqual(connection.presentation, { id: 'claude', name: 'Claude Code', color: 'var(--cf-orange)' });
+  // A worker that names its agent's color: a palette name follows the theme, anything else is used as given.
+  assert.deepEqual(agentPresentation('pi', { name: 'Pi', color: 'teal' }), { id: 'pi', name: 'Pi', color: 'var(--cf-teal)' });
+  assert.equal(agentPresentation('pi', { color: '#3a7bd5' })?.color, '#3a7bd5');
   const attached = await connection.resumeSession('abc', null);
   assert.deepEqual(attached, { key: 'claude-abc', transcriptEntries: 7 });
   assert.deepEqual(

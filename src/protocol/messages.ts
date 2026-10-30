@@ -20,8 +20,15 @@ export interface AgentPresentation {
   id: AgentName;
   /** Product name, e.g. "Claude Code". */
   name?: string;
-  /** A CSS color for the agent's accents. */
+  /** The agent's accent: one of the chat's palette names (orange, teal, …), or any CSS color. */
   color?: string;
+}
+
+/** The palette's accents, which follow the light or dark theme. */
+const PALETTE = ['orange', 'teal', 'indigo', 'violet', 'pink', 'cyan', 'green', 'yellow', 'red'];
+
+function accent(color: string): string {
+  return PALETTE.includes(color) ? `var(--cf-${color})` : color;
 }
 
 /**
@@ -29,16 +36,18 @@ export interface AgentPresentation {
  * agents bring their presentation with them and never need an entry here.
  */
 const LEGACY_PRESENTATION: Record<string, AgentPresentation> = {
-  claude: { id: 'claude', name: 'Claude Code', color: 'var(--cf-orange)' },
-  codex: { id: 'codex', name: 'Codex', color: 'var(--cf-teal)' },
-  dsh: { id: 'dsh', name: 'DeepSeek Harness', color: 'var(--cf-indigo)' }
+  claude: { id: 'claude', name: 'Claude Code', color: 'orange' },
+  codex: { id: 'codex', name: 'Codex', color: 'teal' },
+  dsh: { id: 'dsh', name: 'DeepSeek Harness', color: 'indigo' }
 };
 
 /** The agent's presentation, filling what the worker did not report. */
 export function agentPresentation(id: AgentName | undefined, reported?: Partial<AgentPresentation>): AgentPresentation | undefined {
   if (!id) return undefined;
   const known = Object.fromEntries(Object.entries(reported ?? {}).filter(([, value]) => value));
-  return { ...LEGACY_PRESENTATION[id], ...known, id };
+  const presentation: AgentPresentation = { ...LEGACY_PRESENTATION[id], ...known, id };
+  if (presentation.color) presentation.color = accent(presentation.color);
+  return presentation;
 }
 
 // One rendered chat item. Recorded transcripts and live traffic share this
