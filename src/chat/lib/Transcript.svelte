@@ -28,18 +28,57 @@
   const items = $derived(buildItems(entries));
   let container: HTMLElement | undefined = $state();
 
-  // Follow new output while the user is at the bottom, and jump there when they
-  // send something (also from elsewhere, e.g. feedback from a file preview).
+  // Follow the output while the user is at the bottom: whatever makes the
+  // transcript taller (a new item, streamed text, an image or highlighting that
+  // arrives later, the window resizing) keeps it there. Only the user scrolling
+  // up stops it, and scrolling back down starts it again; growth never moves
+  // the view up, so it cannot look like the user leaving the bottom.
+  let pinned = true;
+  const nearBottom = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+  const follow = () => {
+    if (pinned && container) container.scrollTop = container.scrollHeight;
+  };
+  $effect(() => {
+    const element = container;
+    if (!element) return;
+    let lastTop = element.scrollTop;
+    const scrolled = () => {
+      const top = element.scrollTop;
+      if (nearBottom(element)) pinned = true;
+      else if (top < lastTop) pinned = false;
+      lastTop = top;
+    };
+    const sizes = new ResizeObserver(follow);
+    sizes.observe(element);
+    const watch = (node: Node) => node instanceof Element && sizes.observe(node);
+    element.childNodes.forEach(watch);
+    const children = new MutationObserver((records) => {
+      for (const record of records) {
+        record.addedNodes.forEach(watch);
+        record.removedNodes.forEach((node) => node instanceof Element && sizes.unobserve(node));
+      }
+      follow();
+    });
+    children.observe(element, { childList: true });
+    element.addEventListener('scroll', scrolled, { passive: true });
+    return () => {
+      sizes.disconnect();
+      children.disconnect();
+      element.removeEventListener('scroll', scrolled);
+    };
+  });
+
+  // Back to the bottom when the user sends something (also from elsewhere, e.g.
+  // feedback from a file preview), and when a chat's transcript has loaded.
   let lastUserItem: string | undefined;
-  $effect.pre(() => {
-    void items.length;
-    void busy;
-    if (!container) return;
+  $effect(() => {
     const lastUser = items.findLast((item) => item.kind === 'user' || item.kind === 'action')?.id;
     const sent = lastUserItem !== undefined && lastUser !== lastUserItem;
     lastUserItem = lastUser;
-    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
-    if (atBottom || sent) queueMicrotask(() => container!.scrollTo({ top: container!.scrollHeight }));
+    if (sent || loading) {
+      pinned = true;
+      follow();
+    }
   });
 
   // ACP tool kinds: an icon and a tile color each.
