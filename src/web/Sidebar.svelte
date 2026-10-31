@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tunnelConnectorId } from '../tunnel/connect.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
@@ -24,6 +25,8 @@
     { id: 'server', label: 'Server', icon: 'server-process' }
   ];
   const connectOnly = $derived(app.system?.capabilities.connectOnly ?? false);
+  // Through the tunnel, adding sandboxes and quitting stay on the computer itself.
+  const remote = tunnelConnectorId() !== undefined;
   // A sandbox's own page (`--server`): only it, nothing to start or add.
   const single = $derived(app.single);
 
@@ -87,7 +90,7 @@
         </li>
       {/each}
     </ul>
-    {#if !single}
+    {#if !single && !remote}
       <button class="grid size-9 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink" title="Add remote sandbox" aria-label="Add remote sandbox" onclick={onAdd}>
         <span class="codicon codicon-add"></span>
       </button>
@@ -185,10 +188,12 @@
     </ul>
 
     <div class="flex flex-col gap-2 border-t-[1.5px] border-soft-line p-3">
-      {#if !single}
+      {#if !single && !remote}
         <button class="pill pill-small justify-center" onclick={onAdd}><span class="codicon codicon-add"></span>Add remote sandbox</button>
       {/if}
-      <button class="link self-center text-[0.85em]" onclick={() => app.askToQuit()}>{single ? 'Stop the sandbox' : connectOnly ? 'Quit' : 'Stop all and quit'}</button>
+      {#if !remote}
+        <button class="link self-center text-[0.85em]" onclick={() => app.askToQuit()}>{single ? 'Stop the sandbox' : connectOnly ? 'Quit' : 'Stop all and quit'}</button>
+      {/if}
     </div>
   </nav>
 {/if}

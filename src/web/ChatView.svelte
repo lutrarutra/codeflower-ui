@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tunnelConnectorId } from '../tunnel/connect.ts';
   // The chosen sandbox: its tabs (chats, folders, files) in a grid, under what
   // the user should know about it (another window has it, the agent is not
   // signed in, a wrap-up).
@@ -86,7 +87,7 @@
         {#if !app.system?.capabilities.connectOnly}
           <button class="pill pill-primary" onclick={() => app.go({ view: 'server' })}>Start a sandbox</button>
         {/if}
-        {#if !app.single}
+        {#if !app.single && tunnelConnectorId() === undefined}
           <button class="pill" onclick={onAdd}>Add remote sandbox</button>
         {/if}
       </div>
