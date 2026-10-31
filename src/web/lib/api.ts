@@ -152,6 +152,33 @@ export interface Resources {
   load?: number[];
 }
 
+/** GET /api/tunnel: remote access through a code flower tunnel (on the computer itself only). */
+export interface TunnelStatus {
+  /** The client keeps a tunnel connected once signed in. */
+  available: boolean;
+  url: string;
+  signedIn: boolean;
+  off: boolean;
+  region?: string;
+  /** config.yaml's answer; null until the first sign-in. */
+  euOnly: boolean | null;
+  hardened: boolean;
+  manage: boolean;
+  fingerprint?: string;
+  devices: { key: string; label: string; fingerprint: string; pairedAt: string; workers?: string[] }[];
+  /** Where paired browsers open code flower, once connected. */
+  pageUrl?: string;
+  /** A sign-in waiting for its code to be approved. */
+  login?: { verificationUrl: string; userCode: string; name: string; fingerprint: string; expiresAt: string };
+  loginError?: string;
+}
+
+export interface TunnelPairing {
+  link: string;
+  fingerprint: string;
+  expiresAt: string;
+}
+
 export interface FolderListing {
   path: string;
   parent?: string;

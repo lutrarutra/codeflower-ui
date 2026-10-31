@@ -6,6 +6,7 @@
   import ResourcesCard from './ResourcesCard.svelte';
   import SandboxCard from './SandboxCard.svelte';
   import StartForm from './StartForm.svelte';
+  import TunnelCard from './TunnelCard.svelte';
 
   const here = $derived(app.workers.filter((worker) => worker.source !== 'added'));
   const connectOnly = $derived(app.system?.capabilities.connectOnly ?? false);
@@ -34,6 +35,8 @@
       {/each}
     </section>
   {/if}
+
+  <TunnelCard />
 
   {#if !connectOnly}
     <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
