@@ -56,7 +56,14 @@ export interface SystemInfo {
   configSkills: string[];
   configDirectory?: string;
   isolation: Record<string, string>;
-  capabilities: { connect: boolean; start: boolean; startDisabledReason?: string; connectOnly: boolean };
+  capabilities: {
+    connect: boolean;
+    start: boolean;
+    startDisabledReason?: string;
+    connectOnly: boolean;
+    /** The page is served by one sandbox itself (`--server`): it shows only that one, and quitting stops it. */
+    single?: boolean;
+  };
 }
 
 export interface ChatActivity {

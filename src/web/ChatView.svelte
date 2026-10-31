@@ -86,7 +86,9 @@
         {#if !app.system?.capabilities.connectOnly}
           <button class="pill pill-primary" onclick={() => app.go({ view: 'server' })}>Start a sandbox</button>
         {/if}
-        <button class="pill" onclick={onAdd}>Add remote sandbox</button>
+        {#if !app.single}
+          <button class="pill" onclick={onAdd}>Add remote sandbox</button>
+        {/if}
       </div>
     </div>
   </main>

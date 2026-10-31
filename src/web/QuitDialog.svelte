@@ -17,7 +17,10 @@
     }
     if (current.stopping || current.quitting) return app.setQuit(current);
     if (!current.working) {
-      if (current.sandboxes && !confirm(`Stop ${plural(current.sandboxes, 'running sandbox', 'running sandboxes')} and quit the app?`)) return;
+      const question = app.single
+        ? 'Stop this sandbox? Its agent stops, and so does the job that runs it.'
+        : `Stop ${plural(current.sandboxes, 'running sandbox', 'running sandboxes')} and quit the app?`;
+      if (current.sandboxes && !confirm(question)) return;
       return quit(true);
     }
     plan = current;
@@ -42,7 +45,7 @@
 
 <dialog bind:this={dialog} aria-labelledby="quit-title">
   <div class="card flex flex-col gap-3 p-5">
-    <h2 id="quit-title" class="m-0 font-display text-lg font-medium">Quit code flower?</h2>
+    <h2 id="quit-title" class="m-0 font-display text-lg font-medium">{app.single ? 'Stop the sandbox?' : 'Quit code flower?'}</h2>
     {#if plan}
       <p class="m-0">
         {plural(plan.working, 'chat')} in {plural(plan.busy, 'sandbox', 'sandboxes')} started here {plan.working === 1 ? 'is' : 'are'} working.

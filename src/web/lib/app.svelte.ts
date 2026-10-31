@@ -25,6 +25,17 @@ function parseHash(hash: string): Route | undefined {
   return { view, ...(worker ? { worker } : {}), ...(session ? { session } : {}) };
 }
 
+/** The worker line in a link a sandbox printed (`#add=codeflower://…`), to offer to add. */
+export function addLine(hash: string): string | undefined {
+  const match = /^#add=(.+)$/.exec(hash);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return undefined;
+  }
+}
+
 export function routeHash(route: Route): string {
   return `#/${[route.view, route.worker, route.session]
     .filter(Boolean)
@@ -42,6 +53,8 @@ class AppState {
   /** The client has stopped: the page has nothing more to show. */
   stopped = $state(false);
   route = $state<Route>(parseHash(location.hash) ?? { view: 'chat' });
+  /** A sandbox's line from a link it printed, waiting for the user to add it. */
+  offered = $state<string | null>(null);
   /** Opens the quit dialog; set by the shell. */
   askToQuit: () => void = () => {};
   /** The latest wrap-up a sandbox announced, by sandbox. */
@@ -79,14 +92,35 @@ class AppState {
   private quitting = false;
 
   constructor() {
+    this.offer();
     window.addEventListener('hashchange', () => {
+      if (this.offer()) return;
       const route = parseHash(location.hash);
       if (route) this.go(route);
     });
   }
 
+  /**
+   * A link a sandbox printed: the page offers to add it, and the address bar
+   * goes back to where the user was, without the token.
+   */
+  private offer(): boolean {
+    const line = addLine(location.hash);
+    // A sandbox's own page adds no others.
+    if (line !== undefined && this.single) {
+      history.replaceState(null, '', routeHash(this.route));
+      return true;
+    }
+    if (line === undefined) return false;
+    this.offered = line;
+    history.replaceState(null, '', routeHash(this.route));
+    return true;
+  }
+
   /** Goes where the user asked: a chat opens in its sandbox's workbench, a sandbox shows its own. */
   go(route: Route): void {
+    // A sandbox's own page has no Server view.
+    if (this.single && route.view === 'server') route = { view: 'chat', ...(this.workers[0] ? { worker: this.workers[0].id } : {}) };
     const again = route.view === 'chat' && route.worker !== undefined && route.worker === this.route.worker && this.route.view === 'chat';
     this.route = route;
     const hash = routeHash(route);
@@ -149,7 +183,13 @@ class AppState {
   async refreshWorkers(): Promise<void> {
     try {
       this.workers = await api<Worker[]>('/api/workers');
+      const first = !this.listed;
       this.listed = true;
+      // A sandbox's own page opens on it.
+      const only = this.workers[0];
+      if (first && this.single && only && (this.route.view !== 'chat' || this.route.worker !== only.id)) {
+        this.go({ view: 'chat', worker: only.id, ...(this.route.worker === only.id && this.route.session ? { session: this.route.session } : {}) });
+      }
       for (const worker of this.workers) {
         const agent = this.agents.get(worker.id);
         if (agent) agent.place = worker.source === 'added' ? (worker.address ?? '') : worker.project;
@@ -175,6 +215,11 @@ class AppState {
     }
   }
 
+  /** The page is served by one sandbox itself, and shows only it. */
+  get single(): boolean {
+    return this.system?.capabilities.single ?? false;
+  }
+
   setQuit(plan: QuitPlan): void {
     if (plan.stopping) {
       this.stopped = true;
@@ -185,8 +230,8 @@ class AppState {
   }
 
   start(): void {
-    void this.loadSystem();
-    void this.refreshWorkers();
+    // The system first: it says whether this is a sandbox's own page.
+    void this.loadSystem().then(() => this.refreshWorkers());
     setInterval(() => void this.refreshWorkers(), WORKERS_MS);
   }
 }
