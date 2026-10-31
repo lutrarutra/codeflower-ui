@@ -160,6 +160,23 @@ textarea {
   color: inherit;
 }
 
+/* Tailwind's reset gives buttons the arrow; anything clickable shows the hand. In the base layer,
+   so a cursor utility on an element still wins. */
+@layer base {
+  button:not(:disabled),
+  summary,
+  select:not(:disabled),
+  label[for],
+  input:is([type='checkbox'], [type='radio'], [type='file'], [type='color']):not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='menuitem'],
+  [role='option'],
+  [role='tab'],
+  [role='switch'] {
+    cursor: pointer;
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
