@@ -43,6 +43,7 @@ import type {
   TranscriptEntry
 } from '../protocol/messages.ts';
 import { isMethodNotFound, RpcError, type RpcConnection } from './rpc.ts';
+import type { FileTransfers } from './codeflower.ts';
 
 export const PROTOCOL_VERSION = 1;
 export const AUTH_REQUIRED = -32000;
@@ -50,6 +51,7 @@ export const AUTH_REQUIRED = -32000;
 const REPLAYED_META = 'codeflower/replayed';
 const REQUEST_KEY_META = 'codeflower/requestKey';
 const MULTI_CLIENT_META = 'codeflower/multiClient';
+const FILES_META = 'codeflower/files';
 const PROMPTED_META = 'codeflower/prompted';
 const STEER_METHOD = '_session/steering';
 
@@ -126,6 +128,8 @@ export class AcpClient {
   multiClient = false;
   /** The agent takes a message into the turn it is working on (ACP steering). */
   canSteer = false;
+  /** The bridge sends files to folders and saves files and folders; undefined from older ones. */
+  fileTransfers: FileTransfers | undefined;
 
   private readonly rpc: RpcConnection;
   private readonly handlers: AcpHandlers;
@@ -196,6 +200,8 @@ export class AcpClient {
     this.agentInfo = initialized.agentInfo ?? null;
     this.multiClient = initialized._meta?.[MULTI_CLIENT_META] === true;
     this.canSteer = (initialized._meta as { steering?: { supported?: unknown } } | null | undefined)?.steering?.supported === true;
+    const files = initialized._meta?.[FILES_META] as FileTransfers | undefined;
+    this.fileTransfers = files?.upload?.folders && files.download ? files : undefined;
     return initialized;
   }
 

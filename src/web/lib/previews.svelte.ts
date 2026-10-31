@@ -16,8 +16,6 @@ import type { WebWorker } from './worker.svelte.ts';
 const POLL_MS = 2_000;
 /** Appended to a preview's id for its interactive tab. */
 export const INTERACTIVE = '#interactive';
-/** The tab with the sandbox's folders. */
-export const FILES = '#files';
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -350,11 +348,6 @@ export class Previews {
     if (!preview.html) return;
     preview.interactive = true;
     this.activate(preview.workerId, preview.id + INTERACTIVE);
-  }
-
-  /** Opens the sandbox's folders in a tab. */
-  browse(workerId: string): void {
-    this.activate(workerId, FILES);
   }
 
   /** The user closed a file's tab; closing a preview closes its interactive tab too. */

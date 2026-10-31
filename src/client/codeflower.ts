@@ -75,12 +75,60 @@ export interface DirectoryEntry {
   size: number;
   mtimeMs: number;
   mimeType?: string;
+  /** Folders: whether files may be sent to it. Absent from older bridges. */
+  writable?: boolean;
 }
 
 export interface DirectoryListing {
   path: string;
+  /** Whether files may be sent to this folder. Absent from older bridges. */
+  writable?: boolean;
   entries: DirectoryEntry[];
   truncated: boolean;
+}
+
+/** What a bridge says in `initialize` (`_meta['codeflower/files']`) about sending files both ways. */
+export interface FileTransfers {
+  upload: { maxBytes: number; chunkBytes: number; folders: boolean };
+  download: { chunkBytes: number; folders: boolean };
+}
+
+/** Where a file sent to the sandbox goes: a folder, and its path below it (a dropped folder's structure). */
+export interface UploadTarget {
+  dir: string;
+  relativePath: string;
+  /** On a clash: a numbered name, or over the existing file. */
+  conflict: 'number' | 'replace';
+}
+
+export interface UploadedFile {
+  path: string;
+  name: string;
+  size: number;
+  sha256: string;
+  replaced: boolean;
+}
+
+export interface DownloadStarted {
+  downloadId: string;
+  name: string;
+  chunkBytes: number;
+  /** A file as it is, or a folder as a zip made while it is read. */
+  kind: 'file' | 'zip';
+  /** file: its size. */
+  size?: number;
+  /** zip: how much the folder's files hold, and how many there are. */
+  sourceBytes?: number;
+  files?: number;
+}
+
+export interface DownloadChunk {
+  data: string;
+  done: boolean;
+  /** Bytes of the file, or of the folder's files, read so far. */
+  progress: number;
+  /** With the last chunk. */
+  sha256?: string;
 }
 
 export interface ShowRequest {
@@ -200,6 +248,41 @@ export class CodeflowerExtensions {
 
   listDirectory(path: string): Promise<DirectoryListing> {
     return this.rpc.request<DirectoryListing>('_codeflower/files/list', { path });
+  }
+
+  // Files sent both ways in chunks; see `FileTransfers`.
+
+  async uploadStart(target: UploadTarget, size: number): Promise<{ uploadId: string; chunkBytes: number }> {
+    return this.rpc.request('_codeflower/files/upload', { ...target, size });
+  }
+
+  async uploadChunk(uploadId: string, offset: number, data: string): Promise<{ received: number }> {
+    return this.rpc.request('_codeflower/files/upload', { uploadId, offset, data });
+  }
+
+  async uploadFinish(uploadId: string, sha256: string): Promise<UploadedFile> {
+    return this.rpc.request('_codeflower/files/upload', { uploadId, finish: true, sha256 });
+  }
+
+  async uploadCancel(uploadId: string): Promise<void> {
+    await this.rpc.request('_codeflower/files/upload', { uploadId, cancel: true });
+  }
+
+  /** Which of `paths` (relative to `dir`) exist already. */
+  async filesExist(dir: string, paths: string[]): Promise<{ path: string; type: 'file' | 'directory' | 'other' }[]> {
+    return (await this.rpc.request<{ existing: { path: string; type: 'file' | 'directory' | 'other' }[] }>('_codeflower/files/exists', { dir, paths })).existing;
+  }
+
+  async downloadStart(path: string): Promise<DownloadStarted> {
+    return this.rpc.request('_codeflower/files/download', { path });
+  }
+
+  async downloadChunk(downloadId: string, offset: number): Promise<DownloadChunk> {
+    return this.rpc.request('_codeflower/files/download', { downloadId, offset });
+  }
+
+  async downloadCancel(downloadId: string): Promise<void> {
+    await this.rpc.request('_codeflower/files/download', { downloadId, cancel: true });
   }
 
   /**

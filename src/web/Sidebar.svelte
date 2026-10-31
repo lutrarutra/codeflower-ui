@@ -3,14 +3,13 @@
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import SandboxDialog from './SandboxDialog.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
+  import FileTree from './FileTree.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import SessionList from './SessionList.svelte';
   import StatusDot from './lib/StatusDot.svelte';
   import { app, type View } from './lib/app.svelte.ts';
   import { SOURCE_TEXT, SOURCE_TITLE, workerTitle } from './lib/format.ts';
   import type { Worker } from './lib/api.ts';
-  import { FILES } from './lib/previews.svelte.ts';
-  import { endDrag, startDrag } from './lib/workbench.svelte.ts';
 
   let {
     collapsed = false,
@@ -36,16 +35,23 @@
     onNavigate();
   }
 
+  /** The sandbox's chats, or its folders, in place of them. */
+  let showing: 'chats' | 'files' = $state('chats');
+  const shows = [
+    { id: 'chats', label: 'Chats', icon: 'comment-discussion', title: "The sandbox's chats" },
+    { id: 'files', label: 'Files', icon: 'list-tree', title: 'The folders in the sandbox' }
+  ] as const;
+
   /** Lists the sandbox's chats; the drawer stays open to choose one. */
   function choose(id: string): void {
     app.browse(id);
+    showing = 'chats';
   }
 
-  /** The sandbox's folders, beside the chat that is open. */
+  /** The sandbox's folders, in the sidebar. */
   function files(worker: Worker): void {
-    if (app.route.view !== 'chat') app.go({ view: 'chat' });
-    app.previews.browse(worker.id);
-    onNavigate();
+    app.browse(worker.id);
+    showing = 'files';
   }
 
   const browsed = $derived(app.worker(app.browsing ?? undefined));
@@ -197,27 +203,38 @@
       <div class="flex flex-wrap items-center gap-1.5 px-4 pb-2">
         <ActivityChips worker={browsed} compact />
         {#if browsable(browsed)}
-          <button
-            class="chip ml-auto"
-            title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
-            draggable="true"
-            ondragstart={(event) => startDrag(event, browsed.id, FILES, 'Files')}
-            ondragend={endDrag}
-            onclick={() => files(browsed)}
-          >
-            <span class="codicon codicon-list-tree"></span>Files
-          </button>
+          <div class="ml-auto flex rounded-full border-[1.5px] border-soft-line bg-card p-0.5" role="tablist" aria-label="Show">
+            {#each shows as show (show.id)}
+              <button
+                role="tab"
+                aria-selected={showing === show.id}
+                title={show.title}
+                class="flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.8em] font-semibold pointer-coarse:py-1.5 {showing === show.id
+                  ? 'bg-indigo text-on-accent'
+                  : 'text-muted hover:text-ink'}"
+                onclick={() => (showing = show.id)}
+              >
+                <span class="codicon codicon-{show.icon} text-[13px]!"></span>{show.label}
+              </button>
+            {/each}
+          </div>
         {/if}
       </div>
-      <div class="min-h-0 flex-1 overflow-auto border-t-[1.5px] border-soft-line px-2 py-2">
-        {#if browsed.url && browsed.kind !== 'task'}
-          <SessionList worker={browsed} {onNavigate} />
-        {:else if browsed.kind === 'task'}
-          <p class="m-0 px-2 text-[0.9em] text-muted">This sandbox runs a task by itself and has no chat.</p>
-        {:else}
-          <p class="m-0 px-2 text-[0.9em] text-muted">The sandbox is not ready yet.</p>
-        {/if}
-      </div>
+      {#if showing === 'files' && browsable(browsed)}
+        <div class="min-h-0 flex-1 border-t-[1.5px] border-soft-line">
+          {#key browsed.id}<FileTree workerId={browsed.id} onOpen={onNavigate} />{/key}
+        </div>
+      {:else}
+        <div class="min-h-0 flex-1 overflow-auto border-t-[1.5px] border-soft-line px-2 py-2">
+          {#if browsed.url && browsed.kind !== 'task'}
+            <SessionList worker={browsed} {onNavigate} />
+          {:else if browsed.kind === 'task'}
+            <p class="m-0 px-2 text-[0.9em] text-muted">This sandbox runs a task by itself and has no chat.</p>
+          {:else}
+            <p class="m-0 px-2 text-[0.9em] text-muted">The sandbox is not ready yet.</p>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <div class="eyebrow px-4 pb-1 text-muted">{single ? 'Sandbox' : 'Sandboxes'}</div>
       <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
@@ -258,14 +275,7 @@
                 </button>
               {/if}
               {#if browsable(worker)}
-                <button
-                  class="chip absolute right-2 bottom-2"
-                  title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
-                  draggable="true"
-                  ondragstart={(event) => startDrag(event, worker.id, FILES, 'Files')}
-                  ondragend={endDrag}
-                  onclick={() => files(worker)}
-                >
+                <button class="chip absolute right-2 bottom-2" title="Browse the folders in the sandbox" onclick={() => files(worker)}>
                   <span class="codicon codicon-list-tree"></span>Files
                 </button>
               {/if}

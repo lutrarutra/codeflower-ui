@@ -30,9 +30,14 @@ import {
   CodeflowerExtensions,
   WORKSPACE,
   type DirectoryListing,
+  type DownloadChunk,
+  type DownloadStarted,
   type DshCredentials,
+  type FileTransfers,
   type SessionRecord,
   type ShowRequest,
+  type UploadTarget,
+  type UploadedFile,
   type WorkerStatus,
   type WrapUpNotice
 } from './codeflower.ts';
@@ -46,10 +51,15 @@ export {
   WORKSPACE,
   type DirectoryEntry,
   type DirectoryListing,
+  type DownloadChunk,
+  type DownloadStarted,
   type DshCredentials,
+  type FileTransfers,
   type Mount,
   type SessionRecord,
   type ShowRequest,
+  type UploadTarget,
+  type UploadedFile,
   type WorkerActivity,
   type WorkerStatus,
   type WrapUpNotice
@@ -259,6 +269,43 @@ export class WorkerConnection {
 
   listDirectory(path: string): Promise<DirectoryListing> {
     return this.bridge.listDirectory(path);
+  }
+
+  /** Whether files can be sent to the sandbox's folders and saved from it; see `web/lib/transfers.svelte.ts`. */
+  get fileTransfers(): FileTransfers | undefined {
+    return this.acp.fileTransfers;
+  }
+
+  uploadStart(target: UploadTarget, size: number): Promise<{ uploadId: string; chunkBytes: number }> {
+    return this.bridge.uploadStart(target, size);
+  }
+
+  uploadChunk(uploadId: string, offset: number, data: string): Promise<{ received: number }> {
+    return this.bridge.uploadChunk(uploadId, offset, data);
+  }
+
+  uploadFinish(uploadId: string, sha256: string): Promise<UploadedFile> {
+    return this.bridge.uploadFinish(uploadId, sha256);
+  }
+
+  uploadCancel(uploadId: string): Promise<void> {
+    return this.bridge.uploadCancel(uploadId);
+  }
+
+  filesExist(dir: string, paths: string[]): Promise<{ path: string; type: 'file' | 'directory' | 'other' }[]> {
+    return this.bridge.filesExist(dir, paths);
+  }
+
+  downloadStart(path: string): Promise<DownloadStarted> {
+    return this.bridge.downloadStart(path);
+  }
+
+  downloadChunk(downloadId: string, offset: number): Promise<DownloadChunk> {
+    return this.bridge.downloadChunk(downloadId, offset);
+  }
+
+  downloadCancel(downloadId: string): Promise<void> {
+    return this.bridge.downloadCancel(downloadId);
   }
 
   // ---- sessions ----

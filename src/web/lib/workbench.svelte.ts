@@ -1,11 +1,11 @@
-// The page's workbench: chats, folders and files from any of the sandboxes,
+// The page's workbench: chats and files from any of the sandboxes,
 // as tabs in one grid of groups (see layout.svelte.ts). A tab names its
 // sandbox and what it shows there (`<sandbox>/chat:<key>`). The workbench
 // decides where a tab opens when the user did not drop it somewhere: chats
 // where the chats are, files beside them. The grid is remembered without the
 // file previews, which need their sandbox to load.
 import { Layout, type Placement } from './layout.svelte.ts';
-import { FILES, INTERACTIVE } from './previews.svelte.ts';
+import { INTERACTIVE } from './previews.svelte.ts';
 
 /** A sandbox's overview: its chats, sign-in and connection. */
 export const OVERVIEW = '#overview';
@@ -21,13 +21,11 @@ export function splitTab(tab: string): { workerId: string; local: string } {
 export const chatTab = (key: string) => `${CHAT}${key}`;
 /** The chat a tab shows, by what it shows in its sandbox. */
 export const chatKeyOf = (local: string) => (local.startsWith(CHAT) ? local.slice(CHAT.length) : undefined);
-/** Chats and the overview are the page's own; other tabs show files. */
+/** Chats and the overview are the page's own and open again from a saved grid; other tabs show files. */
 const isPage = (tab: string) => {
   const { local } = splitTab(tab);
   return local.startsWith(CHAT) || local === OVERVIEW;
 };
-/** Tabs that open again from a saved grid. */
-const restorable = (tab: string) => isPage(tab) || splitTab(tab).local === FILES;
 
 /** A tab being dragged, from a group or from a list of chats. */
 export const dragging = $state<{ workerId: string | null; tab: string | null }>({ workerId: null, tab: null });
@@ -148,7 +146,7 @@ export class Workbench {
 
   save(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layout.save(restorable)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layout.save(isPage)));
     } catch {
       // Not remembered, e.g. in a private window.
     }

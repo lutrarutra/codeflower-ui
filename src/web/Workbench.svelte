@@ -8,12 +8,11 @@
   import { fileKind, kindIcon } from '../chat/lib/files.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import PreviewView from '../chat/Preview.svelte';
-  import FileTree from './FileTree.svelte';
   import GridNode from './GridNode.svelte';
   import { app } from './lib/app.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
-  import { FILES, INTERACTIVE } from './lib/previews.svelte.ts';
+  import { INTERACTIVE } from './lib/previews.svelte.ts';
   import { chatKeyOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab } from './lib/workbench.svelte.ts';
   import ReportFrame from './ReportFrame.svelte';
   import WorkerOverview from './WorkerOverview.svelte';
@@ -94,7 +93,7 @@
   $effect(() => {
     for (const tab of layout.tabs()) {
       const { workerId, local } = splitTab(tab);
-      if (chatKeyOf(local) || local === FILES || local === OVERVIEW) continue;
+      if (chatKeyOf(local) || local === OVERVIEW) continue;
       if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
     }
   });
@@ -124,7 +123,6 @@
       };
     }
     const worker = app.worker(workerId);
-    if (local === FILES) return { icon: 'list-tree', label: 'Files', title: named(workerId, 'The folders in the sandbox') };
     if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
     const preview = app.previews.find(workerId, local);
     const interactive = local.endsWith(INTERACTIVE);
@@ -257,8 +255,6 @@
     {:else}
       <div class="mx-auto w-full max-w-3xl p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>
     {/if}
-  {:else if local === FILES}
-    <FileTree {workerId} />
   {:else if local === OVERVIEW}
     {#if worker}<WorkerOverview {worker} {agent} elsewhere={app.elsewhere(worker)} />{/if}
   {:else}
