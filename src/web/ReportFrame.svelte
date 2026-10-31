@@ -45,7 +45,7 @@
 
 <iframe
   bind:this={frame}
-  src="/frame?load={loads}"
+  src="./frame?load={loads}"
   sandbox="allow-scripts"
   {title}
   class="block h-full w-full border-0 bg-white"

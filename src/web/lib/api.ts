@@ -157,8 +157,12 @@ export interface FolderListing {
   places: { name: string; path: string }[];
 }
 
+/**
+ * The app's API, relative to the page: /api/… locally, and under
+ * /m/{connector}/ when the page comes through the tunnel.
+ */
 export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(path.startsWith('/') ? `.${path}` : path, {
     method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
     headers: options.body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: options.body === undefined ? undefined : JSON.stringify(options.body)

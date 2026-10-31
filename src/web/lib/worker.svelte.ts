@@ -13,7 +13,22 @@ import {
   type TranscriptEntry
 } from '../../protocol/messages.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
-import { webSocketTransport } from '../../client/transport.ts';
+import { webSocketTransport, type Transport } from '../../client/transport.ts';
+import { connectorStream, tunnelConnectorId } from '../../tunnel/connect.ts';
+import { tunnelTransport } from '../../tunnel/transport.ts';
+
+/**
+ * A chat's connection: the app's relay on this page's origin, or through the
+ * tunnel an encrypted stream to the connector (the service worker that serves
+ * the tunnelled page's requests cannot intercept WebSockets).
+ */
+async function openTransport(path: string): Promise<Transport> {
+  const connectorId = tunnelConnectorId();
+  if (connectorId) return tunnelTransport(await connectorStream(connectorId), path);
+  const url = new URL(`.${path}`, location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return webSocketTransport(url.toString());
+}
 import {
   isAuthRequired,
   isConnectionClosed,
@@ -113,10 +128,10 @@ export class WebWorker {
   private async establish(): Promise<void> {
     this.state = 'connecting';
     this.error = '';
-    const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/workers/${encodeURIComponent(this.id)}/acp`;
+    const path = `/api/workers/${encodeURIComponent(this.id)}/acp`;
     let connection: WorkerConnection | undefined;
     try {
-      connection = await WorkerConnection.connect(await webSocketTransport(url), this.handlers(++this.generation), CLIENT);
+      connection = await WorkerConnection.connect(await openTransport(path), this.handlers(++this.generation), CLIENT);
       const actions = await connection.actions();
       this.connection = connection;
       this.availableActions = actions;
