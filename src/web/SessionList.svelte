@@ -6,7 +6,6 @@
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import { ago } from './lib/format.ts';
-  import { FILES } from './lib/previews.svelte.ts';
   import { chatTab, endDrag, startDrag } from './lib/workbench.svelte.ts';
 
   let { worker, onNavigate }: { worker: Worker; onNavigate: () => void } = $props();
@@ -76,22 +75,6 @@
   <li>
     <button class="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[0.9em] font-semibold text-indigo hover:bg-card" disabled={creating} onclick={newChat}>
       <span class="codicon codicon-add"></span>{creating ? 'Starting…' : 'New chat'}
-    </button>
-  </li>
-  <li>
-    <button
-      class="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[0.9em] hover:bg-card"
-      title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
-      draggable="true"
-      ondragstart={(event) => startDrag(event, worker.id, FILES, 'Files')}
-      ondragend={endDrag}
-      onclick={() => {
-        app.go({ view: 'chat', worker: worker.id, ...(app.route.worker === worker.id && app.route.session ? { session: app.route.session } : {}) });
-        app.previews.browse(worker.id);
-        onNavigate();
-      }}
-    >
-      <span class="codicon codicon-list-tree"></span>Files
     </button>
   </li>
   {#if error}<li class="px-2 py-1 text-[0.85em] text-red">{error}</li>{/if}
