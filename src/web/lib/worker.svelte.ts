@@ -289,6 +289,7 @@ export class WebWorker {
     );
     this.chats[key] = chat;
     this.showUsage(chat);
+    this.refreshUsage();
     return chat;
   }
 
@@ -419,6 +420,21 @@ export class WebWorker {
   }
 
   // ---- what the agent sends ----
+
+  /**
+   * Asks for the usage again, e.g. when a chat opens or comes to the front:
+   * the worker then reads the login's quota if its last read is old, and
+   * sends it when it has it.
+   */
+  refreshUsage(): void {
+    const connection = this.connection;
+    void connection
+      ?.usage()
+      .then((usage) => {
+        if (usage && this.connection === connection) this.setUsage(usage);
+      })
+      .catch(() => undefined);
+  }
 
   private setUsage(usage: WorkerUsage): void {
     this.usage = usage;

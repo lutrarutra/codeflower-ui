@@ -112,7 +112,15 @@ class AppState {
       const { workerId, local } = splitTab(tab);
       if (!chatKeyOf(local)) this.previews.closed(workerId, local);
     };
-    this.workbench.onChatFocus = (chat) => this.follow(chat);
+    this.workbench.onChatFocus = (chat) => {
+      this.follow(chat);
+      if (chat) this.agents.get(chat.workerId)?.refreshUsage();
+    };
+    // Back to the page: the chat in front shows the quota as it is now.
+    window.addEventListener('focus', () => {
+      const chat = this.workbench.focusedChat();
+      if (chat) this.agents.get(chat.workerId)?.refreshUsage();
+    });
     if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
     this.offer();
     window.addEventListener('hashchange', () => {
