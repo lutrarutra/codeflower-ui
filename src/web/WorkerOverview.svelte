@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tunnelConnectorId } from '../tunnel/connect.ts';
   // A sandbox at a glance: its chats, the agent's sign-in, and how to reach it from VS Code.
   // A tab of its own, and what an empty grid shows.
   import Skeleton from '../chat/lib/Skeleton.svelte';
@@ -76,7 +77,7 @@
   {:else if worker.error}
     <p class="m-0 text-red">{worker.error}</p>
   {/if}
-  {#if worker.url}
+  {#if worker.url && tunnelConnectorId() === undefined}
     <details class="card p-4">
       <summary class="cursor-pointer font-semibold">Open in VS Code instead</summary>
       <div class="pt-3"><ConnectLine url={worker.url} /></div>

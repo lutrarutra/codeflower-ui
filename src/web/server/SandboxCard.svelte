@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tunnelConnectorId } from '../../tunnel/connect.ts';
   import ActivityChips from '../lib/ActivityChips.svelte';
   import ConnectLine from '../lib/ConnectLine.svelte';
   import StatusDot from '../lib/StatusDot.svelte';
@@ -93,7 +94,7 @@
       >
     {/if}
   </header>
-  {#if worker.url}
+  {#if worker.url && tunnelConnectorId() === undefined}
     <details>
       <summary class="cursor-pointer text-[0.9em] font-semibold text-muted">Connect from VS Code</summary>
       <div class="pt-2">

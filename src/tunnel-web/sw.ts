@@ -23,16 +23,29 @@ function errorPage(title: string, message: string, status: number): Response {
   return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
-async function serve(request: Request): Promise<Response> {
+/**
+ * `finished` is called when the stream behind the response closes: until then
+ * the worker must stay alive, or the browser may stop it mid-body (Firefox
+ * does, once the response object is handed back).
+ */
+async function serve(request: Request, finished: () => void): Promise<Response> {
   const url = new URL(request.url);
   const connectorId = tunnelConnectorId(url.pathname);
-  if (!connectorId) return fetch(request);
+  if (!connectorId) {
+    finished();
+    return fetch(request);
+  }
   // The path must end in a slash for the page's relative URLs to resolve under it.
-  if (url.pathname === `/m/${connectorId}`) return Response.redirect(`${url.origin}/m/${connectorId}/${url.search}`, 302);
+  if (url.pathname === `/m/${connectorId}`) {
+    finished();
+    return Response.redirect(`${url.origin}/m/${connectorId}/${url.search}`, 302);
+  }
   try {
     const stream = await connectorStream(connectorId);
+    stream.onClose(finished);
     return await tunnelFetch(stream, appPath(url), request);
   } catch (error) {
+    finished();
     const message = error instanceof Error ? error.message : String(error);
     if (request.mode !== 'navigate') return new Response(JSON.stringify({ error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     return errorPage(error instanceof RefusedError ? 'Not paired' : 'Cannot reach your computer', message, 502);
@@ -42,5 +55,7 @@ async function serve(request: Request): Promise<Response> {
 worker.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== worker.location.origin || !tunnelConnectorId(url.pathname)) return;
-  event.respondWith(serve(event.request));
+  let finished = () => {};
+  event.waitUntil(new Promise<void>((resolve) => (finished = resolve)));
+  event.respondWith(serve(event.request, () => finished()));
 });
