@@ -247,11 +247,12 @@
 
 <div class="flex h-full flex-col">
   {#if preview}
-    <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5">
+    <!-- A narrow pane keeps the icon and title on the first line, and wraps the buttons under them. -->
+    <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5 max-[640px]:flex-wrap max-[640px]:gap-2 max-[640px]:px-3">
       <span class="grid size-8 shrink-0 place-items-center rounded-lg border-[1.5px] border-line bg-teal-soft">
         <span class="codicon codicon-{kindIcon[kind]}"></span>
       </span>
-      <div class="min-w-0 flex-1">
+      <div class="min-w-0 flex-1 max-[640px]:basis-[calc(100%-2.5rem)]">
         <h1 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">
           {preview.title}{#if dirty}<span class="ml-1.5 text-orange" title="Not saved">●</span>{/if}
         </h1>
@@ -376,12 +377,12 @@
           onclick={() => annotate('file')}
         >
           <img
-            class="mx-auto block max-h-[calc(100vh-14rem)] max-w-full rounded-lg bg-white object-contain"
+            class="mx-auto block max-h-[calc(100dvh-14rem)] max-w-full rounded-lg bg-white object-contain"
             src="data:{preview.file.mimeType};base64,{preview.data}"
             alt={preview.title}
           />
           <span
-            class="absolute top-2 right-2 rounded-full bg-indigo px-2.5 py-0.5 text-[0.8em] font-semibold text-on-accent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            class="absolute top-2 right-2 rounded-full bg-indigo px-2.5 py-0.5 text-[0.8em] font-semibold text-on-accent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-100"
           >
             <span class="codicon codicon-comment text-[11px]!"></span> Comment on parts
           </span>

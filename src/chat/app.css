@@ -280,6 +280,13 @@ textarea:focus-visible {
   font-size: 0.85em;
 }
 
+/* Touch screens: buttons a finger can hit. */
+@media (pointer: coarse) {
+  .pill-small {
+    padding: 0.4rem 0.9rem;
+  }
+}
+
 /* A small selector button in the composer's settings row. */
 .chip {
   display: inline-flex;

@@ -111,17 +111,17 @@
 </script>
 
 <!-- Items keep their size and the list scrolls; shrinking would squash cards that clip their content. -->
-<div bind:this={container} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 *:shrink-0">
+<div bind:this={container} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 max-[640px]:px-2.5 *:shrink-0">
   {#each items as item, index (item.id)}
     {#if item.kind === 'user'}
       <div
-        class="bubble-user max-w-[85%] self-end rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
+        class="bubble-user max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
       >
         {item.text}
       </div>
     {:else if item.kind === 'action'}
       <details
-        class="bubble-user group max-w-[85%] self-end rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
+        class="bubble-user group max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
       >
         <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
           <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>

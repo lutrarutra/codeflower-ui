@@ -177,6 +177,15 @@
   }
 
   const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  // On a touch screen Enter types a new line, as phone keyboards expect; the Send button sends.
+  let touch = $state(false);
+  $effect(() => {
+    const query = matchMedia('(pointer: coarse)');
+    touch = query.matches;
+    const changed = () => (touch = query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  });
   // Agents that take a message mid-turn read it at once; others stop first.
   const sendNowHint = $derived(
     chat.steer
@@ -205,7 +214,7 @@
 <main class="flex h-full flex-col">
   <!-- One line: the chat, its agent, the tools and the status; a narrow chat keeps only the status dot. -->
   <header class="@container flex items-center gap-2 border-b-[1.5px] border-soft-line bg-card/60 px-3 py-1.5">
-    <Tulip size={20} />
+    <span class="contents max-[640px]:hidden"><Tulip size={20} /></span>
     <h1 class="m-0 flex min-w-0 flex-1 font-display text-[1rem] leading-tight font-medium" title={chat.title || 'New session'}>
       <ChatTitle title={chat.title} fallback="New session" />
     </h1>
@@ -311,7 +320,7 @@
   {/if}
 
   <form
-    class="card relative mx-4 mb-4 flex flex-col gap-1 px-3 pt-2 pb-2 {shellMode ? 'border-teal!' : 'focus-within:border-indigo'}"
+    class="card relative mx-4 mb-4 flex max-[640px]:mx-2 max-[640px]:mb-2 flex-col gap-1 px-3 pt-2 pb-2 {shellMode ? 'border-teal!' : 'focus-within:border-indigo'}"
     onsubmit={(event) => {
       event.preventDefault();
       submit();
@@ -323,14 +332,18 @@
     <textarea
       bind:this={input}
       rows="2"
-      class="max-h-60 min-h-[2.8em] resize-none border-none bg-transparent p-0.5 outline-none placeholder:text-muted disabled:cursor-not-allowed {shellMode
+      class="max-h-60 min-h-[2.8em] resize-none pointer-coarse:text-base border-none bg-transparent p-0.5 outline-none placeholder:text-muted disabled:cursor-not-allowed {shellMode
         ? 'font-mono'
         : ''}"
       placeholder={!chat.live
         ? 'This session is read-only here'
-        : chat.busy
-          ? `Follow up… Enter sends it when the agent is done, ${modKey}+Enter now`
-          : `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`}
+        : touch
+          ? chat.busy
+            ? 'Follow up…'
+            : 'Ask the agent…'
+          : chat.busy
+            ? `Follow up… Enter sends it when the agent is done, ${modKey}+Enter now`
+            : `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`}
       disabled={!chat.live}
       bind:value={draft}
       oninput={fitInput}
@@ -353,7 +366,7 @@
             return;
           }
         }
-        if (event.key === 'Enter' && !event.shiftKey) {
+        if (event.key === 'Enter' && !event.shiftKey && !(touch && !event.ctrlKey && !event.metaKey)) {
           event.preventDefault();
           submit(event.ctrlKey || event.metaKey);
         } else if (event.key === 'Tab' && event.shiftKey && config.length) {
