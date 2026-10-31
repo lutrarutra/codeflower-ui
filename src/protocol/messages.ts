@@ -176,6 +176,8 @@ export interface ChatState {
   /** The session runs on the connected worker and accepts prompts. */
   live: boolean;
   busy: boolean;
+  /** The agent takes a message while it works (ACP steering); without, sending one now stops the turn first. */
+  steer?: boolean;
 }
 
 export interface ChatAction {
@@ -195,6 +197,8 @@ export interface ActionPromptMeta {
 export interface QueuedPromptSummary {
   id: string;
   title: string;
+  /** The user wrote it in the composer, and can take it back to edit. */
+  editable?: boolean;
 }
 
 export const ACTION_PROMPT_META = 'codeflower/action';
@@ -219,13 +223,18 @@ export type HostMessage =
   /** The chat's tokens and cost, and its worker's quota. */
   | { type: 'usage'; usage: ChatUsage }
   | { type: 'notice'; level: 'info' | 'error'; message: string; action?: { id: 'signIn'; label: string } }
+  /** The notice no longer holds, e.g. the chat reconnected. */
+  | { type: 'clearNotice' }
   | { type: 'queue'; items: QueuedPromptSummary[] }
+  /** Text for the composer: a queued message to edit, or those a stop took off the queue. */
+  | { type: 'draft'; text: string }
   /** A file from the sandbox the chat asked for, e.g. a figure the agent looked at; null if unavailable. */
   | { type: 'fileData'; key: string; dataUrl: string | null };
 
 export type WebviewMessage =
   | { type: 'ready' }
-  | { type: 'prompt'; text: string }
+  /** While the agent works it waits for the turn to end, unless sent `now`. */
+  | { type: 'prompt'; text: string; now?: boolean }
   | { type: 'cancel' }
   | { type: 'permissionResponse'; requestId: number; optionId: string | null }
   | { type: 'setConfig'; configId: string; value: string | boolean }
@@ -237,7 +246,10 @@ export type WebviewMessage =
   | { type: 'fileData'; path: string; key: string }
   | { type: 'setAutoApprove'; enabled: boolean }
   | { type: 'action'; id: string }
-  | { type: 'removeQueued'; id: string };
+  | { type: 'removeQueued'; id: string }
+  /** Send a queued message now, as `prompt` with `now` does. */
+  | { type: 'sendQueued'; id: string }
+  | { type: 'editQueued'; id: string };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

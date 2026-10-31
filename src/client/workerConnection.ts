@@ -62,6 +62,8 @@ interface ShellRun {
   sessionKey: string;
   command: string;
   output: string;
+  /** Started from another window; it ends with `shellEnded`. */
+  remote?: boolean;
 }
 
 export interface WorkerHandlers {
@@ -114,6 +116,19 @@ export class WorkerConnection {
         if (run.output.length < MAX_SHELL_CONTEXT * 4) run.output += data;
         handlers.entry(run.sessionKey, { t: now(), kind: 'shell_output', runId, data });
       },
+      // Another window's command; this one's own end with their request.
+      shellStarted: ({ sessionId, runId, command }) => {
+        const key = sessionKey(this.requireAgent(), sessionId);
+        if (!this.acp.isAttached(key) || this.shells.has(runId) || typeof command !== 'string') return;
+        this.shells.set(runId, { sessionKey: key, command, output: '', remote: true });
+        handlers.entry(key, { t: now(), kind: 'shell', runId, command });
+      },
+      shellEnded: ({ runId, exitCode, timedOut }) => {
+        const run = this.shells.get(runId);
+        if (!run?.remote) return;
+        this.shells.delete(runId);
+        handlers.entry(run.sessionKey, { t: now(), kind: 'shell_end', runId, exitCode, timedOut: timedOut === true });
+      },
       show: (request) => handlers.show(request),
       activity: (activity) => {
         const working = new Set(activity.chats.map((chat) => chat.key));
@@ -125,9 +140,10 @@ export class WorkerConnection {
           handlers.wrapUp(notice);
           return;
         }
-        // The worker answered the chat's requests itself and prompts it; the chat shows the prompt.
+        // The worker answered the chat's requests itself and prompts it; the chat shows the prompt,
+        // which a bridge for several windows echoes with the others.
         this.acp.dropPending(key);
-        if (prompt) handlers.entry(key, { t: now(), kind: 'prompt', prompt: [{ type: 'text', text: prompt }] });
+        if (prompt && !this.acp.multiClient) handlers.entry(key, { t: now(), kind: 'prompt', prompt: [{ type: 'text', text: prompt }] });
       },
       terminalOutput: (terminalId, data) => handlers.terminalOutput(terminalId, data),
       terminalExit: (terminalId, exitCode) => handlers.terminalExit(terminalId, exitCode)
@@ -291,6 +307,19 @@ export class WorkerConnection {
       ? [{ type: 'text' as const, text: context.join('\n\n'), _meta: { [SHELL_CONTEXT_META]: true } }, ...shown]
       : shown;
     return this.acp.prompt(key, blocks, shown);
+  }
+
+  /** The agent takes a message while it works; see {@link steer}. */
+  get canSteer(): boolean {
+    return this.acp.canSteer;
+  }
+
+  /**
+   * Gives the turn the agent is working on a message. False when no turn took
+   * it: send it as a prompt. Commands and shell context wait for a prompt.
+   */
+  steer(key: string, text: string): Promise<boolean> {
+    return this.acp.steer(key, [{ type: 'text', text }]);
   }
 
   cancel(key: string): void {

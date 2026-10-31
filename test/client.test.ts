@@ -232,3 +232,67 @@ test('records action prompt metadata without changing its text', async () => {
     { type: 'text', text: 'Make a checkpoint.', _meta: { 'codeflower/action': { id: 'checkpoint', title: 'Checkpoint' } } }
   ]);
 });
+
+test('shows the prompts, answers and shell commands of other windows on a bridge for several windows', async () => {
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'claude', agentLabel: 'Claude Code', signedIn: true }),
+    initialize: () => ({ protocolVersion: 1, _meta: { 'codeflower/multiClient': true } }),
+    'session/new': () => ({ sessionId: 'one' }),
+    'session/prompt': async (params: { sessionId: string; prompt: unknown[] }) => {
+      // The bridge echoes the prompt to every window, this one too.
+      agent.notify('_codeflower/prompted', { key: 'claude-one', sessionId: params.sessionId, prompt: params.prompt });
+      return { stopReason: 'end_turn' };
+    }
+  });
+  const { entries, events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const key = await connection.newSession();
+
+  // Its own prompt shows once, as the bridge echoes it.
+  assert.equal(await connection.prompt(key, 'hello'), 'end_turn');
+  assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt', 'turn_end']);
+
+  // Another window's prompt.
+  agent.notify('_codeflower/prompted', { key, sessionId: 'one', prompt: [{ type: 'text', text: 'from VS Code' }] });
+  await tick();
+  assert.deepEqual(entries.at(-1), [key, { t: entries.at(-1)![1].t, kind: 'prompt', prompt: [{ type: 'text', text: 'from VS Code' }] }]);
+
+  // A permission request another window answers closes here with that answer.
+  const answer = agent.request('session/request_permission', {
+    sessionId: 'one',
+    toolCall: { toolCallId: 't', title: 'ls' },
+    options: [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }],
+    _meta: { 'codeflower/requestKey': '"r1"' }
+  });
+  await tick();
+  assert.ok(events.includes(`permission ${key} yes`));
+  const allow = { outcome: { outcome: 'selected', optionId: 'yes' } };
+  agent.notify('_codeflower/requestResolved', { key, sessionId: 'one', requestKey: '"r1"', result: allow });
+  await tick();
+  assert.equal(events.at(-1), `permission ${key} none`);
+  assert.deepEqual((entries.at(-1)![1] as { outcome: unknown }).outcome, allow.outcome);
+  assert.deepEqual((await answer).result, allow);
+
+  // Another window's shell command, live.
+  agent.notify('_codeflower/shell/started', { key, sessionId: 'one', runId: 'run-1', command: 'ls' });
+  agent.notify('_codeflower/shell/output', { runId: 'run-1', data: 'a.txt\n' });
+  agent.notify('_codeflower/shell/ended', { key, sessionId: 'one', runId: 'run-1', exitCode: 0, timedOut: false });
+  await tick();
+  assert.deepEqual(
+    entries.slice(-3).map(([, entry]) => entry.kind),
+    ['shell', 'shell_output', 'shell_end']
+  );
+});
+
+test('echoes its own prompt itself on an older bridge', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' }),
+    'session/prompt': () => ({ stopReason: 'end_turn' })
+  });
+  const { entries, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const key = await connection.newSession();
+  await connection.prompt(key, 'hello');
+  assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt', 'turn_end']);
+});

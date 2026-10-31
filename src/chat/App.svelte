@@ -32,6 +32,8 @@
 
   let chat = $state<ChatState>({ title: '', subtitle: '', live: false, busy: false });
   let entries = $state<TranscriptEntry[]>([]);
+  /** The host sent the transcript; until then it is loading, not empty. */
+  let transcriptLoaded = $state(false);
   let permission = $state<PendingPermission | null>(null);
   let question = $state<PendingQuestion | null>(null);
   let notice = $state<Extract<HostMessage, { type: 'notice' }> | null>(null);
@@ -56,6 +58,7 @@
         break;
       case 'transcript':
         entries = message.entries;
+        transcriptLoaded = true;
         break;
       case 'entry':
         entries.push(message.entry);
@@ -69,6 +72,9 @@
       case 'notice':
         notice = message;
         break;
+      case 'clearNotice':
+        notice = null;
+        break;
       case 'config':
         config = message.options;
         break;
@@ -77,6 +83,12 @@
         break;
       case 'queue':
         queued = message.items;
+        break;
+      case 'draft':
+        // Next to what the user is writing, never over it.
+        draft = draft.trim() ? `${draft.trimEnd()}\n\n${message.text}` : message.text;
+        queueMicrotask(fitInput);
+        input?.focus();
         break;
       case 'fileData':
         files.received(message.key, message.dataUrl);
@@ -136,7 +148,8 @@
     input?.focus();
   }
 
-  function submit(): void {
+  /** While the agent works a message waits for its turn to end, unless sent `now`. */
+  function submit(now = false): void {
     const text = draft.trim();
     if (!text || !chat.live) return;
     if (shellMode) {
@@ -148,14 +161,27 @@
       if (input) input.style.height = '';
       return;
     }
-    if (chat.busy) return;
     notice = null;
-    send({ type: 'prompt', text });
+    send({ type: 'prompt', text, ...(chat.busy && now ? { now: true } : {}) });
     draft = '';
     if (input) input.style.height = '';
   }
 
   let input: HTMLTextAreaElement | undefined = $state();
+
+  function fitInput(): void {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = `${input.scrollHeight}px`;
+  }
+
+  const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  // Agents that take a message mid-turn read it at once; others stop first.
+  const sendNowHint = $derived(
+    chat.steer
+      ? `${modKey}+Enter: the agent reads it right away, without stopping`
+      : `${modKey}+Enter: stops the agent's turn and sends this next`
+  );
 
   function suggest(text: string): void {
     draft = text;
@@ -176,7 +202,7 @@
 </script>
 
 <main class="flex h-full flex-col">
-  <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5">
+  <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line bg-card/60 px-4 py-2.5">
     <Tulip size={30} />
     <div class="min-w-0 flex-1">
       <h1 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">
@@ -230,7 +256,7 @@
     </div>
   {/if}
 
-  <Transcript {entries} busy={chat.busy} live={chat.live} {suggest} />
+  <Transcript {entries} loading={!transcriptLoaded} busy={chat.busy} live={chat.live} {suggest} />
 
   {#if permission}
     <PermissionPrompt request={permission} />
@@ -243,22 +269,45 @@
   {/if}
 
   {#if queued.length}
-    <div class="mx-4 mb-2 flex flex-wrap items-center gap-1.5 text-[0.8em]" aria-live="polite">
-      <span class="text-muted">Queued:</span>
-      {#each queued as item (item.id)}
-        <span class="chip gap-1.5" title="Sent after the current turn">
-          {item.title}
+    <section class="mx-4 mb-2 flex flex-col gap-1 rounded-xl bg-sunken p-1.5 text-[0.9em]" aria-label="Queued messages" aria-live="polite">
+      <span class="px-1.5 text-[0.85em] text-muted">
+        <span class="codicon codicon-history text-[12px]!"></span>
+        {chat.busy ? 'Next, one per turn once the agent is done' : 'Next, once the session is back'}
+      </span>
+      {#each queued as item, index (item.id)}
+        <div class="flex items-center gap-2 rounded-lg bg-card py-1 pr-1 pl-2.5 shadow-(--cf-elevation)">
+          <span class="text-[0.85em] text-muted tabular-nums">{index + 1}</span>
+          {#if item.editable}
+            <button
+              type="button"
+              class="min-w-0 flex-1 cursor-text truncate text-left"
+              title="Edit: back into the message box"
+              onclick={() => send({ type: 'editQueued', id: item.id })}>{item.title}</button
+            >
+          {:else}
+            <span class="min-w-0 flex-1 truncate">{item.title}</span>
+          {/if}
           <button
             type="button"
-            class="link -mr-1"
-            aria-label="Remove {item.title} from queue"
+            class="grid size-6 shrink-0 place-items-center rounded-md text-muted hover:bg-soft-line hover:text-ink"
+            title={chat.steer && item.editable ? 'Send now: the agent reads it right away' : "Send now: stops the agent's turn"}
+            aria-label="Send {item.title} now"
+            onclick={() => send({ type: 'sendQueued', id: item.id })}
+          >
+            <span class="codicon codicon-arrow-up"></span>
+          </button>
+          <button
+            type="button"
+            class="grid size-6 shrink-0 place-items-center rounded-md text-muted hover:bg-soft-line hover:text-ink"
+            title="Remove from the queue"
+            aria-label="Remove {item.title} from the queue"
             onclick={() => send({ type: 'removeQueued', id: item.id })}
           >
             <span class="codicon codicon-close"></span>
           </button>
-        </span>
+        </div>
       {/each}
-    </div>
+    </section>
   {/if}
 
   <form
@@ -277,16 +326,14 @@
       class="max-h-60 min-h-[2.8em] resize-none border-none bg-transparent p-0.5 outline-none placeholder:text-muted disabled:cursor-not-allowed {shellMode
         ? 'font-mono'
         : ''}"
-      placeholder={chat.live
-        ? `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`
-        : 'This session is read-only here'}
+      placeholder={!chat.live
+        ? 'This session is read-only here'
+        : chat.busy
+          ? `Follow up… Enter sends it when the agent is done, ${modKey}+Enter now`
+          : `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`}
       disabled={!chat.live}
       bind:value={draft}
-      oninput={() => {
-        if (!input) return;
-        input.style.height = 'auto';
-        input.style.height = `${input.scrollHeight}px`;
-      }}
+      oninput={fitInput}
       onkeydown={(event) => {
         if (commandMenuOpen) {
           const count = commandMatches.length;
@@ -308,7 +355,7 @@
         }
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
-          submit();
+          submit(event.ctrlKey || event.metaKey);
         } else if (event.key === 'Tab' && event.shiftKey && config.length) {
           event.preventDefault();
           settings?.cycleMode();
@@ -338,19 +385,33 @@
         {/if}
       </div>
       {#if chat.busy && !shellMode}
-        <button type="button" class="pill pill-pink pill-small" onclick={() => send({ type: 'cancel' })}>
+        <button
+          type="button"
+          class="pill pill-pink pill-small"
+          title={queued.some((item) => item.editable) ? 'Stop the turn; your queued messages go back into the message box' : 'Stop the turn'}
+          onclick={() => send({ type: 'cancel' })}
+        >
           <span class="codicon codicon-debug-stop"></span> Stop
         </button>
+        {#if draft.trim()}
+          <button type="button" class="pill pill-small" title={sendNowHint} disabled={!chat.live} onclick={() => submit(true)}>
+            Send now
+          </button>
+        {/if}
       {/if}
       <button
         type="submit"
         class="pill pill-small {shellMode ? 'pill-teal' : 'pill-primary'}"
         title={shellMode
           ? 'Run in the sandbox (Enter)'
-          : `Enter to send · Shift+Enter for a new line${config.length ? ' · Shift+Tab to change mode' : ''}`}
-        disabled={!chat.live || !draft.trim() || (chat.busy && !shellMode)}
+          : chat.busy
+            ? 'Enter: sent when the agent is done, one message per turn · Shift+Enter for a new line'
+            : `Enter to send · Shift+Enter for a new line${config.length ? ' · Shift+Tab to change mode' : ''}`}
+        disabled={!chat.live || !draft.trim()}
       >
-        {#if shellMode}Run <span class="codicon codicon-play"></span>{:else}Send <span class="codicon codicon-arrow-up"></span>{/if}
+        {#if shellMode}Run <span class="codicon codicon-play"></span>
+        {:else if chat.busy}Queue <span class="codicon codicon-list-ordered"></span>
+        {:else}Send <span class="codicon codicon-arrow-up"></span>{/if}
       </button>
     </div>
   </form>

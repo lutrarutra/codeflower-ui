@@ -6,7 +6,17 @@
 // The code flower bridge adds a few `_meta` fields, which other agents never
 // send: `codeflower/replayed` on requests it sends again to a window that
 // reattaches, and `codeflower/busy` / `codeflower/transcriptEntries` on
-// resumes. They are read where present and otherwise ignored.
+// resumes. They are read where present and otherwise ignored. A bridge that
+// serves several windows at once says so with `codeflower/multiClient` in its
+// `initialize` answer: it then tells every window with a chat open of each
+// prompt (`_codeflower/prompted`), this window's own too, and of requests
+// another window answered (`_codeflower/requestResolved`, matched by the
+// request's `codeflower/requestKey`).
+//
+// Agents that take a message while they work (ACP steering, `_session/steering`:
+// Claude Code, Codex) say so with `steering.supported` in their `initialize`
+// answer's `_meta`. The bridge echoes such a message like a prompt and marks its
+// answer with `codeflower/prompted`.
 import type {
   AgentCapabilities,
   AuthMethod,
@@ -38,6 +48,10 @@ export const PROTOCOL_VERSION = 1;
 export const AUTH_REQUIRED = -32000;
 
 const REPLAYED_META = 'codeflower/replayed';
+const REQUEST_KEY_META = 'codeflower/requestKey';
+const MULTI_CLIENT_META = 'codeflower/multiClient';
+const PROMPTED_META = 'codeflower/prompted';
+const STEER_METHOD = '_session/steering';
 
 /** What session/new, session/resume, and session/load may report about settings. */
 interface SessionSettings {
@@ -108,6 +122,10 @@ export class AcpClient {
   authMethods: AuthMethod[] = [];
   capabilities: AgentCapabilities = {};
   agentInfo: Implementation | null = null;
+  /** The bridge shows the chats in several windows at once and echoes each prompt to all of them. */
+  multiClient = false;
+  /** The agent takes a message into the turn it is working on (ACP steering). */
+  canSteer = false;
 
   private readonly rpc: RpcConnection;
   private readonly handlers: AcpHandlers;
@@ -121,7 +139,12 @@ export class AcpClient {
   private nextRequestId = 1;
   private readonly permissions = new Map<
     number,
-    { resolve: (response: RequestPermissionResponse) => void; sessionKey: string; request: PendingPermission }
+    {
+      resolve: (response: RequestPermissionResponse) => void;
+      sessionKey: string;
+      request: PendingPermission;
+      requestKey?: string;
+    }
   >();
   private readonly questions = new Map<
     number,
@@ -129,6 +152,7 @@ export class AcpClient {
       resolve: (response: { action: QuestionAction; content?: FormContent }) => void;
       sessionKey: string;
       request: PendingQuestion;
+      requestKey?: string;
     }
   >();
   private readonly autoApprovedSessions = new Set<string>();
@@ -147,6 +171,8 @@ export class AcpClient {
     );
     rpc.handle('session/request_permission', (params) => this.requestPermission(params as RequestPermissionRequest));
     rpc.handle('elicitation/create', (params) => this.elicit(params as ElicitationRequest));
+    rpc.on('_codeflower/prompted', (params) => this.prompted(params as PromptedNotification));
+    rpc.on('_codeflower/requestResolved', (params) => this.resolved(params as ResolvedNotification));
     rpc.onClose(() => this.closed());
   }
 
@@ -168,6 +194,8 @@ export class AcpClient {
     this.authMethods = initialized.authMethods ?? [];
     this.capabilities = initialized.agentCapabilities ?? {};
     this.agentInfo = initialized.agentInfo ?? null;
+    this.multiClient = initialized._meta?.[MULTI_CLIENT_META] === true;
+    this.canSteer = (initialized._meta as { steering?: { supported?: unknown } } | null | undefined)?.steering?.supported === true;
     return initialized;
   }
 
@@ -269,7 +297,8 @@ export class AcpClient {
   async prompt(key: string, blocks: ContentBlock[], shown: ContentBlock[] = blocks): Promise<StopReason> {
     const sessionId = this.sessions.get(key);
     if (!sessionId) throw new Error('This session is not open on the worker');
-    this.handlers.entry(key, { t: now(), kind: 'prompt', prompt: shown });
+    // A bridge for several windows echoes it when the turn starts (`prompted`).
+    if (!this.multiClient) this.handlers.entry(key, { t: now(), kind: 'prompt', prompt: shown });
     this.busySessions.add(key);
     this.handlers.busy(key, true);
     try {
@@ -281,6 +310,24 @@ export class AcpClient {
       // A dropped connection leaves the turn running on the worker.
       if (this.rpc.connected) this.handlers.busy(key, this.isBusy(key));
     }
+  }
+
+  /**
+   * Gives the turn the agent is working on a message (ACP steering). False
+   * when no turn took it, e.g. it just ended: the caller sends it as a prompt.
+   */
+  async steer(key: string, blocks: ContentBlock[]): Promise<boolean> {
+    const sessionId = this.sessions.get(key);
+    if (!sessionId) throw new Error('This session is not open on the worker');
+    const response = await this.rpc.request<SteerResponse>(STEER_METHOD, {
+      sessionId,
+      prompt: blocks,
+      _meta: { steering: { idleBehavior: 'promptRequired' } }
+    });
+    // Codex may start a turn of its own; the message got there either way.
+    if (response?.outcome !== 'injected' && response?.outcome !== 'startedNewTurn') return false;
+    if (!response._meta?.[PROMPTED_META]) this.handlers.entry(key, { t: now(), kind: 'prompt', prompt: blocks });
+    return true;
   }
 
   cancel(key: string): void {
@@ -384,6 +431,37 @@ export class AcpClient {
     this.handlers.config(key, config.options);
   }
 
+  /** A prompt started, from this window or another; the agent gets the shell context too, the chat hides it. */
+  private prompted(params: PromptedNotification): void {
+    const key = typeof params?.sessionId === 'string' ? this.keyFor(params.sessionId) : undefined;
+    if (!key || !Array.isArray(params.prompt)) return;
+    this.handlers.entry(key, { t: now(), kind: 'prompt', prompt: params.prompt });
+  }
+
+  /** Another window answered a request this one shows too (or the bridge did): it closes here, with that answer. */
+  private resolved(params: ResolvedNotification): void {
+    const requestKey = params?.requestKey;
+    if (typeof requestKey !== 'string') return;
+    const result = (params.result ?? {}) as { outcome?: RequestPermissionResponse['outcome']; action?: QuestionAction; content?: FormContent };
+    for (const [requestId, pending] of this.permissions) {
+      if (pending.requestKey !== requestKey) continue;
+      this.permissions.delete(requestId);
+      const outcome = result.outcome ?? ({ outcome: 'cancelled' } as const);
+      this.handlers.entry(pending.sessionKey, { t: now(), kind: 'permission_outcome', outcome });
+      this.handlers.permission(pending.sessionKey, null);
+      // The bridge drops this window's answer; it only ends the request here.
+      pending.resolve({ outcome });
+    }
+    for (const [requestId, pending] of this.questions) {
+      if (pending.requestKey !== requestKey) continue;
+      this.questions.delete(requestId);
+      const action = result.action ?? 'cancel';
+      this.handlers.entry(pending.sessionKey, { t: now(), kind: 'question_outcome', action, content: result.content ?? null });
+      this.handlers.question(pending.sessionKey, null);
+      pending.resolve(action === 'accept' ? { action, content: result.content ?? {} } : { action });
+    }
+  }
+
   /** Every update reaches the chat, kinds it does not know too; settings updates also change the settings. */
   private update(notification: SessionNotification): void {
     if (this.replaying.has(notification.sessionId)) return;
@@ -407,7 +485,7 @@ export class AcpClient {
     }
     return new Promise<RequestPermissionResponse>((resolve) => {
       const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options };
-      this.permissions.set(requestId, { resolve, sessionKey: key, request: pending });
+      this.permissions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
       if (this.autoApprovedSessions.has(key) && this.autoApprovePermission(requestId, pending)) return;
       this.handlers.permission(key, pending);
     });
@@ -437,7 +515,7 @@ export class AcpClient {
       }
       return new Promise((resolve) => {
         const pending = { requestId, ...question };
-        this.questions.set(requestId, { resolve, sessionKey: key, request: pending });
+        this.questions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
         this.handlers.question(key, pending);
       });
     }
@@ -464,6 +542,26 @@ export class AcpClient {
     this.sessions.clear();
     this.remoteBusy.clear();
   }
+}
+
+function requestKeyOf(meta: Record<string, unknown> | null | undefined): { requestKey?: string } {
+  const requestKey = meta?.[REQUEST_KEY_META];
+  return typeof requestKey === 'string' ? { requestKey } : {};
+}
+
+interface SteerResponse {
+  outcome?: 'injected' | 'promptRequired' | 'startedNewTurn' | 'failed';
+  _meta?: Record<string, unknown> | null;
+}
+
+interface PromptedNotification {
+  sessionId?: string;
+  prompt?: ContentBlock[];
+}
+
+interface ResolvedNotification {
+  requestKey?: string;
+  result?: unknown;
 }
 
 interface ElicitationRequest {

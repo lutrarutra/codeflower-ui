@@ -1,7 +1,8 @@
 // One sandbox's agent, reached through the app's relay, and the chats open on
 // it. The connection opens only when a chat or the files of the sandbox are
-// opened: the bridge serves one window at a time, and connecting takes the
-// sandbox over from another (e.g. VS Code).
+// opened. A current bridge serves several windows at once (e.g. this page and
+// VS Code); an older one serves one at a time, and connecting takes the
+// sandbox over from another.
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 import {
   agentPresentation,
@@ -58,6 +59,8 @@ export class WebWorker {
   error = $state('');
   status = $state<WorkerStatus | undefined>();
   sessions = $state<SessionRecord[]>([]);
+  /** The chats were listed (or cannot be): until then the page shows them loading. */
+  sessionsKnown = $state(false);
   usage = $state<WorkerUsage | undefined>();
   private availableActions: ChatAction[] | undefined;
   /** Open chats, by key. */
@@ -81,16 +84,22 @@ export class WebWorker {
     return this.state === 'connected' && !!this.connection?.connected;
   }
 
-  /** The chats, from the agent once connected, else as the app lists them without connecting. */
-  async listSessions(): Promise<void> {
+  /**
+   * The chats, from the agent once connected, else as the app lists them without connecting.
+   * False when the app cannot list them (an older sandbox lists its chats only once connected).
+   */
+  async listSessions(): Promise<boolean> {
     if (this.connected) {
       this.sessions = await this.connection!.listSessions();
-      return;
+      this.sessionsKnown = true;
+      return true;
     }
     try {
       this.sessions = (await api<{ sessions: SessionRecord[] }>(`/api/workers/${encodeURIComponent(this.id)}/sessions`)).sessions;
+      this.sessionsKnown = true;
+      return true;
     } catch {
-      // An older sandbox lists its chats only once connected.
+      return false;
     }
   }
 
@@ -114,8 +123,11 @@ export class WebWorker {
       this.state = 'connected';
       this.stopRetrying();
       await this.refresh();
-      // Chats opened while connecting learn which agent they talk to.
-      for (const chat of Object.values(this.chats)) chat.setState({ ...this.presentation(), actions });
+      // Chats opened while connecting learn which agent they talk to; a notice about the lost connection goes.
+      for (const chat of Object.values(this.chats)) {
+        chat.setState({ ...this.presentation(), actions });
+        chat.post({ type: 'clearNotice' });
+      }
       const usage = await connection.usage().catch(() => undefined);
       if (usage && this.connection === connection) this.setUsage(usage);
       // Open chats attach again and show what happened meanwhile.
@@ -169,6 +181,12 @@ export class WebWorker {
       const [status, sessions] = await Promise.all([this.connection!.status(), this.connection!.listSessions()]);
       this.status = status;
       this.sessions = sessions;
+      this.sessionsKnown = true;
+      // A chat opened before the list came (e.g. on a reload) learns its title.
+      for (const session of sessions) {
+        const chat = this.chats[session.key];
+        if (chat && chat.state.title === 'Chat' && session.title) chat.setState({ title: session.title });
+      }
     } catch (error) {
       this.error = describe(error);
     }
@@ -193,7 +211,7 @@ export class WebWorker {
     const chat = this.create(key, 'New chat');
     chat.post({ type: 'transcript', entries: [] });
     chat.post({ type: 'config', options: connection.config(key) });
-    chat.setState({ live: true });
+    chat.setState({ live: true, steer: connection.canSteer });
     void this.refresh();
     return key;
   }
@@ -280,7 +298,7 @@ export class WebWorker {
       const activity = connection.activity(chat.key);
       chat.post({ type: 'permission', request: activity.permission });
       chat.post({ type: 'question', request: activity.question });
-      chat.setState({ live: true, busy: activity.busy });
+      chat.setState({ live: true, busy: activity.busy, steer: connection.canSteer });
     } catch (error) {
       chat.loaded(await connection.transcript(chat.key).catch(() => []));
       this.report(chat, error);
@@ -308,6 +326,14 @@ export class WebWorker {
         if (!isConnectionClosed(error)) this.report(chat, error);
       } finally {
         void this.refresh();
+      }
+    },
+    // A message the turn could not take is sent another way; no notice for it.
+    steer: async (chat, text) => {
+      try {
+        return await this.require().steer(chat.key, text);
+      } catch {
+        return false;
       }
     },
     shell: async (chat, command) => {

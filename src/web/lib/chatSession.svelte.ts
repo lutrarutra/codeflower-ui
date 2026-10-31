@@ -22,6 +22,8 @@ import { PromptQueue } from '../../client/promptQueue.ts';
 /** What a chat asks of the sandbox it runs on. */
 export interface ChatActions {
   prompt(chat: ChatSession, text: string, action?: ActionPromptMeta): Promise<void>;
+  /** Into the turn the agent is working on; false when it did not take it. */
+  steer(chat: ChatSession, text: string): Promise<boolean>;
   shell(chat: ChatSession, command: string): Promise<void>;
   cancelShell(chat: ChatSession, runId: string): void;
   cancel(chat: ChatSession): void;
@@ -46,6 +48,8 @@ export class ChatSession {
   shellsRunning = 0;
 
   private entries: TranscriptEntry[] = [];
+  /** The transcript arrived: until then the view shows it loading, not an empty chat. */
+  private transcriptKnown = false;
   private config: SessionConfigOption[] = [];
   private usage: ChatUsage = { session: null, account: null };
   private notice: Extract<HostMessage, { type: 'notice' }> | null = null;
@@ -100,6 +104,34 @@ export class ChatSession {
       this.sending = false;
       this.flushWaiting();
     }
+  }
+
+  /** A message from the composer: while the agent works it waits for the turn to end, unless sent `now`. */
+  private message(text: string, now: boolean): void {
+    if (!this.state.busy && !this.sending) void this.sendPrompt(text);
+    else if (now) void this.sendNow(this.waiting.enqueueMessage(text).id);
+    else {
+      this.waiting.enqueueMessage(text);
+      this.publishQueue();
+    }
+  }
+
+  /**
+   * A queued prompt, now: into the turn where the agent takes messages while it
+   * works, otherwise first in the queue, and the turn stops so it goes next.
+   */
+  private async sendNow(id: string): Promise<void> {
+    const item = this.waiting.take(id);
+    if (!item) return;
+    // A command or an action is a prompt of its own.
+    if (this.state.steer && item.editable && !item.text.trimStart().startsWith('/')) {
+      this.publishQueue();
+      if (await this.actions.steer(this, item.text)) return;
+    }
+    this.waiting.putFirst(item);
+    this.publishQueue();
+    if (this.state.busy || this.sending) this.actions.cancel(this);
+    else this.flushWaiting();
   }
 
   private publishQueue(): void {
@@ -157,6 +189,7 @@ export class ChatSession {
     switch (message.type) {
       case 'transcript':
         this.entries = [...message.entries];
+        this.transcriptKnown = true;
         break;
       case 'entry':
         this.entries.push(message.entry);
@@ -175,6 +208,9 @@ export class ChatSession {
         break;
       case 'notice':
         this.notice = message;
+        break;
+      case 'clearNotice':
+        this.notice = null;
         break;
     }
     for (const listener of this.listeners) listener(message);
@@ -197,7 +233,7 @@ export class ChatSession {
 
   private replay(listener: (message: HostMessage) => void): void {
     listener({ type: 'state', state: this.state });
-    listener({ type: 'transcript', entries: [...this.entries] });
+    if (this.transcriptKnown) listener({ type: 'transcript', entries: [...this.entries] });
     listener({ type: 'permission', request: this.permission });
     listener({ type: 'question', request: this.question });
     listener({ type: 'config', options: this.config });
@@ -214,7 +250,7 @@ export class ChatSession {
       case 'prompt':
         this.lastUsed = Date.now();
         this.notice = null;
-        await this.sendPrompt(message.text);
+        this.message(message.text, message.now ?? false);
         break;
       case 'shell':
         this.lastUsed = Date.now();
@@ -228,9 +264,16 @@ export class ChatSession {
       case 'cancelShell':
         this.actions.cancelShell(this, message.runId);
         break;
-      case 'cancel':
+      case 'cancel': {
+        // The user's queued messages go back to the composer instead of after the stop.
+        const messages = this.waiting.takeMessages();
+        if (messages.length) {
+          this.publishQueue();
+          this.post({ type: 'draft', text: messages.map((item) => item.text).join('\n\n') });
+        }
         this.actions.cancel(this);
         break;
+      }
       case 'setConfig':
         await this.actions.setConfig(this, message.configId, message.value);
         break;
@@ -256,6 +299,16 @@ export class ChatSession {
       case 'removeQueued':
         if (this.waiting.remove(message.id)) this.publishQueue();
         break;
+      case 'sendQueued':
+        void this.sendNow(message.id);
+        break;
+      case 'editQueued': {
+        const item = this.waiting.take(message.id);
+        if (!item) break;
+        this.publishQueue();
+        this.post({ type: 'draft', text: item.text });
+        break;
+      }
     }
   }
 }

@@ -26,10 +26,12 @@ const wrapUp = {
 function actions(
   prompt: ChatActions['prompt'],
   cancel: ChatActions['cancel'] = () => {},
-  setAutoApprove: ChatActions['setAutoApprove'] = () => {}
+  setAutoApprove: ChatActions['setAutoApprove'] = () => {},
+  steer: ChatActions['steer'] = async () => false
 ): ChatActions {
   return {
     prompt,
+    steer,
     shell: async () => {},
     cancelShell: () => {},
     cancel,
@@ -120,4 +122,99 @@ test('wrap up replaces queued work, cancels the turn, and sends after it ends', 
   chat.setState({ busy: false });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.deepEqual(sent, ['Wrap up now.']);
+});
+
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+const lastOf = <T extends HostMessage['type']>(messages: HostMessage[], type: T) =>
+  messages.filter((message): message is Extract<HostMessage, { type: T }> => message.type === type).at(-1);
+
+test('stacks follow-ups while the agent works and sends them one per turn', async () => {
+  const sent: string[] = [];
+  const turns: (() => void)[] = [];
+  const prompt: ChatActions['prompt'] = (_chat, text) => {
+    sent.push(text);
+    return new Promise<void>((resolve) => turns.push(resolve));
+  };
+  const chat = new ChatSession('worker', 'session', { live: true, busy: true }, actions(prompt));
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'first' });
+  chat.host.send({ type: 'prompt', text: 'second' });
+  assert.deepEqual(lastOf(messages, 'queue')?.items, [
+    { id: 'queued-1', title: 'first', editable: true },
+    { id: 'queued-2', title: 'second', editable: true }
+  ]);
+  assert.deepEqual(sent, []);
+
+  chat.setState({ busy: false });
+  assert.deepEqual(sent, ['first']);
+  turns.shift()!();
+  await settle();
+  assert.deepEqual(sent, ['first', 'second']);
+  assert.deepEqual(lastOf(messages, 'queue')?.items, []);
+});
+
+test('sends a message now into the turn when the agent takes it', async () => {
+  const steered: string[] = [];
+  let cancelled = 0;
+  const chat = new ChatSession(
+    'worker',
+    'session',
+    { live: true, busy: true, steer: true },
+    actions(async () => {}, () => cancelled++, () => {}, async (_chat, text) => (steered.push(text), true))
+  );
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'later' });
+  chat.host.send({ type: 'prompt', text: 'look at this too', now: true });
+  await settle();
+  assert.deepEqual(steered, ['look at this too']);
+  assert.equal(cancelled, 0);
+  // A queued one can go now too.
+  chat.host.send({ type: 'sendQueued', id: 'queued-1' });
+  await settle();
+  assert.deepEqual(steered, ['look at this too', 'later']);
+  assert.deepEqual(lastOf(messages, 'queue')?.items, []);
+});
+
+test('without steering, sending now stops the turn and sends the message next', async () => {
+  const sent: string[] = [];
+  let cancelled = 0;
+  const chat = new ChatSession(
+    'worker',
+    'session',
+    { live: true, busy: true, steer: false },
+    actions(async (_chat, text) => void sent.push(text), () => cancelled++)
+  );
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'queued' });
+  chat.host.send({ type: 'prompt', text: 'urgent', now: true });
+  await settle();
+  assert.equal(cancelled, 1);
+  assert.deepEqual(lastOf(messages, 'queue')?.items.map((item) => item.title), ['urgent', 'queued']);
+
+  chat.setState({ busy: false });
+  await settle();
+  assert.deepEqual(sent, ['urgent', 'queued']);
+});
+
+test('a queued message goes back to the composer to edit, and all of them on stop', () => {
+  let cancelled = 0;
+  const chat = new ChatSession('worker', 'session', { live: true, busy: true, actions: [checkpoint] }, actions(async () => {}, () => cancelled++));
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'one' });
+  chat.host.send({ type: 'action', id: 'checkpoint' });
+  chat.host.send({ type: 'prompt', text: 'two' });
+  chat.host.send({ type: 'prompt', text: 'three' });
+
+  chat.host.send({ type: 'editQueued', id: 'queued-1' });
+  assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'one' });
+
+  chat.host.send({ type: 'cancel' });
+  assert.equal(cancelled, 1);
+  assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'two\n\nthree' });
+  // Actions stay queued: the user did not write them.
+  assert.deepEqual(lastOf(messages, 'queue')?.items, [{ id: 'queued-2', title: 'Checkpoint' }]);
 });

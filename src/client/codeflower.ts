@@ -8,7 +8,7 @@ import { isMethodNotFound, type RpcConnection } from './rpc.ts';
 
 export const WORKSPACE = '/codeflower-state/workspace';
 
-/** The bridge closes a connection with this code when another window takes the worker over. */
+/** An older bridge closes a connection with this code when another window takes the worker over. */
 export const TAKEN_OVER = 4001;
 
 export interface WorkerStatus {
@@ -96,6 +96,9 @@ export interface DshCredentials {
 
 export interface CodeflowerHandlers {
   shellOutput(runId: string, data: string): void;
+  /** Another window ran a shell command in a chat open here (bridges for several windows). */
+  shellStarted(run: { sessionId: string; runId: string; command: string }): void;
+  shellEnded(run: { sessionId: string; runId: string; exitCode: number; timedOut: boolean }): void;
   /** The agent ran `codeflower-show`: the user should see these files. */
   show(request: ShowRequest): void;
   activity(activity: WorkerActivity): void;
@@ -116,6 +119,12 @@ export class CodeflowerExtensions {
       const { runId, data } = params as { runId: string; data: string };
       handlers.shellOutput(runId, data);
     });
+    rpc.on('_codeflower/shell/started', (params) =>
+      handlers.shellStarted(params as { sessionId: string; runId: string; command: string })
+    );
+    rpc.on('_codeflower/shell/ended', (params) =>
+      handlers.shellEnded(params as { sessionId: string; runId: string; exitCode: number; timedOut: boolean })
+    );
     rpc.on('_codeflower/show', (params) => handlers.show(params as ShowRequest));
     rpc.on('_codeflower/activity', (params) => handlers.activity(params as WorkerActivity));
     rpc.on('_codeflower/usage', (params) => handlers.usage(params as WorkerUsage));
