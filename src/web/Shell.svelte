@@ -46,6 +46,52 @@
     }
   }
 
+  // Wide windows: the sidebar's width, dragged at its edge (double-click: back to the default); it stays so.
+  const WIDTH = 'codeflower.sidebarWidth';
+  const DEFAULT_WIDTH = 288;
+  const MIN_WIDTH = 200;
+  let sidebarWidth = $state(storedWidth());
+  /** The edge being dragged: the pointer and the width where the drag began. */
+  let resizing: { from: number; width: number } | null = $state(null);
+  const maxWidth = () => Math.max(MIN_WIDTH, Math.min(640, width - 320));
+
+  function storedWidth(): number {
+    try {
+      const stored = Number(localStorage.getItem(WIDTH));
+      return stored >= MIN_WIDTH ? stored : DEFAULT_WIDTH;
+    } catch {
+      return DEFAULT_WIDTH;
+    }
+  }
+
+  function setWidth(next: number): void {
+    sidebarWidth = Math.round(Math.min(Math.max(next, MIN_WIDTH), maxWidth()));
+  }
+
+  function keep(): void {
+    try {
+      localStorage.setItem(WIDTH, String(sidebarWidth));
+    } catch {
+      // Not kept, e.g. in a private window.
+    }
+  }
+
+  function startResize(event: PointerEvent): void {
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    resizing = { from: event.clientX, width: sidebarWidth };
+  }
+
+  function moveResize(event: PointerEvent): void {
+    if (resizing) setWidth(resizing.width + event.clientX - resizing.from);
+  }
+
+  function endResize(): void {
+    if (!resizing) return;
+    resizing = null;
+    keep();
+  }
+
   function keydown(event: KeyboardEvent): void {
     if (event.key.toLowerCase() !== 'b' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
     event.preventDefault();
@@ -71,12 +117,38 @@
 {:else}
   <div class="flex h-full">
     <div
-      class="fixed inset-y-0 left-0 z-20 shrink-0 -translate-x-full transition-[translate,width] min-[800px]:static min-[800px]:translate-x-0 {folded
-        ? 'w-14'
-        : 'w-72 max-[800px]:max-w-[85vw]'}"
+      class="fixed inset-y-0 left-0 z-20 shrink-0 -translate-x-full min-[800px]:relative min-[800px]:translate-x-0 {resizing
+        ? ''
+        : 'transition-[translate,width]'} {folded ? 'w-14' : 'w-72 max-[800px]:max-w-[85vw]'}"
       class:translate-x-0={drawer}
+      style={wide && !folded ? `width: ${Math.min(sidebarWidth, maxWidth())}px` : undefined}
     >
       <Sidebar collapsed={folded} canCollapse={wide} onToggle={toggle} onAdd={() => (adding = true)} onNavigate={() => (drawer = false)} />
+      {#if wide && !folded}
+        <!-- A focusable separator is a widget: it moves with the arrow keys too. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the sidebar"
+          aria-valuenow={sidebarWidth}
+          tabindex="0"
+          title="Drag to resize; double-click for the default width"
+          class="group absolute inset-y-0 -right-[3px] z-10 w-[5px] cursor-col-resize"
+          onpointerdown={startResize}
+          onpointermove={moveResize}
+          onpointerup={endResize}
+          onpointercancel={endResize}
+          ondblclick={() => (setWidth(DEFAULT_WIDTH), keep())}
+          onkeydown={(event) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            setWidth(sidebarWidth + (event.key === 'ArrowLeft' ? -16 : 16));
+            keep();
+          }}
+        >
+          <span class="absolute inset-y-0 left-[2px] w-[1.5px] transition-colors group-hover:bg-indigo group-focus-visible:bg-indigo {resizing ? 'bg-indigo' : ''}"></span>
+        </div>
+      {/if}
     </div>
     {#if drawer}
       <button class="fixed inset-0 z-10 bg-black/30 min-[800px]:hidden" aria-label="Close the sidebar" onclick={() => (drawer = false)}></button>
