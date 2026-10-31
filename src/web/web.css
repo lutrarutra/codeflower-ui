@@ -5,6 +5,24 @@
   height: 100%;
 }
 
+/* Phones: the visible height (the toolbar and keyboard come and go), clear of notches and the home bar. */
+@media (max-width: 799.98px) {
+  html,
+  body,
+  #app {
+    height: 100dvh;
+  }
+
+  #app {
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  dialog {
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
+  }
+}
+
 input,
 select {
   font: inherit;

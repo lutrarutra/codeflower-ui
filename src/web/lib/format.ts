@@ -53,7 +53,12 @@ export const SOURCE_TITLE: Record<Worker['source'], string> = {
 
 /** The sandbox's name in lists: its agent, and its project or address. */
 export function workerTitle(worker: Worker): [string, string] {
-  return [worker.label || 'Sandbox', worker.source === 'added' ? worker.address ?? '' : worker.project];
+  return [worker.name || worker.label || 'Sandbox', worker.source === 'added' ? worker.address ?? '' : worker.project];
+}
+
+/** An added sandbox runs on without this app, so it can leave the list; a started one once it has stopped. */
+export function canForget(worker: Worker): boolean {
+  return worker.source === 'added' || (worker.source === 'started' && !canStop(worker) && worker.status !== 'stopping');
 }
 
 /** A sandbox that runs and can be stopped from here. */

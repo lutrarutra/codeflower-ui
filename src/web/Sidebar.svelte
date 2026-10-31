@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tunnelConnectorId } from '../tunnel/connect.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
+  import SandboxDialog from './SandboxDialog.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import SessionList from './SessionList.svelte';
@@ -31,23 +32,35 @@
   const single = $derived(app.single);
 
   function show(view: View): void {
-    app.go({ view, worker: app.route.worker });
+    app.go({ view });
     onNavigate();
   }
 
+  /** Lists the sandbox's chats; the drawer stays open to choose one. */
   function choose(id: string): void {
-    app.go({ view: 'chat', worker: id });
-    onNavigate();
+    app.browse(id);
   }
 
   /** The sandbox's folders, beside the chat that is open. */
   function files(worker: Worker): void {
-    app.go({ view: 'chat', worker: worker.id, ...(app.route.worker === worker.id && app.route.session ? { session: app.route.session } : {}) });
+    if (app.route.view !== 'chat') app.go({ view: 'chat' });
     app.previews.browse(worker.id);
     onNavigate();
   }
 
+  const browsed = $derived(app.worker(app.browsing ?? undefined));
+  /** Other sandboxes have chats that finished or wait: the way back says so. */
+  const othersNeed = $derived(app.attention.othersNeed(app.browsing));
+
   const browsable = (worker: Worker) => !!worker.url && worker.kind !== 'task';
+
+  // The sandbox whose name, address or place in the list the user manages.
+  let managing: Worker | null = $state(null);
+  function manage(event: Event, worker: Worker): void {
+    if (single) return;
+    event.preventDefault();
+    managing = worker;
+  }
 </script>
 
 {#if collapsed}
@@ -75,17 +88,24 @@
     <ul class="m-0 flex min-h-0 w-full flex-1 list-none flex-col items-center gap-1 overflow-auto border-t-[1.5px] border-soft-line p-0 pt-2">
       {#each app.workers as worker (worker.id)}
         {@const [name, where] = workerTitle(worker)}
-        {@const selected = app.route.view === 'chat' && app.route.worker === worker.id}
+        {@const selected = app.browsing === worker.id}
         <li>
           <button
             class="relative grid size-9 place-items-center rounded-lg font-semibold uppercase {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'text-muted hover:bg-card'}"
             aria-current={selected ? 'page' : undefined}
             aria-label="{name}, {where}"
-            title="{name}, {where}"
-            onclick={() => choose(worker.id)}
+            title="{name}, {where}{single ? '' : ' (right-click to manage)'}"
+            onclick={() => {
+              app.go({ view: 'chat', worker: worker.id });
+              app.workbench.openOverview(worker.id);
+            }}
+            oncontextmenu={(event) => manage(event, worker)}
           >
             {name.slice(0, 1)}
             <span class="absolute right-1 bottom-1 flex"><StatusDot {worker} /></span>
+            {#if app.attention.count(worker.id)}
+              <span class="absolute top-0.5 right-0.5 size-2.5 rounded-full bg-indigo ring-2 ring-sunken" title="Chats that finished or wait for you"></span>
+            {/if}
           </button>
         </li>
       {/each}
@@ -136,56 +156,134 @@
       </div>
     {/if}
 
-    <div class="eyebrow px-4 pb-1 text-muted">{single ? 'Sandbox' : 'Sandboxes'}</div>
-    <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
-    <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-1">
-      {#each app.workers as worker (worker.id)}
-        {@const [name, where] = workerTitle(worker)}
-        {@const selected = app.route.view === 'chat' && app.route.worker === worker.id}
-        <li>
-          <div class="relative">
-            <button
-              class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'hover:bg-card'}"
-              aria-current={selected ? 'page' : undefined}
-              onclick={() => choose(worker.id)}
-            >
-              <span class="flex w-full items-center gap-2">
-                <StatusDot {worker} />
-                <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
-                <span class="tag bg-soft-line text-muted" title={SOURCE_TITLE[worker.source]}>{SOURCE_TEXT[worker.source]}</span>
-              </span>
-              <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
-              <span class="pl-[1.1rem] {browsable(worker) ? 'pr-16' : ''}"><ActivityChips {worker} compact /></span>
-            </button>
-            {#if browsable(worker)}
+    {#if browsed}
+      {@const [name, where] = workerTitle(browsed)}
+      <!-- One sandbox: its chats, and the way back to the others. -->
+      <div class="flex items-center gap-1.5 px-2 pb-2">
+        {#if !single}
+          <button
+            class="relative grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink pointer-coarse:size-10"
+            title={othersNeed ? `All sandboxes: chats in ${othersNeed === 1 ? 'another one need' : `${othersNeed} others need`} you` : 'All sandboxes'}
+            aria-label="All sandboxes"
+            onclick={() => app.browse(null)}
+          >
+            <span class="codicon codicon-arrow-left"></span>
+            {#if othersNeed}<span class="absolute top-1 right-1 size-2 rounded-full bg-indigo ring-2 ring-sunken"></span>{/if}
+          </button>
+        {/if}
+        <button
+          class="flex min-w-0 flex-1 flex-col rounded-lg px-1.5 py-0.5 text-left hover:bg-card {single ? 'ml-2' : ''}"
+          title="The sandbox: its chats and sign-in"
+          onclick={() => app.workbench.openOverview(browsed.id)}
+          oncontextmenu={(event) => manage(event, browsed)}
+        >
+          <span class="flex w-full items-center gap-2">
+            <StatusDot worker={browsed} />
+            <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
+          </span>
+          <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
+        </button>
+        {#if !single}
+          <button
+            class="grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-card hover:text-ink pointer-coarse:size-10"
+            title="Rename, change its address or token, or remove it"
+            aria-label="Manage {name}"
+            onclick={(event) => manage(event, browsed)}
+          >
+            <span class="codicon codicon-settings-gear"></span>
+          </button>
+        {/if}
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5 px-4 pb-2">
+        <ActivityChips worker={browsed} compact />
+        {#if browsable(browsed)}
+          <button
+            class="chip ml-auto"
+            title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
+            draggable="true"
+            ondragstart={(event) => startDrag(event, browsed.id, FILES, 'Files')}
+            ondragend={endDrag}
+            onclick={() => files(browsed)}
+          >
+            <span class="codicon codicon-list-tree"></span>Files
+          </button>
+        {/if}
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto border-t-[1.5px] border-soft-line px-2 py-2">
+        {#if browsed.url && browsed.kind !== 'task'}
+          <SessionList worker={browsed} {onNavigate} />
+        {:else if browsed.kind === 'task'}
+          <p class="m-0 px-2 text-[0.9em] text-muted">This sandbox runs a task by itself and has no chat.</p>
+        {:else}
+          <p class="m-0 px-2 text-[0.9em] text-muted">The sandbox is not ready yet.</p>
+        {/if}
+      </div>
+    {:else}
+      <div class="eyebrow px-4 pb-1 text-muted">{single ? 'Sandbox' : 'Sandboxes'}</div>
+      <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
+      <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-1">
+        {#each app.workers as worker (worker.id)}
+          {@const [name, where] = workerTitle(worker)}
+          {@const selected = app.browsing === worker.id}
+          {@const needs = app.attention.count(worker.id)}
+          <li>
+            <div class="group relative">
               <button
-                class="chip absolute right-2 bottom-2"
-                title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
-                draggable="true"
-                ondragstart={(event) => startDrag(event, worker.id, FILES, 'Files')}
-                ondragend={endDrag}
-                onclick={() => files(worker)}
+                class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'hover:bg-card'}"
+                aria-current={selected ? 'page' : undefined}
+                onclick={() => choose(worker.id)}
+                oncontextmenu={(event) => manage(event, worker)}
               >
-                <span class="codicon codicon-list-tree"></span>Files
+                <span class="flex w-full items-center gap-2 {single ? '' : 'pr-6'}">
+                  <StatusDot {worker} />
+                  <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
+                  {#if needs}
+                    <span class="tag bg-indigo text-on-accent" title="{needs} {needs === 1 ? 'chat' : 'chats'} finished or {needs === 1 ? 'waits' : 'wait'} for you">{needs}</span>
+                  {/if}
+                  <span class="tag bg-soft-line text-muted" title={SOURCE_TITLE[worker.source]}>{SOURCE_TEXT[worker.source]}</span>
+                </span>
+                <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
+                <span class="pl-[1.1rem] {browsable(worker) ? 'pr-16' : ''}"><ActivityChips {worker} compact /></span>
               </button>
-            {/if}
-          </div>
-          {#if selected && worker.url && worker.kind !== 'task'}
-            <SessionList {worker} {onNavigate} />
-          {/if}
-        </li>
-      {:else}
-        {#if !app.listed}
-          <li class="flex flex-col gap-2 rounded-xl px-2.5 py-2.5" role="status" aria-label="Loading the sandboxes">
-            <Skeleton lines={['60%', '40%']} height="0.75rem" />
+              {#if !single}
+                <button
+                  class="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-md text-muted opacity-0 group-hover:opacity-100 hover:bg-sunken hover:text-ink focus-visible:opacity-100 pointer-coarse:opacity-100 {selected
+                    ? 'opacity-100'
+                    : ''}"
+                  title="Rename, change its address or token, or remove it"
+                  aria-label="Manage {name}"
+                  onclick={(event) => manage(event, worker)}
+                >
+                  <span class="codicon codicon-settings-gear"></span>
+                </button>
+              {/if}
+              {#if browsable(worker)}
+                <button
+                  class="chip absolute right-2 bottom-2"
+                  title="Browse the folders in the sandbox beside the chat; or drag it into the grid"
+                  draggable="true"
+                  ondragstart={(event) => startDrag(event, worker.id, FILES, 'Files')}
+                  ondragend={endDrag}
+                  onclick={() => files(worker)}
+                >
+                  <span class="codicon codicon-list-tree"></span>Files
+                </button>
+              {/if}
+            </div>
           </li>
         {:else}
-          <li class="px-2.5 py-2 text-[0.9em] text-muted">
-            No sandboxes yet. {connectOnly ? 'Add one running elsewhere.' : 'Start one under Server, or add one running elsewhere.'}
-          </li>
-        {/if}
-      {/each}
-    </ul>
+          {#if !app.listed}
+            <li class="flex flex-col gap-2 rounded-xl px-2.5 py-2.5" role="status" aria-label="Loading the sandboxes">
+              <Skeleton lines={['60%', '40%']} height="0.75rem" />
+            </li>
+          {:else}
+            <li class="px-2.5 py-2 text-[0.9em] text-muted">
+              No sandboxes yet. {connectOnly ? 'Add one running elsewhere.' : 'Start one under Server, or add one running elsewhere.'}
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
 
     <div class="flex flex-col gap-2 border-t-[1.5px] border-soft-line p-3">
       {#if !single && !remote}
@@ -197,3 +295,5 @@
     </div>
   </nav>
 {/if}
+
+<SandboxDialog bind:worker={managing} />

@@ -1,42 +1,42 @@
 <script lang="ts">
   import { tunnelConnectorId } from '../tunnel/connect.ts';
-  // The chosen sandbox: its tabs (chats, folders, files) in a grid, under what
-  // the user should know about it (another window has it, the agent is not
-  // signed in, a wrap-up).
+  // The tabs from the sandboxes (chats, folders, files) in a grid, under what
+  // the user should know about the sandbox of the tab in front (another window
+  // has it, the agent is not signed in, a wrap-up).
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import Workbench from './Workbench.svelte';
+  import WorkerOverview from './WorkerOverview.svelte';
   import { app } from './lib/app.svelte.ts';
   import { plural } from './lib/format.ts';
 
   let { onAdd }: { onAdd: () => void } = $props();
-  const worker = $derived(app.worker(app.route.worker));
+  const empty = $derived(app.workbench.layout.tabs().length === 0);
+  // The sandbox of the tab in front, else the one the sidebar lists.
+  const worker = $derived(app.worker(app.workbench.focusedWorker() ?? app.browsing ?? app.route.worker));
   const agent = $derived(worker ? app.agent(worker.id) : undefined);
-  /** Sandboxes the user chose to open here although another window had them. */
-  let takeOver = $state<Record<string, boolean>>({});
-  // With an older sandbox, connecting takes it over from a window that has it (VS Code, another tab): ask
-  // first. Newer ones show the chats in every window at once.
-  const elsewhere = $derived(
-    !!worker &&
-      !!agent &&
-      agent.state !== 'connected' &&
-      !!worker.activity?.connected &&
-      !worker.activity.multiClient &&
-      worker.relays === 0 &&
-      !takeOver[worker.id]
-  );
+  const elsewhere = $derived(!!worker && app.elsewhere(worker));
   const wrapUp = $derived(worker ? app.wrapUps[worker.id] : undefined);
+  const browsed = $derived(app.worker(app.browsing ?? undefined));
 
   async function openHere(): Promise<void> {
-    if (!worker || !agent) return;
-    takeOver[worker.id] = true;
-    if (agent.state === 'taken-over') await agent.takeBack().catch(() => undefined);
+    if (worker) await app.openHere(worker);
   }
 </script>
 
-{#if worker && agent}
+{#snippet overview()}
+  {#if browsed}
+    <WorkerOverview worker={browsed} agent={app.agent(browsed.id)} elsewhere={app.elsewhere(browsed)} />
+  {:else}
+    {@render choose()}
+  {/if}
+{/snippet}
+
+{#if app.workers.length && (!empty || browsed)}
   <div class="flex h-full flex-col">
-    {#if agent.state === 'taken-over' || (elsewhere && app.route.session)}
+    {#if !worker || !agent}
+      <!-- No sandbox to speak of: e.g. the tab in front is from one that went. -->
+    {:else if agent.state === 'taken-over' || (elsewhere && app.route.session)}
       <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-2.5" role="status">
         <span class="min-w-0 flex-1">
           {agent.state === 'taken-over'
@@ -55,7 +55,7 @@
     {:else if agent.state === 'disconnected' && agent.error}
       <p class="m-0 border-b-[1.5px] border-soft-line px-4 py-2.5 text-red">Could not reach the sandbox: {agent.error}. Trying again…</p>
     {/if}
-    {#if wrapUp}
+    {#if worker && wrapUp}
       <p class="m-0 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-2.5">
         {wrapUp.reason === 'quit'
           ? `The app that started this sandbox is quitting; ${plural(wrapUp.chats, 'working chat was', 'working chats were')} asked to save their work.`
@@ -63,9 +63,7 @@
       </p>
     {/if}
     <div class="min-h-0 flex-1">
-      {#key worker.id}
-        <Workbench {worker} {agent} {elsewhere} />
-      {/key}
+      <Workbench empty={overview} />
     </div>
   </div>
 {:else if !app.listed}
@@ -76,6 +74,10 @@
     <div class="card p-4"><Skeleton lines={['25%', '80%']} /></div>
   </main>
 {:else}
+  {@render choose()}
+{/if}
+
+{#snippet choose()}
   <main class="grid h-full place-items-center p-8 text-center">
     <div class="flex max-w-md flex-col items-center gap-3">
       <Tulip size={56} />
@@ -93,4 +95,4 @@
       </div>
     </div>
   </main>
-{/if}
+{/snippet}

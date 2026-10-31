@@ -1,12 +1,12 @@
 <script lang="ts">
-  // The chosen sandbox's chats, under it in the sidebar.
+  // The chosen sandbox's chats, the sidebar's view of it: a new chat, then the chats, latest first.
   import { untrack } from 'svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import { ago } from './lib/format.ts';
-  import { chatTab, endDrag, startDrag } from './lib/workbench.svelte.ts';
+  import { chatTab, endDrag, startDrag, tabOf } from './lib/workbench.svelte.ts';
 
   let { worker, onNavigate }: { worker: Worker; onNavigate: () => void } = $props();
   const agent = $derived(app.agent(worker.id));
@@ -50,7 +50,7 @@
     error = '';
     try {
       await agent.delete(key);
-      app.workbench(worker.id).remove(chatTab(key));
+      app.workbench.remove(tabOf(worker.id, chatTab(key)));
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     }
@@ -71,9 +71,9 @@
   }
 </script>
 
-<ul class="m-0 mb-2 ml-4 list-none border-l-[1.5px] border-soft-line py-1 pl-2">
-  <li>
-    <button class="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[0.9em] font-semibold text-indigo hover:bg-card" disabled={creating} onclick={newChat}>
+<ul class="m-0 flex list-none flex-col gap-0.5 p-0">
+  <li class="pb-1.5">
+    <button class="pill pill-small pill-primary w-full justify-center" disabled={creating} onclick={newChat}>
       <span class="codicon codicon-add"></span>{creating ? 'Starting…' : 'New chat'}
     </button>
   </li>
@@ -85,10 +85,11 @@
     {@const chat = agent.chats[session.key]}
     {@const busy = worker.activity?.chats.find((candidate) => candidate.key === session.key)}
     {@const status = chat?.status ?? (busy ? busy.state : undefined)}
-    {@const current = app.route.session === session.key}
-    <li>
+    {@const current = app.route.worker === worker.id && app.route.session === session.key}
+    {@const need = status === 'working' || status === 'waiting' ? undefined : app.attention.need(worker.id, session.key)}
+    <li class="flex items-center">
       <button
-        class="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[0.9em] {current ? 'bg-card font-semibold' : 'hover:bg-card'}"
+        class="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left text-[0.9em] pointer-coarse:py-2 {current ? 'bg-card font-semibold' : 'hover:bg-card'}"
         aria-current={current ? 'page' : undefined}
         title="{session.title}: drag it into the grid to open it there"
         draggable="true"
@@ -103,11 +104,26 @@
           menu = { key: session.key, title: session.title, x: event.clientX, y: event.clientY };
         }}
       >
-        <span class="size-2 shrink-0 rounded-full {status ? DOT[status] : 'bg-transparent'}" class:animate-pulse={status === 'working'}></span>
-        <ChatTitle title={session.title} />
+        {#if need}
+          <span class="size-2 shrink-0 rounded-full bg-indigo ring-2 ring-indigo/30" title="The agent finished while you were elsewhere"></span>
+        {:else}
+          <span class="size-2 shrink-0 rounded-full {status ? DOT[status] : 'bg-transparent'}" class:animate-pulse={status === 'working'}></span>
+        {/if}
+        <span class="flex min-w-0 flex-1" class:font-semibold={need}><ChatTitle title={session.title} /></span>
         {#if session.updatedAt}
           <span class="shrink-0 text-[0.8em] font-normal text-muted" title={new Date(session.updatedAt).toLocaleString()}>{ago(Date.parse(session.updatedAt))}</span>
         {/if}
+      </button>
+      <!-- Touch screens have no right click: the same menu from a button. -->
+      <button
+        class="hidden size-9 shrink-0 place-items-center rounded-lg text-muted pointer-coarse:grid"
+        aria-label="More for {session.title || 'Untitled chat'}"
+        onclick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          menu = { key: session.key, title: session.title, x: box.right - 176, y: box.bottom };
+        }}
+      >
+        <span class="codicon codicon-ellipsis"></span>
       </button>
     </li>
   {/each}

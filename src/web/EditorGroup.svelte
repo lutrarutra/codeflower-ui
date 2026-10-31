@@ -6,7 +6,7 @@
   import type { Grid } from './lib/grid.ts';
   import type { Group, Side } from './lib/layout.svelte.ts';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
-  import { endDrag, startDrag } from './lib/workbench.svelte.ts';
+  import { endDrag, splitTab, startDrag } from './lib/workbench.svelte.ts';
 
   let { group, grid }: { group: Group; grid: Grid } = $props();
   const workbench = $derived(grid.workbench);
@@ -88,7 +88,10 @@
         class="group relative flex max-w-56 shrink-0 items-center rounded-t-lg border-[1.5px] border-b-0 {active
           ? 'border-soft-line bg-paper'
           : 'border-transparent text-muted hover:bg-paper/60'}"
-        ondragstart={(event) => startDrag(event, workbench.workerId, tab, label.label)}
+        ondragstart={(event) => {
+          const { workerId, local } = splitTab(tab);
+          startDrag(event, workerId, local, label.label);
+        }}
         ondragend={endDrag}
         ondragover={(event) => over(event, () => ({ index: indexAt(event, index) }))}
         onauxclick={(event) => event.button === 1 && workbench.close(tab)}
@@ -98,12 +101,14 @@
         <button
           role="tab"
           aria-selected={active}
-          class="flex min-w-0 items-center gap-1.5 py-1 pr-1 pl-2.5 text-left"
+          class="flex min-w-0 items-center gap-1.5 py-1 pr-1 pl-2.5 text-left pointer-coarse:py-1.5"
           title={label.title}
           onclick={() => workbench.activate(tab)}
         >
           {#if label.status}
-            <span class="size-2 shrink-0 rounded-full {label.status === 'working' ? 'animate-pulse bg-cyan' : 'bg-orange'}"></span>
+            <span
+              class="size-2 shrink-0 rounded-full {label.status === 'working' ? 'animate-pulse bg-cyan' : label.status === 'done' ? 'bg-green' : 'bg-orange'}"
+            ></span>
           {:else}
             <span class="codicon codicon-{label.icon} shrink-0 text-[13px]!"></span>
           {/if}
@@ -114,7 +119,7 @@
           {/if}
         </button>
         <button
-          class="mr-1 grid size-5 shrink-0 place-items-center rounded opacity-60 group-hover:opacity-100 hover:bg-soft-line"
+          class="mr-1 grid size-5 shrink-0 place-items-center rounded opacity-60 group-hover:opacity-100 hover:bg-soft-line pointer-coarse:size-7 pointer-coarse:opacity-100"
           aria-label="Close {label.label}"
           title="Close (middle click)"
           onclick={() => workbench.close(tab)}

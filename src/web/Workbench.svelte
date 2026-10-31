@@ -1,5 +1,5 @@
 <script lang="ts">
-  // A sandbox's tabs in a grid of groups, arranged as in VS Code by dragging
+  // The tabs from every sandbox in a grid of groups, arranged as in VS Code by dragging
   // tabs. The grid lays out the strips and leaves each group's body empty; what
   // the tabs show lies in a layer above, placed over its group's body. Moving a
   // tab or splitting a group so never reloads a chat or a running report.
@@ -10,20 +10,19 @@
   import PreviewView from '../chat/Preview.svelte';
   import FileTree from './FileTree.svelte';
   import GridNode from './GridNode.svelte';
-  import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
   import { FILES, INTERACTIVE } from './lib/previews.svelte.ts';
-  import { chatKeyOf, dragging, endDrag, OVERVIEW } from './lib/workbench.svelte.ts';
-  import type { WebWorker } from './lib/worker.svelte.ts';
+  import { chatKeyOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab } from './lib/workbench.svelte.ts';
   import ReportFrame from './ReportFrame.svelte';
   import WorkerOverview from './WorkerOverview.svelte';
   import { workerTitle } from './lib/format.ts';
 
-  let { worker, agent, elsewhere }: { worker: Worker; agent: WebWorker; elsewhere: boolean } = $props();
-  const workbench = $derived(app.workbench(worker.id));
-  const layout = $derived(workbench.layout);
+  /** What an empty grid shows. */
+  let { empty }: { empty: import('svelte').Snippet } = $props();
+  const workbench = app.workbench;
+  const layout = workbench.layout;
 
   interface Rect {
     x: number;
@@ -77,43 +76,62 @@
     untrack(() => workbench.save());
   });
 
-  // Chats in the grid connect once the sandbox is ready; a chat deleted elsewhere leaves it.
+  // Chats in the grid connect once their sandbox is ready; a chat deleted elsewhere leaves it.
   $effect(() => {
-    if (!agent.sessionsKnown) return;
-    const known = new Set(agent.sessions.map((session) => session.key));
-    const ready = worker.status === 'ready' && !elsewhere;
     for (const tab of layout.tabs()) {
-      const key = chatKeyOf(tab);
-      if (!key || agent.chats[key]) continue;
-      if (!known.has(key)) untrack(() => workbench.remove(tab));
-      else if (ready) untrack(() => void agent.open(key));
+      const { workerId, local } = splitTab(tab);
+      const key = chatKeyOf(local);
+      const worker = app.worker(workerId);
+      if (!key || !worker) continue;
+      const agent = app.agent(workerId);
+      if (agent.chats[key] || !agent.sessionsKnown) continue;
+      if (!agent.sessions.some((session) => session.key === key)) untrack(() => workbench.remove(tab));
+      else if (worker.status === 'ready' && !app.elsewhere(worker)) untrack(() => void agent.open(key));
     }
   });
 
   // Previews of files that went (the sandbox restarted) leave the grid too.
   $effect(() => {
     for (const tab of layout.tabs()) {
-      if (chatKeyOf(tab) || tab === FILES || tab === OVERVIEW) continue;
-      if (!app.previews.find(worker.id, tab)) untrack(() => workbench.remove(tab));
+      const { workerId, local } = splitTab(tab);
+      if (chatKeyOf(local) || local === FILES || local === OVERVIEW) continue;
+      if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
     }
   });
 
+  /** A sandbox's name, for the tabs from it when several sandboxes have some. */
+  const several = $derived(new Set(layout.tabs().map((tab) => splitTab(tab).workerId)).size > 1);
+  function named(workerId: string, title: string): string {
+    const worker = app.worker(workerId);
+    return several && worker ? `${title} · ${workerTitle(worker).filter(Boolean).join(', ')}` : title;
+  }
+
   function label(tab: string): TabLabel {
-    const key = chatKeyOf(tab);
+    const { workerId, local } = splitTab(tab);
+    const agent = app.agent(workerId);
+    const key = chatKeyOf(local);
     if (key) {
       const chat = agent.chats[key];
       const title = chat?.state.title || agent.sessions.find((session) => session.key === key)?.title || 'Chat';
       const status = chat?.status;
-      return { icon: 'comment', label: title, title, chat: true, ...(status === 'working' || status === 'waiting' ? { status } : {}) };
+      const need = app.attention.need(workerId, key);
+      return {
+        icon: 'comment',
+        label: title,
+        title: named(workerId, title),
+        chat: true,
+        ...(status === 'working' || status === 'waiting' ? { status } : need === 'done' ? { status: 'done' as const } : {})
+      };
     }
-    if (tab === FILES) return { icon: 'list-tree', label: 'Files', title: 'The folders in the sandbox' };
-    if (tab === OVERVIEW) return { icon: 'home', label: workerTitle(worker)[0], title: 'The sandbox: its chats and sign-in' };
-    const preview = app.previews.find(worker.id, tab);
-    const interactive = tab.endsWith(INTERACTIVE);
+    const worker = app.worker(workerId);
+    if (local === FILES) return { icon: 'list-tree', label: 'Files', title: named(workerId, 'The folders in the sandbox') };
+    if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
+    const preview = app.previews.find(workerId, local);
+    const interactive = local.endsWith(INTERACTIVE);
     return {
       icon: interactive ? 'play' : preview ? kindIcon[fileKind(preview.file.mimeType)] : 'file',
-      label: `${preview?.title ?? tab}${interactive ? ' (interactive)' : preview?.dirty ? ' ●' : ''}`,
-      title: preview?.file.path ?? tab
+      label: `${preview?.title ?? local}${interactive ? ' (interactive)' : preview?.dirty ? ' ●' : ''}`,
+      title: named(workerId, preview?.file.path ?? local)
     };
   }
 
@@ -135,24 +153,28 @@
     },
     dragOver(placement) {
       // A group's only tab cannot split its own group.
-      const source = dragging.tab ? layout.groupOf(dragging.tab) : undefined;
+      const dragged = draggedTab();
+      const source = dragged ? layout.groupOf(dragged) : undefined;
       const pointless = placement && source?.id === placement.group && source.tabs.length === 1;
       target = pointless ? null : placement;
     },
     drop() {
-      if (target && dragging.tab) workbench.drop(dragging.tab, target);
+      const dragged = draggedTab();
+      if (target && dragged) workbench.drop(dragged, target);
       target = null;
       endDrag();
     },
     target: () => target,
-    accepts: () => !narrow && dragging.tab !== null && dragging.workerId === worker.id,
+    accepts: () => !narrow && draggedTab() !== null,
     setResizing(value) {
       resizing = value;
     },
     get narrow() {
       return narrow;
     },
-    empty
+    get empty() {
+      return empty;
+    }
   };
 
   /** Where the dragged tab would land, over its group's body. */
@@ -177,10 +199,6 @@
   const shown = $derived(narrow ? layout.group(layout.focused) : undefined);
   const style = (rect: Rect) => `left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px`;
 </script>
-
-{#snippet empty()}
-  <WorkerOverview {worker} {agent} {elsewhere} />
-{/snippet}
 
 <!-- A drag that leaves the window, or ends on no group, lands nowhere. -->
 <svelte:window ondragend={() => (target = null)} ondrop={() => ((target = null), endDrag())} />
@@ -226,7 +244,10 @@
 </div>
 
 {#snippet content(tab: string)}
-  {@const key = chatKeyOf(tab)}
+  {@const { workerId, local } = splitTab(tab)}
+  {@const worker = app.worker(workerId)}
+  {@const agent = app.agent(workerId)}
+  {@const key = chatKeyOf(local)}
   {#if key}
     {@const chat = agent.chats[key]}
     {#if chat}
@@ -236,13 +257,13 @@
     {:else}
       <div class="mx-auto w-full max-w-3xl p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>
     {/if}
-  {:else if tab === FILES}
-    <FileTree workerId={worker.id} />
-  {:else if tab === OVERVIEW}
-    <WorkerOverview {worker} {agent} {elsewhere} />
+  {:else if local === FILES}
+    <FileTree {workerId} />
+  {:else if local === OVERVIEW}
+    {#if worker}<WorkerOverview {worker} {agent} elsewhere={app.elsewhere(worker)} />{/if}
   {:else}
-    {@const preview = app.previews.find(worker.id, tab)}
-    {#if preview && tab.endsWith(INTERACTIVE)}
+    {@const preview = app.previews.find(workerId, local)}
+    {#if preview && local.endsWith(INTERACTIVE)}
       <ReportFrame
         html={preview.html}
         title="{preview.title} (interactive)"

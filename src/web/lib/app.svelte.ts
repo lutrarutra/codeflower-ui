@@ -4,16 +4,17 @@ import type { WrapUpNotice } from '../../client/workerConnection.ts';
 import { api, type QuitPlan, type SystemInfo, type Worker } from './api.ts';
 import { Previews } from './previews.svelte.ts';
 import { SignIn } from './signIn.svelte.ts';
-import { Workbench, chatKeyOf } from './workbench.svelte.ts';
+import { Attention } from './attention.svelte.ts';
+import { Workbench, chatKeyOf, splitTab, tabOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'server';
 
 export interface Route {
   view: View;
-  /** The sandbox chosen in the sidebar. */
+  /** The sandbox of the chat the user looks at, or the one chosen in the sidebar. */
   worker?: string;
-  /** The chat the user looks at in it. */
+  /** The chat the user looks at. */
   session?: string;
 }
 
@@ -53,6 +54,10 @@ class AppState {
   /** The client has stopped: the page has nothing more to show. */
   stopped = $state(false);
   route = $state<Route>(parseHash(location.hash) ?? { view: 'chat' });
+  /** The sandbox whose chats the sidebar lists; none: the list of sandboxes. */
+  browsing = $state<string | null>(this.route.worker ?? null);
+  /** Sandboxes the user chose to open here although another window had them. */
+  takeOver = $state<Record<string, boolean>>({});
   /** A sandbox's line from a link it printed, waiting for the user to add it. */
   offered = $state<string | null>(null);
   /** Opens the quit dialog; set by the shell. */
@@ -81,17 +86,34 @@ class AppState {
   /** Files shown from the sandboxes, in tabs of their workbenches. */
   readonly previews = new Previews({
     agent: (id) => this.agents.get(id),
-    visible: (id, tab) => this.route.view === 'chat' && this.route.worker === id && !!this.workbenches.get(id)?.layout.visible(tab),
-    open: (id, tab) => this.workbench(id).openFile(tab),
-    remove: (id, tab) => this.workbenches.get(id)?.remove(tab),
+    visible: (id, tab) => this.shows(tabOf(id, tab)),
+    open: (id, tab) => this.workbench.openFile(id, tab),
+    remove: (id, tab) => this.workbench.remove(tabOf(id, tab)),
     showChat: (worker, session) => this.go({ view: 'chat', worker, session })
   });
 
-  /** Each sandbox's tabs in their grid; made on first use. */
-  private readonly workbenches = new Map<string, Workbench>();
+  /** The tabs from every sandbox, in one grid. */
+  readonly workbench = new Workbench();
+  /** Chats that finished or wait for the user while they looked elsewhere. */
+  readonly attention = new Attention({
+    workers: () => this.workers,
+    agent: (id) => this.agents.get(id),
+    shows: (tab) => this.shows(tab),
+    open: (worker, session) => this.go({ view: 'chat', worker, session })
+  });
   private quitting = false;
 
   constructor() {
+    this.workbench.mayClose = (tab) => {
+      const { workerId, local } = splitTab(tab);
+      return !!chatKeyOf(local) || this.previews.mayClose(workerId, local);
+    };
+    this.workbench.onClose = (tab) => {
+      const { workerId, local } = splitTab(tab);
+      if (!chatKeyOf(local)) this.previews.closed(workerId, local);
+    };
+    this.workbench.onChatFocus = (chat) => this.follow(chat);
+    if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
     this.offer();
     window.addEventListener('hashchange', () => {
       if (this.offer()) return;
@@ -117,43 +139,74 @@ class AppState {
     return true;
   }
 
-  /** Goes where the user asked: a chat opens in its sandbox's workbench, a sandbox shows its own. */
+  /**
+   * Goes where the user asked: a chat opens in the workbench, and the sidebar
+   * lists the chats of its sandbox.
+   */
   go(route: Route): void {
     // A sandbox's own page has no Server view.
     if (this.single && route.view === 'server') route = { view: 'chat', ...(this.workers[0] ? { worker: this.workers[0].id } : {}) };
-    const again = route.view === 'chat' && route.worker !== undefined && route.worker === this.route.worker && this.route.view === 'chat';
+    const again = route.view === 'chat' && route.worker !== undefined && route.worker === this.browsing && this.route.view === 'chat';
+    // Back to the chats: the address names the chat in front, and the sidebar stays as it was.
+    const focused = route.view === 'chat' && !route.worker ? this.workbench.focusedChat() : undefined;
+    if (focused) {
+      route = { view: 'chat', worker: focused.workerId, session: focused.key };
+      this.route = route;
+      const hash = routeHash(route);
+      if (location.hash !== hash) history.pushState(null, '', hash);
+      return;
+    }
     this.route = route;
     const hash = routeHash(route);
     if (location.hash !== hash) history.pushState(null, '', hash);
     if (route.view !== 'chat' || !route.worker) return;
-    const workbench = this.workbench(route.worker);
-    if (route.session) workbench.openChat(route.session);
-    // Choosing the sandbox it shows already: its overview.
-    else if (again) workbench.openOverview();
-    else this.follow(route.worker, workbench.focusedChat());
+    this.browsing = route.worker;
+    if (route.session) this.workbench.openChat(route.worker, route.session);
+    // Choosing the sandbox it lists already: its overview.
+    else if (again) this.workbench.openOverview(route.worker);
   }
 
-  /** The sandbox's tabs; a new one opens the chat the address names. */
-  workbench(id: string): Workbench {
-    let workbench = this.workbenches.get(id);
-    if (!workbench) {
-      workbench = new Workbench(id);
-      workbench.mayClose = (tab) => !!chatKeyOf(tab) || this.previews.mayClose(id, tab);
-      workbench.onClose = (tab) => {
-        if (!chatKeyOf(tab)) this.previews.closed(id, tab);
-      };
-      workbench.onChatFocus = (key) => this.follow(id, key);
-      this.workbenches.set(id, workbench);
-      if (this.route.worker === id && this.route.session) workbench.openChat(this.route.session);
+  /** The sidebar lists the sandbox's chats (null: the sandboxes again). */
+  browse(id: string | null): void {
+    if (id === null) {
+      this.browsing = null;
+      return;
     }
-    return workbench;
+    this.go({ view: 'chat', worker: id });
   }
 
-  /** The address follows the chat the user looks at, without a step in the history. */
-  private follow(worker: string, session: string | undefined): void {
-    if (this.route.view !== 'chat' || this.route.worker !== worker || this.route.session === session) return;
-    this.route = { view: 'chat', worker, ...(session ? { session } : {}) };
+  /** The tab is in front of its group, on the page in front. */
+  shows(tab: string): boolean {
+    return this.route.view === 'chat' && this.workbench.layout.visible(tab);
+  }
+
+  /** The address follows the chat the user looks at, in whichever sandbox, without a step in the history. */
+  private follow(chat: { workerId: string; key: string } | undefined): void {
+    if (this.route.view !== 'chat' || !chat) return;
+    if (this.route.worker === chat.workerId && this.route.session === chat.key) return;
+    this.route = { view: 'chat', worker: chat.workerId, session: chat.key };
     history.replaceState(null, '', routeHash(this.route));
+  }
+
+  /**
+   * An older sandbox that another window has (VS Code, another tab): connecting takes it over, so the
+   * page asks first. Newer ones show the chats in every window at once.
+   */
+  elsewhere(worker: Worker): boolean {
+    const agent = this.agents.get(worker.id);
+    return (
+      agent?.state !== 'connected' &&
+      !!worker.activity?.connected &&
+      !worker.activity.multiClient &&
+      worker.relays === 0 &&
+      !this.takeOver[worker.id]
+    );
+  }
+
+  async openHere(worker: Worker): Promise<void> {
+    const agent = this.agent(worker.id);
+    this.takeOver[worker.id] = true;
+    if (agent.state === 'taken-over') await agent.takeBack().catch(() => undefined);
   }
 
   worker(id: string | undefined): Worker | undefined {
@@ -195,16 +248,21 @@ class AppState {
         const agent = this.agents.get(worker.id);
         if (agent) agent.place = worker.source === 'added' ? (worker.address ?? '') : worker.project;
       }
-      // A sandbox gone from the list (stopped, forgotten) closes its connection.
+      // A sandbox gone from the list (stopped, forgotten) closes its connection, and its tabs.
+      const listed = new Set(this.workers.map((worker) => worker.id));
       for (const [id, agent] of this.agents) {
-        if (!this.workers.some((worker) => worker.id === id)) {
+        if (!listed.has(id)) {
           agent.close();
           this.agents.delete(id);
           this.previews.closeWorker(id);
-          this.workbenches.delete(id);
           this.signIn.closeWorker(id);
         }
       }
+      for (const tab of this.workbench.layout.tabs()) {
+        const { workerId } = splitTab(tab);
+        if (!listed.has(workerId)) this.workbench.removeWorker(workerId);
+      }
+      if (this.browsing && !listed.has(this.browsing)) this.browsing = null;
     } catch {
       // The client stopped while it was quitting.
       if (this.quitting) this.stopped = true;

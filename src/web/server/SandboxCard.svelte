@@ -6,7 +6,7 @@
   import UsageChips from '../lib/UsageChips.svelte';
   import { api, type Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
-  import { canStop, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
+  import { canForget, canStop, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
 
   let { worker }: { worker: Worker } = $props();
   const [name, where] = $derived(workerTitle(worker));
@@ -35,8 +35,7 @@
       ...worker.skills.map((path) => `skills ${path}`)
     ].join('\n')
   );
-  // An added or local sandbox runs on without this app; only an added one can leave the list.
-  const forgettable = $derived(worker.source === 'added' || (worker.source === 'started' && !canStop(worker) && worker.status !== 'stopping'));
+  const forgettable = $derived(canForget(worker));
   let log: HTMLPreElement | undefined = $state();
 
   $effect(() => {

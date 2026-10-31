@@ -10,8 +10,8 @@ export interface TabLabel {
   title: string;
   /** A chat's title, shown with its command. */
   chat?: boolean;
-  /** A chat's state: working, or waiting for the user. */
-  status?: 'working' | 'waiting';
+  /** A chat's state: working, waiting for the user, or done while the user looked elsewhere. */
+  status?: 'working' | 'waiting' | 'done';
 }
 
 export interface Grid {

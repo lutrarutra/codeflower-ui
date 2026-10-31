@@ -111,7 +111,10 @@ export interface Worker {
   source: WorkerSource;
   /** worker, run or task, for a local sandbox. */
   kind?: string;
+  /** host:port, of an added or local sandbox. */
   address?: string;
+  /** The name the user gave it in the list. */
+  name?: string;
   engine: string;
   project: string;
   state: string;

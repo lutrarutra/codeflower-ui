@@ -1,26 +1,38 @@
-// A sandbox's workbench: its chats, its folders and the files shown from it,
-// as tabs in a grid of groups (see layout.svelte.ts). It decides where a tab
-// opens when the user did not drop it somewhere: chats where the chats are,
-// files beside them. The grid is remembered per sandbox, without the file
-// previews, which need the sandbox to load.
+// The page's workbench: chats, folders and files from any of the sandboxes,
+// as tabs in one grid of groups (see layout.svelte.ts). A tab names its
+// sandbox and what it shows there (`<sandbox>/chat:<key>`). The workbench
+// decides where a tab opens when the user did not drop it somewhere: chats
+// where the chats are, files beside them. The grid is remembered without the
+// file previews, which need their sandbox to load.
 import { Layout, type Placement } from './layout.svelte.ts';
 import { FILES, INTERACTIVE } from './previews.svelte.ts';
 
-/** The sandbox's overview: its chats, sign-in and connection. */
+/** A sandbox's overview: its chats, sign-in and connection. */
 export const OVERVIEW = '#overview';
 const CHAT = 'chat:';
 
+/** The grid's tab for what a sandbox shows (a chat, its folders, a file). */
+export const tabOf = (workerId: string, local: string) => `${encodeURIComponent(workerId)}/${local}`;
+/** The sandbox a tab is from, and what it shows there. */
+export function splitTab(tab: string): { workerId: string; local: string } {
+  const slash = tab.indexOf('/');
+  return { workerId: decodeURIComponent(tab.slice(0, slash)), local: tab.slice(slash + 1) };
+}
 export const chatTab = (key: string) => `${CHAT}${key}`;
-export const chatKeyOf = (tab: string) => (tab.startsWith(CHAT) ? tab.slice(CHAT.length) : undefined);
+/** The chat a tab shows, by what it shows in its sandbox. */
+export const chatKeyOf = (local: string) => (local.startsWith(CHAT) ? local.slice(CHAT.length) : undefined);
 /** Chats and the overview are the page's own; other tabs show files. */
-const isPage = (tab: string) => tab.startsWith(CHAT) || tab === OVERVIEW;
+const isPage = (tab: string) => {
+  const { local } = splitTab(tab);
+  return local.startsWith(CHAT) || local === OVERVIEW;
+};
 /** Tabs that open again from a saved grid. */
-const restorable = (tab: string) => isPage(tab) || tab === FILES;
+const restorable = (tab: string) => isPage(tab) || splitTab(tab).local === FILES;
 
 /** A tab being dragged, from a group or from a list of chats. */
 export const dragging = $state<{ workerId: string | null; tab: string | null }>({ workerId: null, tab: null });
 
-/** Starts dragging a tab onto a grid, e.g. a chat from a list. */
+/** Starts dragging a sandbox's tab onto the grid, e.g. a chat from a list. */
 export function startDrag(event: DragEvent, workerId: string, tab: string, label: string): void {
   dragging.workerId = workerId;
   dragging.tab = tab;
@@ -34,50 +46,55 @@ export function endDrag(): void {
   dragging.tab = null;
 }
 
+/** The grid's tab being dragged. */
+export const draggedTab = () => (dragging.workerId !== null && dragging.tab !== null ? tabOf(dragging.workerId, dragging.tab) : null);
+
 export class Workbench {
-  readonly workerId: string;
   readonly layout: Layout;
   /** Asked before the user closes a tab, e.g. one with edits that are not saved. */
   mayClose: (tab: string) => boolean = () => true;
   /** Tabs the user closed: what they show is let go, e.g. a preview. */
   onClose: (tab: string) => void = () => {};
   /** The chat in front of the focused group changed, e.g. for the page's address. */
-  onChatFocus: (key: string | undefined) => void = () => {};
+  onChatFocus: (chat: { workerId: string; key: string } | undefined) => void = () => {};
 
-  constructor(workerId: string) {
-    this.workerId = workerId;
-    this.layout = new Layout(load(workerId));
+  constructor() {
+    this.layout = new Layout(load());
   }
 
   /** Opens a chat, where the chats are: the latest group that shows one, else the focused group. */
-  openChat(key: string): void {
-    const tab = chatTab(key);
+  openChat(workerId: string, key: string): void {
+    const tab = tabOf(workerId, chatTab(key));
     if (this.layout.has(tab)) this.layout.activate(tab);
     else {
       const group = this.layout.byRecency().find((candidate) => candidate.active && isPage(candidate.active)) ?? this.layout.byRecency()[0]!;
       this.layout.place(tab, { group: group.id });
     }
-    this.onChatFocus(key);
+    this.onChatFocus({ workerId, key });
   }
 
-  openOverview(): void {
-    if (this.layout.has(OVERVIEW)) this.layout.activate(OVERVIEW);
-    else this.layout.place(OVERVIEW, { group: this.layout.byRecency()[0]!.id });
+  openOverview(workerId: string): void {
+    const tab = tabOf(workerId, OVERVIEW);
+    if (this.layout.has(tab)) this.layout.activate(tab);
+    else this.layout.place(tab, { group: this.layout.byRecency()[0]!.id });
+    this.focusChanged();
   }
 
   /**
-   * Opens a file's tab without taking the focus from the chat: next to the
-   * files already open, else beside the chat in front.
+   * Opens a sandbox's file tab without taking the focus from the chat: next to
+   * the files already open, else beside the chat in front.
    */
-  openFile(tab: string): void {
+  openFile(workerId: string, local: string): void {
+    const tab = tabOf(workerId, local);
     if (this.layout.has(tab)) {
       this.layout.activate(tab, false);
       return;
     }
     // An interactive report opens next to its preview.
-    const preview = tab.endsWith(INTERACTIVE) ? this.layout.groupOf(tab.slice(0, -INTERACTIVE.length)) : undefined;
+    const previewTab = tab.endsWith(INTERACTIVE) ? tab.slice(0, -INTERACTIVE.length) : undefined;
+    const preview = previewTab ? this.layout.groupOf(previewTab) : undefined;
     if (preview) {
-      this.layout.place(tab, { group: preview.id, index: preview.tabs.indexOf(tab.slice(0, -INTERACTIVE.length)) + 1 }, false);
+      this.layout.place(tab, { group: preview.id, index: preview.tabs.indexOf(previewTab!) + 1 }, false);
       return;
     }
     const groups = this.layout.byRecency();
@@ -123,21 +140,35 @@ export class Workbench {
     this.focusChanged();
   }
 
+  /** A sandbox went: its tabs leave the grid. */
+  removeWorker(workerId: string): void {
+    for (const tab of this.layout.tabs()) if (splitTab(tab).workerId === workerId) this.layout.close(tab);
+    this.focusChanged();
+  }
+
   save(): void {
     try {
-      localStorage.setItem(storageKey(this.workerId), JSON.stringify(this.layout.save(restorable)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layout.save(restorable)));
     } catch {
       // Not remembered, e.g. in a private window.
     }
   }
 
   /** The chat the user looks at: in front of the focused group, else of the latest group showing one. */
-  focusedChat(): string | undefined {
+  focusedChat(): { workerId: string; key: string } | undefined {
     for (const group of this.layout.byRecency()) {
-      const key = group.active ? chatKeyOf(group.active) : undefined;
-      if (key) return key;
+      if (!group.active) continue;
+      const { workerId, local } = splitTab(group.active);
+      const key = chatKeyOf(local);
+      if (key) return { workerId, key };
     }
     return undefined;
+  }
+
+  /** The sandbox of the tab in front of the focused group. */
+  focusedWorker(): string | undefined {
+    const active = this.layout.group(this.layout.focused)?.active;
+    return active ? splitTab(active).workerId : undefined;
   }
 
   private focusChanged(): void {
@@ -145,11 +176,11 @@ export class Workbench {
   }
 }
 
-const storageKey = (workerId: string) => `codeflower.layout.${workerId}`;
+const STORAGE_KEY = 'codeflower.layout';
 
-function load(workerId: string): unknown {
+function load(): unknown {
   try {
-    return JSON.parse(localStorage.getItem(storageKey(workerId)) ?? 'null');
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
   } catch {
     return undefined;
   }
