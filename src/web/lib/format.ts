@@ -93,12 +93,6 @@ export function ago(timeMs: number): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-/** A chat title that starts with a slash command (/goal …): the command and the rest. */
-export function commandTitle(title: string): [string, string] | null {
-  const match = /^(\/[\w:.-]+)(.*)$/s.exec(title.trim());
-  return match ? [match[1]!, match[2]!.trim()] : null;
-}
-
 /** Bytes as htop writes them: 512M, 15.8G. */
 export function bytes(value: number): string {
   const units = ['B', 'K', 'M', 'G', 'T'];

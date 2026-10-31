@@ -5,7 +5,7 @@
   import ActivityChips from './lib/ActivityChips.svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
-  import ChatTitle from './lib/ChatTitle.svelte';
+  import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import ConnectLine from './lib/ConnectLine.svelte';
   import { ago, SOURCE_TITLE, statusText, workerTitle } from './lib/format.ts';
   import StatusDot from './lib/StatusDot.svelte';

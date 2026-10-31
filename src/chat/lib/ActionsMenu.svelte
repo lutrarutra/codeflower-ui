@@ -71,15 +71,15 @@
 <div class="relative shrink-0" bind:this={root} onkeydown={keydown} role="presentation">
   <button
     type="button"
-    class="chip"
+    class="grid size-7 place-items-center rounded-lg text-muted hover:bg-sunken hover:text-ink disabled:opacity-50 aria-expanded:bg-sunken aria-expanded:text-ink"
     aria-haspopup="menu"
     aria-expanded={open}
+    aria-label="Tools"
+    title="Tools: actions for this chat"
     disabled={!live}
     onclick={toggle}
   >
     <span class="codicon codicon-tools"></span>
-    Tools
-    <span class="codicon codicon-chevron-down text-[11px]! opacity-60"></span>
   </button>
 
   {#if open}

@@ -4,7 +4,7 @@
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
-  import ChatTitle from './lib/ChatTitle.svelte';
+  import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import { ago } from './lib/format.ts';
   import { FILES } from './lib/previews.svelte.ts';
   import { chatTab, endDrag, startDrag } from './lib/workbench.svelte.ts';

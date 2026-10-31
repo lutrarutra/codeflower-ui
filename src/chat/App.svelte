@@ -19,6 +19,7 @@
   import QuestionCard from './lib/QuestionCard.svelte';
   import SettingsBar from './lib/SettingsBar.svelte';
   import Transcript from './lib/Transcript.svelte';
+  import ChatTitle from './lib/ChatTitle.svelte';
   import Tulip from './lib/Tulip.svelte';
   import UsageMeter from './lib/UsageMeter.svelte';
 
@@ -202,24 +203,21 @@
 </script>
 
 <main class="flex h-full flex-col">
-  <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line bg-card/60 px-4 py-2.5">
-    <Tulip size={30} />
-    <div class="min-w-0 flex-1">
-      <h1 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">
-        {chat.title || 'New session'}
-      </h1>
-      <div class="flex items-center gap-2 text-[0.8em] text-muted">
-        {#if agentLabel}
-          <span
-            class="inline-flex items-center gap-1.5 rounded-full border-[1.5px] border-line bg-card px-2 py-px font-semibold text-ink"
-          >
-            <span class="size-2 rounded-full bg-violet" style:background-color={chat.agent?.color}></span>
-            {agentLabel}
-          </span>
-        {/if}
-        {#if location}<span class="truncate font-mono">{location}</span>{/if}
-      </div>
-    </div>
+  <!-- One line: the chat, its agent, the tools and the status; a narrow chat keeps only the status dot. -->
+  <header class="@container flex items-center gap-2 border-b-[1.5px] border-soft-line bg-card/60 px-3 py-1.5">
+    <Tulip size={20} />
+    <h1 class="m-0 flex min-w-0 flex-1 font-display text-[1rem] leading-tight font-medium" title={chat.title || 'New session'}>
+      <ChatTitle title={chat.title} fallback="New session" />
+    </h1>
+    {#if agentLabel}
+      <span
+        class="inline-flex shrink-0 items-center gap-1.5 rounded-full border-[1.5px] border-line bg-card px-2 py-px text-[0.8em] font-semibold"
+        title={location ? `${agentLabel} on ${location}` : agentLabel}
+      >
+        <span class="size-2 rounded-full bg-violet" style:background-color={chat.agent?.color}></span>
+        <span class="hidden @xs:inline">{agentLabel}</span>
+      </span>
+    {/if}
     {#if chat.actions?.length}
       <ActionsMenu
         actions={chat.actions}
@@ -229,11 +227,13 @@
       />
     {/if}
     <span
-      class="inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[0.8em] font-semibold {statusLook[status][1]}"
+      class="inline-flex shrink-0 items-center gap-1.5 text-[0.8em] font-semibold {statusLook[status][1]}"
       title={statusLook[status][2]}
+      role="status"
+      aria-label={statusLook[status][3]}
     >
       <span class="size-2 rounded-full {statusLook[status][0]} {status === 'working' ? 'animate-pulse' : ''}"></span>
-      {statusLook[status][3]}
+      <span class="hidden @md:inline">{statusLook[status][3]}</span>
     </span>
   </header>
 

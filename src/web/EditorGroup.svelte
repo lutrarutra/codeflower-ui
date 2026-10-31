@@ -5,7 +5,7 @@
   // strip it goes where it was dropped.
   import type { Grid } from './lib/grid.ts';
   import type { Group, Side } from './lib/layout.svelte.ts';
-  import ChatTitle from './lib/ChatTitle.svelte';
+  import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import { endDrag, startDrag } from './lib/workbench.svelte.ts';
 
   let { group, grid }: { group: Group; grid: Grid } = $props();
