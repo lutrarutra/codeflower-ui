@@ -130,9 +130,7 @@
     {:else if step.kind === 'working'}
       <p class="m-0 text-muted" role="status"><span class="spinner"></span> {step.text}</p>
     {:else if step.kind === 'terminal' && signIn.worker}
-      <p class="m-0 text-muted">
-        {step.method.name}: follow the steps in the terminal. A link it prints opens in a new tab when you click it.
-      </p>
+      <p class="m-0 text-muted">{step.method.name}: the sign-in runs inside the sandbox.</p>
       <!-- xterm.js loads only for a terminal sign-in. -->
       {#await import('./SignInTerminal.svelte')}
         <p class="m-0 text-muted"><span class="spinner"></span> Opening the terminal…</p>

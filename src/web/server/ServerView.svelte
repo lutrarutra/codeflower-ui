@@ -1,5 +1,6 @@
 <script lang="ts">
   // Starting sandboxes on this computer, and the ones that run here.
+  import Skeleton from '../../chat/lib/Skeleton.svelte';
   import { app } from '../lib/app.svelte.ts';
   import EngineCard from './EngineCard.svelte';
   import ResourcesCard from './ResourcesCard.svelte';
@@ -24,7 +25,9 @@
     </p>
   </header>
 
-  {#if here.length}
+  {#if !app.listed}
+    <div class="card p-4" role="status" aria-label="Loading the sandboxes"><Skeleton lines={['35%', '55%']} /></div>
+  {:else if here.length}
     <section class="flex flex-col gap-3" aria-label="Sandboxes on this computer">
       {#each here as worker (worker.id)}
         <SandboxCard {worker} />

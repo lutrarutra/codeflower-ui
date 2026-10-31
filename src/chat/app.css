@@ -5,20 +5,23 @@
 @import '@fontsource-variable/dm-sans/wght.css';
 @import '@vscode/codicons/dist/codicon.css';
 
-/* The code flower look (codeflower.dev): paper and ink, bold outlines with
-   hard offset shadows, pill buttons, and a playful palette. Light themes get
-   the paper, dark themes a deep ink, and high-contrast themes fall back to
-   the theme's own colors without decoration. The host sets `cf-dark` on an
-   ancestor (the body) for dark themes. Outside VS Code its --vscode-*
-   variables are missing, so each use has a fallback. */
+/* The code flower look (codeflower.dev): paper and ink, rounded cards, pill
+   buttons, and a playful palette. Borders are thin and quiet; depth comes from
+   the surfaces' shades (paper, card, code) and soft shadows, and color from
+   fills. Light themes get the paper, dark themes a deep ink, and high-contrast
+   themes fall back to the theme's own colors without decoration. The host sets
+   `cf-dark` on an ancestor (the body) for dark themes. Outside VS Code its
+   --vscode-* variables are missing, so each use has a fallback. */
 :root {
   --cf-paper: #f6efd9;
+  /* Below the paper: the frame around the work (sidebar, tab strips). */
+  --cf-sunken: #ede3c6;
   --cf-card: #fffaf0;
   --cf-ink: #1d1d1f;
   --cf-muted: #6b5d45;
-  --cf-line: #1d1d1f;
-  --cf-soft-line: #e3d8bd;
-  --cf-shadow: #1d1d1f;
+  --cf-line: #d5c7a2;
+  --cf-soft-line: #e6dcc2;
+  --cf-shadow: transparent;
   --cf-code: #efe5c9;
 
   --cf-indigo: #4f46e5;
@@ -38,15 +41,17 @@
   --cf-cyan: #0f8fb0;
   --cf-on-accent: #ffffff;
 
-  --cf-border-width: 2px;
-  --cf-lift: 3px;
+  --cf-border-width: 1px;
+  --cf-lift: 0px;
+  /* Soft shadows: a card above the page, and a button under the pointer. */
+  --cf-elevation: 0 1px 2px rgb(77 61 31 / 0.05), 0 4px 16px rgb(77 61 31 / 0.06);
+  --cf-hover: 0 2px 8px rgb(77 61 31 / 0.12);
 }
 
-/* Dark themes are not the paper look inverted: ink outlines and hard
-   shadows turn into heavy cream borders on a dark page. Here surfaces are
-   warm charcoal, borders thin and quiet, and color comes from fills. */
+/* Dark themes are not the paper look inverted: surfaces are warm charcoal. */
 .cf-dark {
   --cf-paper: #1c1b21;
+  --cf-sunken: #16151a;
   --cf-card: #25242c;
   --cf-ink: #ece6d6;
   --cf-muted: #a19a8b;
@@ -73,11 +78,14 @@
 
   --cf-border-width: 1px;
   --cf-lift: 0px;
+  --cf-elevation: 0 6px 24px rgb(0 0 0 / 0.25);
+  --cf-hover: 0 2px 10px rgb(0 0 0 / 0.35);
 }
 
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
   --cf-paper: var(--vscode-editor-background);
+  --cf-sunken: var(--vscode-editor-background);
   --cf-card: var(--vscode-editor-background);
   --cf-ink: var(--vscode-foreground);
   --cf-muted: var(--vscode-descriptionForeground);
@@ -94,6 +102,8 @@ body.vscode-high-contrast-light {
   --cf-violet-soft: var(--vscode-editor-background);
   --cf-on-accent: var(--vscode-button-foreground);
   --cf-lift: 0px;
+  --cf-elevation: none;
+  --cf-hover: none;
 }
 
 @theme inline {
@@ -101,6 +111,7 @@ body.vscode-high-contrast-light {
   --font-display: 'Fredoka Variable', 'Trebuchet MS', sans-serif;
   --font-mono: var(--vscode-editor-font-family, ui-monospace), ui-monospace, monospace;
   --color-paper: var(--cf-paper);
+  --color-sunken: var(--cf-sunken);
   --color-card: var(--cf-card);
   --color-ink: var(--cf-ink);
   --color-muted: var(--cf-muted);
@@ -179,12 +190,12 @@ textarea:focus-visible {
   background: var(--cf-muted);
 }
 
-/* An outlined surface with the brand's hard shadow. */
+/* A surface above the page. */
 .card {
   background: var(--cf-card);
-  border: var(--cf-border-width) solid var(--cf-line);
+  border: var(--cf-border-width) solid var(--cf-soft-line);
   border-radius: 16px;
-  box-shadow: var(--cf-lift) var(--cf-lift) 0 var(--cf-shadow);
+  box-shadow: var(--cf-elevation);
 }
 
 .eyebrow {
@@ -206,20 +217,21 @@ textarea:focus-visible {
   cursor: pointer;
   background: var(--cf-card);
   color: var(--cf-ink);
-  box-shadow: 2px 2px 0 var(--cf-shadow);
   transition:
-    transform 80ms ease,
-    box-shadow 80ms ease;
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    background-color 120ms ease;
 }
 
+/* A little hop under the pointer, a press on click. */
 .pill:hover:not(:disabled) {
-  transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0 var(--cf-shadow);
+  transform: translateY(-1px);
+  box-shadow: var(--cf-hover);
 }
 
 .pill:active:not(:disabled) {
-  transform: translate(2px, 2px);
-  box-shadow: 0 0 0 var(--cf-shadow);
+  transform: translateY(1px) scale(0.98);
+  box-shadow: none;
 }
 
 .pill:disabled {
@@ -230,16 +242,19 @@ textarea:focus-visible {
 
 .pill-primary {
   background: var(--cf-indigo);
+  border-color: var(--cf-indigo);
   color: var(--cf-on-accent);
 }
 
 .pill-teal {
   background: var(--cf-teal);
+  border-color: var(--cf-teal);
   color: var(--cf-on-accent);
 }
 
 .pill-pink {
   background: var(--cf-pink);
+  border-color: var(--cf-pink);
   color: var(--cf-on-accent);
 }
 
@@ -278,7 +293,7 @@ textarea:focus-visible {
 
 .chip[aria-expanded='true'] {
   border-color: var(--cf-line);
-  box-shadow: 2px 2px 0 var(--cf-shadow);
+  background: var(--cf-code);
 }
 
 .link {
@@ -295,9 +310,6 @@ textarea:focus-visible {
   text-decoration: underline;
 }
 
-.cf-dark .card {
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
-}
 
 /* Filled buttons and the user's bubble carry their color without an outline. */
 .cf-dark .pill-primary,
@@ -486,4 +498,27 @@ textarea:focus-visible {
   max-width: 100%;
   height: auto;
   border-radius: 8px;
+}
+
+/* A placeholder for content on its way: a soft shape with a light sweeping across. */
+.skeleton {
+  background: linear-gradient(90deg, var(--cf-soft-line) 25%, var(--cf-code) 50%, var(--cf-soft-line) 75%);
+  background-size: 200% 100%;
+  border-radius: 8px;
+  animation: cf-skeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes cf-skeleton {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }

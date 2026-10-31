@@ -84,6 +84,21 @@ export function resets(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
+/** How long ago a time was: just now, 5 min ago, 3 h ago, 2 d ago. */
+export function ago(timeMs: number): string {
+  const seconds = Math.max(0, (Date.now() - timeMs) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+  return `${Math.floor(seconds / 86400)} d ago`;
+}
+
+/** A chat title that starts with a slash command (/goal …): the command and the rest. */
+export function commandTitle(title: string): [string, string] | null {
+  const match = /^(\/[\w:.-]+)(.*)$/s.exec(title.trim());
+  return match ? [match[1]!, match[2]!.trim()] : null;
+}
+
 /** Bytes as htop writes them: 512M, 15.8G. */
 export function bytes(value: number): string {
   const units = ['B', 'K', 'M', 'G', 'T'];

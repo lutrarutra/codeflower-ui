@@ -49,6 +49,8 @@ export interface SystemInfo {
   fix?: Step[];
   guide: { system: string; options: { title: string; note?: string; steps: Step[] }[] };
   image?: { name: string; ready: boolean; download?: boolean; error?: string; help?: Step[] };
+  /** The sandbox release the app runs when no version is chosen (missing from older apps, which run `latest`). */
+  imageTag?: string;
   agents: AgentChoice[];
   settings: Settings;
   configSkills: string[];
@@ -76,6 +78,10 @@ export interface WorkerActivity {
   agent: string;
   agentLabel: string;
   connected: boolean;
+  /** How many windows are connected; missing from older sandboxes. */
+  clients?: number;
+  /** Windows attach side by side instead of taking the sandbox over; missing from older sandboxes. */
+  multiClient?: boolean;
   working: number;
   waiting: number;
   chats: ChatActivity[];

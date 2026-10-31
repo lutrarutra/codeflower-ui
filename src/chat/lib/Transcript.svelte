@@ -4,6 +4,7 @@
   import { chatHost, type ChatHost } from './host.ts';
   import { buildItems } from './transcript.ts';
   import { sandboxFiles } from './sandboxFiles.svelte.ts';
+  import Skeleton from './Skeleton.svelte';
   import Tulip from './Tulip.svelte';
 
   const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
@@ -15,10 +16,11 @@
 
   let {
     entries,
+    loading = false,
     busy,
     live,
     suggest
-  }: { entries: TranscriptEntry[]; busy: boolean; live: boolean; suggest: (text: string) => void } = $props();
+  }: { entries: TranscriptEntry[]; loading?: boolean; busy: boolean; live: boolean; suggest: (text: string) => void } = $props();
   const items = $derived(buildItems(entries));
   let container: HTMLElement | undefined = $state();
 
@@ -70,13 +72,13 @@
   {#each items as item, index (item.id)}
     {#if item.kind === 'user'}
       <div
-        class="bubble-user max-w-[85%] self-end rounded-[18px] rounded-br-md border-2 border-line bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-[3px_3px_0_var(--cf-shadow)]"
+        class="bubble-user max-w-[85%] self-end rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
       >
         {item.text}
       </div>
     {:else if item.kind === 'action'}
       <details
-        class="bubble-user group max-w-[85%] self-end rounded-[18px] rounded-br-md border-2 border-line bg-indigo px-3.5 py-2 text-on-accent shadow-[3px_3px_0_var(--cf-shadow)]"
+        class="bubble-user group max-w-[85%] self-end rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
       >
         <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
           <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
@@ -263,20 +265,29 @@
       </div>
     {/if}
   {:else}
-    <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-8 text-center">
-      <Tulip size={72} sway />
-      <h2 class="m-0 font-display text-2xl font-semibold ">What shall we grow today?</h2>
-      <p class="m-0 text-muted">
-        Ask the agent about your data. It analyses it in its own sandbox, shows you figures and writes up what it finds.
-      </p>
-      {#if live}
-        <div class="flex flex-wrap justify-center gap-2 pt-2">
-          {#each suggestions as suggestion (suggestion)}
-            <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
-          {/each}
-        </div>
-      {/if}
-    </div>
+    {#if loading}
+      <div class="flex flex-col gap-4" role="status" aria-label="Loading the chat">
+        <div class="skeleton h-9 w-[55%] self-end rounded-[18px]!"></div>
+        <Skeleton lines={['92%', '84%', '60%']} />
+        <div class="skeleton h-8 w-full rounded-xl!"></div>
+        <Skeleton lines={['88%', '45%']} />
+      </div>
+    {:else}
+      <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-8 text-center">
+        <Tulip size={72} sway />
+        <h2 class="m-0 font-display text-2xl font-semibold ">What shall we grow today?</h2>
+        <p class="m-0 text-muted">
+          Ask the agent about your data. It analyses it in its own sandbox, shows you figures and writes up what it finds.
+        </p>
+        {#if live}
+          <div class="flex flex-wrap justify-center gap-2 pt-2">
+            {#each suggestions as suggestion (suggestion)}
+              <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
   {/each}
 
   {#if busy}

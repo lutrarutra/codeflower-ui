@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Skeleton from '../chat/lib/Skeleton.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import SessionList from './SessionList.svelte';
@@ -25,7 +26,7 @@
   }
 </script>
 
-<nav class="flex h-full flex-col border-r-[1.5px] border-soft-line bg-paper" aria-label="Sandboxes">
+<nav class="flex h-full flex-col border-r-[1.5px] border-soft-line bg-sunken" aria-label="Sandboxes">
   <header class="flex items-center gap-2.5 px-4 pt-4 pb-3">
     <Tulip size={30} />
     <div class="min-w-0">
@@ -50,13 +51,14 @@
   </div>
 
   <div class="eyebrow px-4 pb-1 text-muted">Sandboxes</div>
-  <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-0">
+  <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
+  <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-1">
     {#each app.workers as worker (worker.id)}
       {@const [name, where] = workerTitle(worker)}
       {@const selected = app.route.view === 'chat' && app.route.worker === worker.id}
       <li>
         <button
-          class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1.5px_var(--cf-line)]' : 'hover:bg-card'}"
+          class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'hover:bg-card'}"
           aria-current={selected ? 'page' : undefined}
           onclick={() => choose(worker.id)}
         >
@@ -73,7 +75,11 @@
         {/if}
       </li>
     {:else}
-      {#if app.listed}
+      {#if !app.listed}
+        <li class="flex flex-col gap-2 rounded-xl px-2.5 py-2.5" role="status" aria-label="Loading the sandboxes">
+          <Skeleton lines={['60%', '40%']} height="0.75rem" />
+        </li>
+      {:else}
         <li class="px-2.5 py-2 text-[0.9em] text-muted">
           No sandboxes yet. {connectOnly ? 'Add one running elsewhere.' : 'Start one under Server, or add one running elsewhere.'}
         </li>

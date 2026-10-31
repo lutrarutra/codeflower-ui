@@ -164,9 +164,9 @@
       </label>
       <label class="flex flex-col gap-1"
         >Sandbox version
-        <input class="field" bind:value={imageTag} placeholder="latest" onchange={reload} />
+        <input class="field" bind:value={imageTag} placeholder={system.imageTag || 'latest'} onchange={reload} />
         <span class="text-[0.85em] text-muted"
-          >A release of the published image (<code>0.2.1</code>, or <code>0.2</code> for its newest fix) or a commit's build (<code>sha-abc1234</code>), downloaded
+          >Empty runs the release this app is made for; or <code>latest</code>, another release (<code>0.2.1</code>, or <code>0.2</code> for its newest fix) or a commit's build (<code>sha-abc1234</code>), downloaded
           on first use.</span
         >
       </label>

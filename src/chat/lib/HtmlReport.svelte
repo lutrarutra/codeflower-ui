@@ -11,13 +11,21 @@
     if (!host) return;
     const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
     const document = new DOMParser().parseFromString(html, 'text/html');
-    // The report's page-level rules apply to its container here.
+    // The report's page-level rules apply to its container here, and its width
+    // queries to the container's width: the window can be much wider (a tab
+    // beside the chat in the app).
     const styles = [...document.querySelectorAll('style')]
-      .map((style) => `<style>${(style.textContent ?? '').replace(/(^|[\s,}])(html|body)(?=[\s,{.:#[])/g, '$1.report')}</style>`)
+      .map(
+        (style) =>
+          `<style>${(style.textContent ?? '')
+            .replace(/(^|[\s,}])(html|body)(?=[\s,{.:#[])/g, '$1.report')
+            .replace(/@media\s*(\(\s*(?:min|max)-width\s*:[^)]*\)(?:\s*and\s*\(\s*(?:min|max)-width\s*:[^)]*\))*)\s*\{/g, '@container $1 {')}</style>`
+      )
       .join('');
     // Reports are written for paper: dark text on white, whatever the editor theme.
-    root.innerHTML = `<style>:host{all:initial;display:block;color:#1d1d1f;font-family:system-ui,sans-serif;line-height:1.5}
-      .report{padding:24px 28px;overflow-wrap:anywhere} img,svg,table{max-width:100%;height:auto}</style>${styles}<div class="report">${document.body.innerHTML}</div>`;
+    // all:initial would make the host visible in a hidden tab: it keeps the tab's visibility.
+    root.innerHTML = `<style>:host{all:initial;display:block;visibility:inherit;color:#1d1d1f;font-family:system-ui,sans-serif;line-height:1.5}
+      .report{container-type:inline-size;padding:24px 28px;overflow-wrap:anywhere} img,svg,table{max-width:100%;height:auto}</style>${styles}<div class="report">${document.body.innerHTML}</div>`;
     const parts = [...root.querySelectorAll<HTMLElement>('[data-cf-part]')];
     for (const part of parts) {
       const before = hashes.get(part.dataset.cfPart ?? '');

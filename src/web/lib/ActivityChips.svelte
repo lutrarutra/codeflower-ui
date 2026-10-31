@@ -31,6 +31,8 @@
     {/if}
     {#if !compact && !activity.connected}
       <span class="chip cursor-default text-muted">No window connected</span>
+    {:else if !compact && (activity.clients ?? 0) > 1}
+      <span class="chip cursor-default text-muted">{plural(activity.clients ?? 0, 'window')} connected</span>
     {/if}
   </span>
 {/if}
