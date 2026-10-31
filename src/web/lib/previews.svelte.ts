@@ -1,7 +1,8 @@
-// Tabs beside the chat that show files from a sandbox: the figures, reports and
-// tables the agent shows with `codeflower-show`, or paths clicked in the chat.
-// Each tab follows its file and sends the user's feedback to the chat it came
-// from; an HTML report can also open with its scripts running.
+// Tabs that show files from a sandbox: the figures, reports and tables the
+// agent shows with `codeflower-show`, or paths clicked in the chat. Each tab
+// follows its file and sends the user's feedback to the chat it came from; an
+// HTML report can also open with its scripts running. Where the tabs are is the
+// sandbox's workbench's business (see workbench.svelte.ts).
 import { untrack } from 'svelte';
 import type { PreviewHost } from '../../chat/lib/host.ts';
 import { decodeText } from '../../chat/lib/files.ts';
@@ -24,8 +25,12 @@ function describe(error: unknown): string {
 export interface PreviewOwner {
   /** The sandbox's agent, if the page reaches it. */
   agent(workerId: string): WebWorker | undefined;
-  /** Whether the sandbox's previews are in front. */
-  showing(workerId: string): boolean;
+  /** The tab is in front of its group, on the page in front. */
+  visible(workerId: string, tab: string): boolean;
+  /** Opens a file's tab, or brings it to the front. */
+  open(workerId: string, tab: string): void;
+  /** Takes the tab away, e.g. an interactive report whose preview closed. */
+  remove(workerId: string, tab: string): void;
   showChat(workerId: string, key: string): void;
 }
 
@@ -242,12 +247,6 @@ function download(name: string, mimeType: string, base64: string): void {
 
 export class Previews {
   items = $state<Preview[]>([]);
-  /** The tab in front, by sandbox: a preview's id, or that id + INTERACTIVE. */
-  active = $state<Record<string, string>>({});
-  /** Sandboxes whose previews the user put away, to see the chat. */
-  hidden = $state<Record<string, boolean>>({});
-  /** Sandboxes whose folders are open in a tab. */
-  browsing = $state<Record<string, boolean>>({});
   readonly page: PreviewOwner;
 
   constructor(page: PreviewOwner) {
@@ -263,17 +262,11 @@ export class Previews {
   }
 
   inFront(preview: Preview): boolean {
-    const active = this.active[preview.workerId];
-    return (
-      this.page.showing(preview.workerId) &&
-      !this.hidden[preview.workerId] &&
-      (active === preview.id || active === preview.id + INTERACTIVE)
-    );
+    return this.page.visible(preview.workerId, preview.id) || this.page.visible(preview.workerId, preview.id + INTERACTIVE);
   }
 
   activate(workerId: string, tab: string): void {
-    this.active[workerId] = tab;
-    this.hidden[workerId] = false;
+    this.page.open(workerId, tab);
   }
 
   /** The agent ran `codeflower-show`. */
@@ -323,46 +316,27 @@ export class Previews {
     this.activate(preview.workerId, preview.id + INTERACTIVE);
   }
 
-  /** Opens the sandbox's folders in the first tab. */
+  /** Opens the sandbox's folders in a tab. */
   browse(workerId: string): void {
-    this.browsing[workerId] = true;
     this.activate(workerId, FILES);
   }
 
-  /** Closes a tab; closing a preview closes its interactive tab too. */
-  close(workerId: string, tab: string): void {
+  /** The user closed a file's tab; closing a preview closes its interactive tab too. */
+  closed(workerId: string, tab: string): void {
     const preview = this.find(workerId, tab);
-    if (!preview && tab !== FILES) return;
-    const tabs = this.tabs(workerId);
-    const index = tabs.indexOf(tab);
-    if (!preview) {
-      delete this.browsing[workerId];
-    } else if (tab.endsWith(INTERACTIVE)) {
+    if (!preview) return;
+    if (tab.endsWith(INTERACTIVE)) {
       preview.interactive = false;
-    } else {
-      preview.close();
-      this.items = this.items.filter((item) => item !== preview);
+      return;
     }
-    if (this.active[workerId] === tab || !this.tabs(workerId).includes(this.active[workerId] ?? '')) {
-      const left = this.tabs(workerId);
-      if (left.length) this.active[workerId] = left[Math.min(Math.max(index - 1, 0), left.length - 1)]!;
-      else delete this.active[workerId];
-    }
+    preview.close();
+    this.items = this.items.filter((item) => item !== preview);
+    if (preview.interactive) this.page.remove(workerId, preview.id + INTERACTIVE);
   }
 
   /** The sandbox is gone: its previews go too. */
   closeWorker(workerId: string): void {
     for (const preview of this.of(workerId)) preview.close();
     this.items = this.items.filter((preview) => preview.workerId !== workerId);
-    delete this.active[workerId];
-    delete this.browsing[workerId];
-  }
-
-  /** The sandbox's tabs in order: its folders, then each preview and its interactive tab. */
-  tabs(workerId: string): string[] {
-    return [
-      ...(this.browsing[workerId] ? [FILES] : []),
-      ...this.of(workerId).flatMap((preview) => (preview.interactive ? [preview.id, preview.id + INTERACTIVE] : [preview.id]))
-    ];
   }
 }

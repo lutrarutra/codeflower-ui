@@ -5,13 +5,13 @@
   import { fileKind, formatSize, kindIcon } from '../chat/lib/files.ts';
   import { WORKSPACE, type DirectoryEntry, type Mount } from '../client/workerConnection.ts';
   import { app } from './lib/app.svelte.ts';
-  import { short } from './lib/format.ts';
+  import { ago, short } from './lib/format.ts';
 
   let { workerId }: { workerId: string } = $props();
   const worker = $derived(app.worker(workerId));
   const agent = $derived(app.agent(workerId));
-  // Connecting takes the sandbox over from a window that has it: ask first.
-  const elsewhere = $derived(!!worker?.activity?.connected && worker.relays === 0);
+  // With an older sandbox, connecting takes it over from a window that has it: ask first.
+  const elsewhere = $derived(!!worker?.activity?.connected && !worker.activity.multiClient && worker.relays === 0);
 
   /** The app mounts each of the user's folders in a subfolder of one of these. */
   const GROUPS = [
@@ -60,14 +60,6 @@
   function show(path: string): void {
     const chatKey = app.route.worker === workerId && app.route.session ? app.route.session : agent.chatFor()?.key;
     void app.previews.openPath(agent, path, chatKey);
-  }
-
-  function ago(mtimeMs: number): string {
-    const seconds = Math.max(0, (Date.now() - mtimeMs) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-    return `${Math.floor(seconds / 86400)} d ago`;
   }
 
   const ROW = 'flex w-full items-center gap-1.5 rounded-md py-0.5 pr-2 text-left hover:bg-soft-line/70';

@@ -4,6 +4,7 @@ import type { WrapUpNotice } from '../../client/workerConnection.ts';
 import { api, type QuitPlan, type SystemInfo, type Worker } from './api.ts';
 import { Previews } from './previews.svelte.ts';
 import { SignIn } from './signIn.svelte.ts';
+import { Workbench, chatKeyOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'server';
@@ -12,7 +13,7 @@ export interface Route {
   view: View;
   /** The sandbox chosen in the sidebar. */
   worker?: string;
-  /** The chat open in it. */
+  /** The chat the user looks at in it. */
   session?: string;
 }
 
@@ -64,30 +65,60 @@ class AppState {
   /** Signing a sandbox's agent in, and the links agents ask the user to open. */
   readonly signIn = new SignIn();
 
-  /** Files shown beside the chats, by sandbox. */
+  /** Files shown from the sandboxes, in tabs of their workbenches. */
   readonly previews = new Previews({
     agent: (id) => this.agents.get(id),
-    showing: (id) => this.route.view === 'chat' && this.route.worker === id,
-    showChat: (worker, session) => {
-      this.go({ view: 'chat', worker, session });
-      // In a narrow window the files cover the chat.
-      if (!matchMedia('(min-width: 1100px)').matches) this.previews.hidden[worker] = true;
-    }
+    visible: (id, tab) => this.route.view === 'chat' && this.route.worker === id && !!this.workbenches.get(id)?.layout.visible(tab),
+    open: (id, tab) => this.workbench(id).openFile(tab),
+    remove: (id, tab) => this.workbenches.get(id)?.remove(tab),
+    showChat: (worker, session) => this.go({ view: 'chat', worker, session })
   });
 
+  /** Each sandbox's tabs in their grid; made on first use. */
+  private readonly workbenches = new Map<string, Workbench>();
   private quitting = false;
 
   constructor() {
     window.addEventListener('hashchange', () => {
       const route = parseHash(location.hash);
-      if (route) this.route = route;
+      if (route) this.go(route);
     });
   }
 
+  /** Goes where the user asked: a chat opens in its sandbox's workbench, a sandbox shows its own. */
   go(route: Route): void {
+    const again = route.view === 'chat' && route.worker !== undefined && route.worker === this.route.worker && this.route.view === 'chat';
     this.route = route;
     const hash = routeHash(route);
     if (location.hash !== hash) history.pushState(null, '', hash);
+    if (route.view !== 'chat' || !route.worker) return;
+    const workbench = this.workbench(route.worker);
+    if (route.session) workbench.openChat(route.session);
+    // Choosing the sandbox it shows already: its overview.
+    else if (again) workbench.openOverview();
+    else this.follow(route.worker, workbench.focusedChat());
+  }
+
+  /** The sandbox's tabs; a new one opens the chat the address names. */
+  workbench(id: string): Workbench {
+    let workbench = this.workbenches.get(id);
+    if (!workbench) {
+      workbench = new Workbench(id);
+      workbench.onClose = (tab) => {
+        if (!chatKeyOf(tab)) this.previews.closed(id, tab);
+      };
+      workbench.onChatFocus = (key) => this.follow(id, key);
+      this.workbenches.set(id, workbench);
+      if (this.route.worker === id && this.route.session) workbench.openChat(this.route.session);
+    }
+    return workbench;
+  }
+
+  /** The address follows the chat the user looks at, without a step in the history. */
+  private follow(worker: string, session: string | undefined): void {
+    if (this.route.view !== 'chat' || this.route.worker !== worker || this.route.session === session) return;
+    this.route = { view: 'chat', worker, ...(session ? { session } : {}) };
+    history.replaceState(null, '', routeHash(this.route));
   }
 
   worker(id: string | undefined): Worker | undefined {
@@ -129,6 +160,7 @@ class AppState {
           agent.close();
           this.agents.delete(id);
           this.previews.closeWorker(id);
+          this.workbenches.delete(id);
           this.signIn.closeWorker(id);
         }
       }
