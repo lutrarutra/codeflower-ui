@@ -112,7 +112,7 @@
     const interactive = tab.endsWith(INTERACTIVE);
     return {
       icon: interactive ? 'play' : preview ? kindIcon[fileKind(preview.file.mimeType)] : 'file',
-      label: `${preview?.title ?? tab}${interactive ? ' (interactive)' : ''}`,
+      label: `${preview?.title ?? tab}${interactive ? ' (interactive)' : preview?.dirty ? ' ●' : ''}`,
       title: preview?.file.path ?? tab
     };
   }

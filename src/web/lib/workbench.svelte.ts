@@ -37,6 +37,8 @@ export function endDrag(): void {
 export class Workbench {
   readonly workerId: string;
   readonly layout: Layout;
+  /** Asked before the user closes a tab, e.g. one with edits that are not saved. */
+  mayClose: (tab: string) => boolean = () => true;
   /** Tabs the user closed: what they show is let go, e.g. a preview. */
   onClose: (tab: string) => void = () => {};
   /** The chat in front of the focused group changed, e.g. for the page's address. */
@@ -108,6 +110,7 @@ export class Workbench {
 
   /** The user closed a tab. */
   close(tab: string): void {
+    if (!this.mayClose(tab)) return;
     this.layout.close(tab);
     this.onClose(tab);
     this.focusChanged();

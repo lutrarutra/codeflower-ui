@@ -6,6 +6,7 @@
 import { untrack } from 'svelte';
 import type { PreviewHost } from '../../chat/lib/host.ts';
 import { decodeText } from '../../chat/lib/files.ts';
+import { isFileConflict } from '../../client/codeflower.ts';
 import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
 import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
@@ -44,6 +45,8 @@ export class Preview {
   error = $state<string | null>(null);
   /** The report's tab with its scripts running is open. */
   interactive = $state(false);
+  /** The user's edits in the tab are not saved. */
+  dirty = $state(false);
   private message = $state<string | null>(null);
   /** The agent's note describes the file as shown; it goes once the file changes. */
   private messageFor = $state<number | undefined>();
@@ -225,6 +228,22 @@ export class Preview {
       case 'save':
         if (this.data) download(basename(this.file.path), this.file.mimeType, this.data);
         break;
+      case 'write':
+        try {
+          if (!agent?.connection) throw new Error('The sandbox is not connected');
+          const file = await agent.connection.writeFile(this.file.path, message.text, message.baseMtimeMs);
+          // The saved text is the file now: no need to read it back.
+          this.file = file;
+          this.data = encodeText(message.text);
+          this.error = null;
+          this.post({ type: 'written', file });
+        } catch (error) {
+          this.post({ type: 'writeFailed', error: describe(error), conflict: isFileConflict(error) });
+        }
+        break;
+      case 'dirty':
+        this.dirty = message.dirty;
+        break;
       case 'showChat':
         if (this.chatKey) this.owner.page.showChat(this.workerId, this.chatKey);
         break;
@@ -233,6 +252,12 @@ export class Preview {
         break;
     }
   }
+}
+
+function encodeText(text: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 /** Saves a copy through the browser's downloads. */
@@ -252,6 +277,16 @@ export class Previews {
 
   constructor(page: PreviewOwner) {
     this.page = page;
+    // Leaving the page loses edits that are not saved: the browser asks first.
+    addEventListener('beforeunload', (event) => {
+      if (this.items.some((preview) => preview.dirty)) event.preventDefault();
+    });
+  }
+
+  /** Closing the tab loses the user's edits: asks first. */
+  mayClose(workerId: string, tab: string): boolean {
+    const preview = tab.endsWith(INTERACTIVE) ? undefined : this.find(workerId, tab);
+    return !preview?.dirty || confirm(`${preview.title} has edits that are not saved. Close it anyway?`);
   }
 
   of(workerId: string): Preview[] {

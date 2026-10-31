@@ -240,6 +240,10 @@ export class WorkerConnection {
     return this.bridge.statFile(path);
   }
 
+  writeFile(path: string, text: string, expectedMtimeMs: number): Promise<SandboxFile> {
+    return this.bridge.writeFile(path, text, expectedMtimeMs);
+  }
+
   saveReportComments(path: string, comments: string): Promise<void> {
     return this.bridge.saveReportComments(path, comments);
   }

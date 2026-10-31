@@ -138,6 +138,7 @@ class AppState {
     let workbench = this.workbenches.get(id);
     if (!workbench) {
       workbench = new Workbench(id);
+      workbench.mayClose = (tab) => !!chatKeyOf(tab) || this.previews.mayClose(id, tab);
       workbench.onClose = (tab) => {
         if (!chatKeyOf(tab)) this.previews.closed(id, tab);
       };

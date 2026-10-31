@@ -1,6 +1,7 @@
 <script lang="ts">
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
+  import { highlightElement } from './editor/highlight.ts';
   import { PATH_IN_TEXT, isLocalHref, looksLikeFile } from './files.ts';
 
   // Agent output is untrusted: render markdown, then sanitize the HTML.
@@ -49,6 +50,16 @@
     for (const link of root.querySelectorAll('a[href]')) {
       const href = link.getAttribute('href') ?? '';
       if (isLocalHref(href)) (link as HTMLElement).dataset.file = decodeURI(href);
+    }
+  });
+
+  // Fenced code in the language it names (```python); others stay plain.
+  $effect(() => {
+    void html;
+    if (!root) return;
+    for (const code of root.querySelectorAll<HTMLElement>('pre > code[class*="language-"]')) {
+      const name = /\blanguage-(\S+)/.exec(code.className)?.[1];
+      if (name) void highlightElement(code, name);
     }
   });
 

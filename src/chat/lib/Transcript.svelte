@@ -1,11 +1,15 @@
 <script lang="ts">
   import type { TranscriptEntry } from '../../protocol/messages.ts';
+  import { highlighted } from './editor/highlight.ts';
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
   import { buildItems } from './transcript.ts';
   import { sandboxFiles } from './sandboxFiles.svelte.ts';
   import Skeleton from './Skeleton.svelte';
   import Tulip from './Tulip.svelte';
+
+  /** Tool output that is a unified diff, e.g. from `git diff`. */
+  const looksLikeDiff = (text: string) => /^@@ .* @@/m.test(text) && /^[+-]/m.test(text);
 
   const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 
@@ -133,11 +137,13 @@
         </summary>
         {#if item.description && item.toolKind === 'execute'}
           <pre
-            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap">{item.title}</pre>
+            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
+            use:highlighted={{ text: item.title, language: 'shell' }}></pre>
         {/if}
         {#each item.details as detail, index (index)}
           <pre
-            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap">{detail}</pre>
+            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
+            use:highlighted={{ text: detail, language: looksLikeDiff(detail) ? 'diff' : undefined }}></pre>
         {/each}
       </details>
       <!-- Figures the agent looked at, so the user sees them too. -->
@@ -193,7 +199,11 @@
       <div class="flex max-w-full flex-col overflow-hidden rounded-xl border-[1.5px] border-soft-line bg-code">
         <div class="flex items-center gap-2 px-3 py-1.5">
           <span class="font-mono font-bold text-teal">$</span>
-          <span class="min-w-0 flex-1 truncate font-mono text-[0.88em]" title={item.command}>{item.command}</span>
+          <span
+            class="min-w-0 flex-1 truncate font-mono text-[0.88em]"
+            title={item.command}
+            use:highlighted={{ text: item.command, language: 'shell' }}
+          ></span>
           {#if item.exitCode === null}
             <span class="codicon codicon-loading codicon-modifier-spin text-cyan"></span>
             <button class="link text-[0.85em]" onclick={() => send({ type: 'cancelShell', runId: item.runId })}>Stop</button>

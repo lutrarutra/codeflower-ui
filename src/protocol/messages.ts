@@ -257,6 +257,8 @@ export interface SandboxFile {
   size: number;
   mtimeMs: number;
   mimeType: string;
+  /** The user may save it (the workspace or an output folder); missing from older sandboxes. */
+  writable?: boolean;
 }
 
 /** What a preview tab shows: one file the agent (or the user) opened. */
@@ -280,7 +282,11 @@ export type PreviewHostMessage =
   | { type: 'asset'; path: string; dataUrl: string | null }
   | { type: 'feedbackSent'; queued: boolean }
   /** Text for the feedback box (from the interactive report), for the user to send. */
-  | { type: 'draft'; text: string };
+  | { type: 'draft'; text: string }
+  /** The user's edits were saved; `file` is the new version. */
+  | { type: 'written'; file: SandboxFile }
+  /** Not saved; `conflict` when the file changed in the sandbox since it was opened. */
+  | { type: 'writeFailed'; error: string; conflict: boolean };
 
 /** An element of an SVG figure the user selected to give feedback on. */
 export interface FeedbackElement {
@@ -325,4 +331,8 @@ export type PreviewWebviewMessage =
   | { type: 'asset'; path: string }
   | { type: 'openFile'; path: string }
   | { type: 'save' }
+  /** Save the user's edits into the sandbox, over the version with `baseMtimeMs`. */
+  | { type: 'write'; text: string; baseMtimeMs: number }
+  /** The editor has edits that are not saved: the host asks before closing the tab. */
+  | { type: 'dirty'; dirty: boolean }
   | { type: 'showChat' };

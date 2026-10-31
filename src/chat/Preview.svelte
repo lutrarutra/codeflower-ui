@@ -6,6 +6,8 @@
   import HtmlReport, { type ReportFigure } from './lib/HtmlReport.svelte';
   import Markdown from './lib/Markdown.svelte';
   import type { PreviewHost } from './lib/host.ts';
+  // Loaded with the first file shown as text: chats alone do not need the editor.
+  const loadEditor = () => import('./lib/editor/CodeEditor.svelte');
 
   let { host }: { host: PreviewHost } = $props();
   const sendPreview: PreviewHost['send'] = (message) => host.send(message);
@@ -46,21 +48,49 @@
     if (annotating && draft && !draft.notes.length && !draft.general.trim()) delete drafts[annotating];
     annotating = null;
   }
+  // The text in an editor: Markdown, HTML and tables show rendered unless the user asks for the source.
+  let source = $state(false);
+  let editor: { markSaved(text: string): void; reset(text: string): void; save(): void } | undefined = $state();
+  let dirty = $state(false);
+  /** The version of the file the edits are on; a save only goes over that one. */
+  let baseMtime: number | undefined;
+  /** Text sent to be saved, until the host says how it went. */
+  let saving = $state<string | null>(null);
+  let saveError = $state<string | null>(null);
+  /** The file changed in the sandbox while the user had edits. */
+  let changedOutside = $state(false);
+  let savedAt = $state<number | null>(null);
 
   function receive(message: PreviewHostMessage): void {
     switch (message.type) {
       case 'preview': {
         const previous = preview;
         preview = message.state;
-        // Say so when the agent rewrote the file; its images may have changed too.
-        if (previous?.data && message.state.data && previous.file.mtimeMs !== message.state.file.mtimeMs) {
+        // Say so when the agent rewrote the file (not the user, from the editor); its images may have changed too.
+        const ownSave = message.state.file.mtimeMs === baseMtime && savedAt !== null;
+        if (previous?.data && message.state.data && previous.file.mtimeMs !== message.state.file.mtimeMs && !ownSave) {
           assets = {};
           requested = new Set();
           updated = true;
           setTimeout(() => (updated = false), 4000);
         }
+        follow();
         break;
       }
+      case 'written':
+        baseMtime = message.file.mtimeMs;
+        if (saving !== null) editor?.markSaved(saving);
+        saving = null;
+        saveError = null;
+        changedOutside = false;
+        savedAt = Date.now();
+        // The host sends the new version next; what it shows until then is older than the save.
+        break;
+      case 'writeFailed':
+        saving = null;
+        if (message.conflict) changedOutside = true;
+        else saveError = message.error;
+        break;
       case 'asset':
         assets[message.path] = message.dataUrl;
         break;
@@ -93,6 +123,8 @@
   }
 
   const kind = $derived(preview ? fileKind(preview.file.mimeType) : 'binary');
+  /** Rendered kinds that also have a source to edit. */
+  const rendered = $derived(['markdown', 'html', 'table'].includes(kind));
   const text = $derived(
     preview?.data && ['markdown', 'html', 'table', 'json', 'text'].includes(kind) ? decodeText(preview.data) : null
   );
@@ -105,14 +137,57 @@
     return parseDelimited(text, preview.file.mimeType === 'text/csv' ? ',' : '\t', MAX_ROWS + 1);
   });
 
-  const json = $derived.by(() => {
-    if (kind !== 'json' || text === null) return null;
-    try {
-      return JSON.stringify(JSON.parse(text), null, 2);
-    } catch {
-      return text;
-    }
-  });
+  const editing = $derived(text !== null && (kind === 'text' || kind === 'json' || (rendered && source)));
+  // Text that is not UTF-8 would be damaged by a save: it can be looked at only.
+  const readOnlyReason = $derived(
+    !preview?.live
+      ? 'The sandbox is not connected'
+      : preview.file.writable === undefined
+        ? 'This sandbox is too old to save files; update its image'
+        : !preview.file.writable
+          ? 'Only files in the workspace or an output folder can be saved'
+          : text?.includes('\uFFFD')
+            ? 'This file is not UTF-8 text'
+            : null
+  );
+
+  /** Shows the file's new version in the editor, unless that would lose the user's edits. */
+  function follow(): void {
+    if (!preview?.data || text === null || saving !== null) return;
+    if (baseMtime === undefined) baseMtime = preview.file.mtimeMs;
+    if (preview.file.mtimeMs === baseMtime) return;
+    if (dirty) changedOutside = true;
+    else reload();
+  }
+
+  function reload(): void {
+    if (!preview || text === null) return;
+    baseMtime = preview.file.mtimeMs;
+    changedOutside = false;
+    editor?.reset(text);
+  }
+
+  /** Keeps the user's edits: the next save goes over the agent's version. */
+  function keepMine(): void {
+    if (preview) baseMtime = preview.file.mtimeMs;
+    changedOutside = false;
+  }
+
+  function write(edited: string): void {
+    if (!preview || readOnlyReason || saving !== null || baseMtime === undefined) return;
+    if (changedOutside) return void feedbackBox?.focus();
+    saving = edited;
+    saveError = null;
+    sendPreview({ type: 'write', text: edited, baseMtimeMs: baseMtime });
+  }
+
+  function tellAgent(): void {
+    draft = draft.trim() ? `${draft.trim()}\n\nI edited ${shownPath} myself.` : `I edited ${shownPath} myself.`;
+    savedAt = null;
+    feedbackBox?.focus();
+  }
+
+  $effect(() => sendPreview({ type: 'dirty', dirty }));
 
   // HTML reports render without scripts; their local images load through the host.
   const htmlDocument = $derived.by(() => {
@@ -177,7 +252,9 @@
         <span class="codicon codicon-{kindIcon[kind]}"></span>
       </span>
       <div class="min-w-0 flex-1">
-        <h1 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">{preview.title}</h1>
+        <h1 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">
+          {preview.title}{#if dirty}<span class="ml-1.5 text-orange" title="Not saved">●</span>{/if}
+        </h1>
         <div class="flex items-center gap-2 text-[0.8em] text-muted">
           <span class="truncate font-mono" title={preview.file.path}>{shownPath}</span>
           <span class="shrink-0">· {formatSize(preview.file.size)} · {updatedAt}</span>
@@ -198,8 +275,48 @@
           <span class="codicon codicon-play"></span> Open interactive
         </button>
       {/if}
+      {#if rendered && text !== null}
+        <!-- Rendered or the source in the editor; edits must be saved or undone before switching back. -->
+        <div
+          class="flex shrink-0 rounded-full border-[1.5px] border-soft-line bg-code p-0.5 text-[0.8em] font-semibold"
+          role="radiogroup"
+          aria-label="Show the file"
+        >
+          {#each [{ value: false, icon: 'preview', label: 'Rendered' }, { value: true, icon: 'code', label: 'Code' }] as mode (mode.label)}
+            <button
+              role="radio"
+              aria-checked={source === mode.value}
+              class="flex items-center gap-1 rounded-full border-none px-2 py-0.5 {source === mode.value
+                ? 'bg-card text-ink shadow-sm'
+                : 'bg-transparent text-muted hover:text-ink'} disabled:cursor-not-allowed disabled:opacity-60"
+              title={mode.value ? 'Show and edit the source' : dirty ? 'Save or undo your edits first' : 'Show it rendered'}
+              disabled={!mode.value && dirty}
+              onclick={() => (source = mode.value)}
+            >
+              <span class="codicon codicon-{mode.icon} text-[12px]!"></span>
+              {mode.label}
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if editing}
+        {#if readOnlyReason}
+          <span class="shrink-0 rounded-full bg-code px-2 py-0.5 text-[0.8em] text-muted" title={readOnlyReason}>
+            <span class="codicon codicon-lock text-[11px]!"></span> read-only
+          </span>
+        {:else}
+          <button
+            class="chip shrink-0"
+            title="Save into the sandbox (Ctrl+S)"
+            disabled={!dirty || saving !== null}
+            onclick={() => editor?.save()}
+          >
+            <span class="codicon codicon-{saving !== null ? 'loading codicon-modifier-spin' : 'save'}"></span> Save
+          </button>
+        {/if}
+      {/if}
       <button class="chip shrink-0" title="Save a copy on this machine" disabled={!preview.data} onclick={() => sendPreview({ type: 'save' })}>
-        <span class="codicon codicon-save"></span> Save
+        <span class="codicon codicon-cloud-download"></span> Download
       </button>
     </header>
 
@@ -207,6 +324,20 @@
       <div class="mx-4 mt-3 flex items-start gap-2 rounded-xl bg-yellow-soft px-3 py-2">
         <span class="codicon codicon-sparkle mt-[3px] text-orange"></span>
         <span class="flex-1">{preview.message}</span>
+      </div>
+    {/if}
+
+    {#if changedOutside}
+      <div class="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-yellow-soft px-3 py-2">
+        <span class="codicon codicon-warning text-orange"></span>
+        <span class="flex-1">The file changed in the sandbox since you started editing.</span>
+        <button class="chip" title="Show the new version; your edits are lost" onclick={reload}>Load theirs</button>
+        <button class="chip" title="Keep editing; saving replaces the new version" onclick={keepMine}>Keep mine</button>
+      </div>
+    {:else if saveError}
+      <div class="mx-4 mt-3 flex items-start gap-2 rounded-xl bg-pink-soft px-3 py-2">
+        <span class="codicon codicon-error mt-[3px] text-pink"></span>
+        <span class="flex-1">Not saved: {saveError}</span>
       </div>
     {/if}
 
@@ -220,6 +351,23 @@
         <div class="flex items-center gap-2 py-10 text-muted">
           <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading…
         </div>
+      {:else if editing && text !== null}
+        {#await loadEditor()}
+          <div class="flex items-center gap-2 py-10 text-muted">
+            <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading the editor…
+          </div>
+        {:then { default: CodeEditor }}
+          <div class="card h-full overflow-hidden p-0">
+            <CodeEditor
+              bind:this={editor}
+              {text}
+              path={preview.file.path}
+              readOnly={!!readOnlyReason}
+              onSave={write}
+              onDirty={(value) => (dirty = value)}
+            />
+          </div>
+        {/await}
       {:else if kind === 'image'}
         <!-- Click opens the figure over the whole tab, to comment on its parts. -->
         <button
@@ -286,10 +434,6 @@
         <p class="mt-2 text-[0.85em] text-muted">
           {table.total - 1} rows{table.total - 1 > MAX_ROWS ? `, the first ${MAX_ROWS} shown` : ''} · {table.rows[0]?.length ?? 0} columns
         </p>
-      {:else if json !== null}
-        <pre class="m-0 rounded-xl bg-code px-3 py-2 font-mono text-[0.85em] whitespace-pre-wrap">{json}</pre>
-      {:else if text !== null}
-        <pre class="m-0 rounded-xl bg-code px-3 py-2 font-mono text-[0.85em] whitespace-pre-wrap">{text}</pre>
       {:else}
         <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-10 text-center text-muted">
           <span class="codicon codicon-{kindIcon[kind]} text-3xl!"></span>
@@ -334,6 +478,11 @@
             <span class="truncate">The agent is busy; your feedback goes to it when this turn ends.</span>
           {:else if sent === 'sent'}
             <span class="codicon codicon-check text-green"></span> Sent to the chat.
+          {:else if savedAt !== null && !dirty}
+            <span class="codicon codicon-check text-green"></span> Saved.
+            {#if preview.chat}
+              <button type="button" class="link font-semibold" onclick={tellAgent}>Tell the agent</button>
+            {/if}
           {:else if preview.chat}
             <span class="shrink-0">Goes to</span>
             <button

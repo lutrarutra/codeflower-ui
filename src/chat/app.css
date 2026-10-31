@@ -522,3 +522,77 @@ textarea:focus-visible {
     animation: none;
   }
 }
+
+/* Syntax colors, for the editor and the chat's code alike (@lezer/highlight's classHighlighter). */
+.tok-comment,
+.tok-meta {
+  color: var(--cf-muted);
+  font-style: italic;
+}
+
+.tok-keyword {
+  color: var(--cf-violet);
+}
+
+.tok-string,
+.tok-string2 {
+  color: var(--cf-green);
+}
+
+.tok-number,
+.tok-bool,
+.tok-atom,
+.tok-literal {
+  color: var(--cf-orange);
+}
+
+.tok-typeName,
+.tok-className,
+.tok-namespace,
+.tok-macroName {
+  color: var(--cf-cyan);
+}
+
+.tok-variableName.tok-definition,
+.tok-variableName2,
+.tok-labelName {
+  color: var(--cf-indigo);
+}
+
+.tok-propertyName {
+  color: var(--cf-teal);
+}
+
+.tok-heading {
+  color: var(--cf-pink);
+  font-weight: 600;
+}
+
+.tok-link,
+.tok-url {
+  color: var(--cf-indigo);
+  text-decoration: underline;
+}
+
+.tok-emphasis {
+  font-style: italic;
+}
+
+.tok-strong {
+  font-weight: 700;
+}
+
+.tok-inserted {
+  color: var(--cf-green);
+  background: color-mix(in srgb, var(--cf-green) 12%, transparent);
+}
+
+.tok-deleted {
+  color: var(--cf-red);
+  background: color-mix(in srgb, var(--cf-red) 12%, transparent);
+}
+
+.tok-invalid {
+  color: var(--cf-red);
+}
+

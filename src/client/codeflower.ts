@@ -4,7 +4,7 @@
 // the bridge answers none of them, and the chat works without them.
 import type { AgentName, AgentPresentation, ChatAction, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
-import { isMethodNotFound, type RpcConnection } from './rpc.ts';
+import { RpcError, isMethodNotFound, type RpcConnection } from './rpc.ts';
 
 export const WORKSPACE = '/codeflower-state/workspace';
 
@@ -203,6 +203,19 @@ export class CodeflowerExtensions {
   }
 
   /**
+   * Saves a text file the user edited, over the version they opened (its
+   * `mtimeMs`); see `isFileConflict` for when the agent wrote it since.
+   */
+  async writeFile(path: string, text: string, expectedMtimeMs: number): Promise<SandboxFile> {
+    try {
+      return await this.rpc.request<SandboxFile>('_codeflower/files/write', { path, text, expectedMtimeMs });
+    } catch (error) {
+      if (isMethodNotFound(error)) throw new Error('this sandbox is too old to save files; update its image');
+      throw error;
+    }
+  }
+
+  /**
    * Saves the comments the user left on a storyteller report (a JSON array) into the
    * report's store and its page. Workers from before comments do not have this.
    */
@@ -245,4 +258,9 @@ export class CodeflowerExtensions {
   async restartAgent(): Promise<void> {
     await this.rpc.request('_codeflower/agent/restart', {});
   }
+}
+
+/** The file changed in the sandbox since the user opened it, so it was not saved. */
+export function isFileConflict(error: unknown): boolean {
+  return error instanceof RpcError && (error.data as { conflict?: boolean } | undefined)?.conflict === true;
 }
