@@ -282,11 +282,46 @@ export type PreviewHostMessage =
   /** Text for the feedback box (from the interactive report), for the user to send. */
   | { type: 'draft'; text: string };
 
+/** An element of an SVG figure the user selected to give feedback on. */
+export interface FeedbackElement {
+  id: string;
+  /** Its `data-label`, the name the figure gives it. */
+  label?: string;
+  tag?: string;
+}
+
+/** An area the user marked on a figure, as fractions of its width and height (0 to 1). */
+export interface FeedbackRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The same area in the file's own units: image pixels, or SVG user units. */
+  units?: { x: number; y: number; width: number; height: number; unit: 'px' | 'svg' };
+}
+
+/** Which figure of a report the comments are about. */
+export interface FeedbackFigure {
+  /** Its number among the report's figures, from 1. */
+  index: number;
+  caption?: string;
+  /** The storyteller part it is in (`data-cf-part`), and the nearest anchor. */
+  part?: string;
+  anchor?: string;
+}
+
+/** One comment the user attached to a part of a figure. */
+export interface FeedbackAnnotation {
+  comment: string;
+  elements?: FeedbackElement[];
+  region?: FeedbackRegion;
+}
+
 export type PreviewWebviewMessage =
   | { type: 'ready' }
   /** Open the HTML file with its scripts running, in its own tab. */
   | { type: 'interactive' }
-  | { type: 'feedback'; text: string }
+  | { type: 'feedback'; text: string; annotations?: FeedbackAnnotation[]; figure?: FeedbackFigure }
   | { type: 'asset'; path: string }
   | { type: 'openFile'; path: string }
   | { type: 'save' }

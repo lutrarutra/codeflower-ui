@@ -28,6 +28,13 @@ export function decodeText(base64: string): string {
   return new TextDecoder().decode(Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)));
 }
 
+export function encodeText(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let start = 0; start < bytes.length; start += 0x8000) binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  return btoa(binary);
+}
+
 /** CSV or TSV rows, with quoted fields; at most `limit` rows. */
 export function parseDelimited(text: string, separator: string, limit: number): { rows: string[][]; total: number } {
   const rows: string[][] = [];

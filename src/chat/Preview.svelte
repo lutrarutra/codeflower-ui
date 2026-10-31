@@ -1,8 +1,9 @@
 <script lang="ts">
   import DOMPurify from 'dompurify';
-  import type { PreviewHostMessage, PreviewState } from '../protocol/messages.ts';
+  import type { FeedbackAnnotation, FeedbackFigure, PreviewHostMessage, PreviewState } from '../protocol/messages.ts';
+  import Annotator, { type Note } from './lib/Annotator.svelte';
   import { decodeText, fileKind, formatSize, isLocalHref, kindIcon, parseDelimited } from './lib/files.ts';
-  import HtmlReport from './lib/HtmlReport.svelte';
+  import HtmlReport, { type ReportFigure } from './lib/HtmlReport.svelte';
   import Markdown from './lib/Markdown.svelte';
   import type { PreviewHost } from './lib/host.ts';
 
@@ -18,8 +19,33 @@
   let draft = $state('');
   let sent = $state<'sent' | 'queued' | null>(null);
   let updated = $state(false);
-  let actualSize = $state(false);
   let feedbackBox: HTMLTextAreaElement | undefined = $state();
+  // Comments on parts of a figure, written over the whole tab: the shown image
+  // ('file'), or a figure of a report. Drafts are kept per figure while closed.
+  interface Draft {
+    notes: Note[];
+    general: string;
+    report?: ReportFigure;
+  }
+  let drafts = $state<Record<string, Draft>>({});
+  let annotating = $state<string | null>(null);
+  const figureKey = (figure: FeedbackFigure) => `${figure.index}:${figure.part ?? ''}:${figure.caption ?? ''}`;
+  const pending = $derived(
+    Object.entries(drafts).filter(([, draft]) => draft.notes.length || draft.general.trim()) as [string, Draft][]
+  );
+
+  function annotate(key: string, report?: ReportFigure): void {
+    drafts[key] ??= { notes: [], general: '' };
+    // A report figure is shown as it was clicked; the report may change meanwhile.
+    if (report) drafts[key].report = report;
+    annotating = key;
+  }
+
+  function closeAnnotator(): void {
+    const draft = annotating ? drafts[annotating] : undefined;
+    if (annotating && draft && !draft.notes.length && !draft.general.trim()) delete drafts[annotating];
+    annotating = null;
+  }
 
   function receive(message: PreviewHostMessage): void {
     switch (message.type) {
@@ -113,6 +139,35 @@
     sendPreview({ type: 'feedback', text: feedback });
     draft = '';
   }
+
+  function sendAnnotations(text: string, annotations: FeedbackAnnotation[]): void {
+    if (!preview?.chat || !preview.live || !annotating) return;
+    const figure = drafts[annotating]?.report?.figure;
+    sendPreview({
+      type: 'feedback',
+      text,
+      ...(annotations.length ? { annotations } : {}),
+      ...(figure ? { figure: $state.snapshot(figure) } : {})
+    });
+    delete drafts[annotating];
+    annotating = null;
+  }
+
+  // What the overlay shows: the file's image, live, or the report figure as clicked.
+  const annotated = $derived.by(() => {
+    if (!annotating || !preview?.data) return null;
+    const draft = drafts[annotating];
+    if (!draft) return null;
+    if (draft.report) {
+      const { figure, mimeType, data } = draft.report;
+      return { draft, title: figure.caption || `Figure ${figure.index}`, subtitle: `figure ${figure.index} in ${shownPath}`, mimeType, data };
+    }
+    return kind === 'image' ? { draft, title: preview.title, subtitle: shownPath, mimeType: preview.file.mimeType, data: preview.data } : null;
+  });
+
+  const sendHint = $derived(
+    !preview?.chat ? 'Open a chat on this worker to send comments to its agent.' : !preview.live ? 'The worker is not connected.' : ''
+  );
 </script>
 
 <div class="flex h-full flex-col">
@@ -166,24 +221,47 @@
           <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading…
         </div>
       {:else if kind === 'image'}
-        <!-- Click toggles between fitting the tab and the figure's own size. -->
+        <!-- Click opens the figure over the whole tab, to comment on its parts. -->
         <button
-          class="block w-full cursor-zoom-in border-none bg-transparent p-0 {actualSize ? 'cursor-zoom-out' : ''}"
-          title={actualSize ? 'Fit to the tab' : 'Show at full size'}
-          onclick={() => (actualSize = !actualSize)}
+          class="group relative mx-auto block w-fit max-w-full cursor-zoom-in border-none bg-transparent p-0"
+          title="Open the figure to comment on parts of it"
+          onclick={() => annotate('file')}
         >
           <img
-            class="mx-auto block rounded-lg bg-white {actualSize ? 'max-w-none' : 'max-h-[calc(100vh-14rem)] max-w-full object-contain'}"
+            class="mx-auto block max-h-[calc(100vh-14rem)] max-w-full rounded-lg bg-white object-contain"
             src="data:{preview.file.mimeType};base64,{preview.data}"
             alt={preview.title}
           />
+          <span
+            class="absolute top-2 right-2 rounded-full bg-indigo px-2.5 py-0.5 text-[0.8em] font-semibold text-on-accent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          >
+            <span class="codicon codicon-comment text-[11px]!"></span> Comment on parts
+          </span>
         </button>
+        {#if drafts.file && (drafts.file.notes.length || drafts.file.general.trim())}
+          <p class="mt-2 mb-0 text-center text-[0.85em] text-muted">
+            <span class="codicon codicon-comment-draft text-orange"></span>
+            {drafts.file.notes.length ? `${drafts.file.notes.length} comment${drafts.file.notes.length === 1 ? '' : 's'}` : 'A comment'} not
+            sent yet ·
+            <button type="button" class="link font-semibold" onclick={() => annotate('file')}>Continue</button>
+          </p>
+        {/if}
       {:else if kind === 'markdown' && text !== null}
         <article class="card mx-auto max-w-3xl px-6 py-5">
           <Markdown {text} {asset} openFile={(path) => sendPreview({ type: 'openFile', path })} />
         </article>
       {:else if kind === 'html'}
-        <HtmlReport html={htmlDocument} />
+        {#if pending.some(([key]) => key !== 'file')}
+          <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.85em] text-muted">
+            <span class="codicon codicon-comment-draft text-orange"></span> Comments not sent yet on
+            {#each pending.filter(([key]) => key !== 'file') as [key, draft] (key)}
+              <button type="button" class="link font-semibold" onclick={() => annotate(key)}>
+                {draft.report ? `figure ${draft.report.figure.index}` : key}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        <HtmlReport html={htmlDocument} onfigure={(figure) => annotate(figureKey(figure.figure), figure)} />
       {:else if table}
         <div class="overflow-auto rounded-xl border-[1.5px] border-soft-line">
           <table class="w-full border-collapse font-mono text-[0.85em]">
@@ -272,6 +350,22 @@
         </button>
       </div>
     </form>
+    {#if annotated && annotating}
+      {#key annotating}
+        <Annotator
+          title={annotated.title}
+          subtitle={annotated.subtitle}
+          mimeType={annotated.mimeType}
+          data={annotated.data}
+          bind:notes={drafts[annotating]!.notes}
+          bind:general={drafts[annotating]!.general}
+          sendable={Boolean(preview.chat && preview.live)}
+          {sendHint}
+          onsend={sendAnnotations}
+          onclose={closeAnnotator}
+        />
+      {/key}
+    {/if}
   {:else}
     <div class="m-auto flex items-center gap-2 text-muted">
       <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading…

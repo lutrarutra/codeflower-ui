@@ -8,6 +8,7 @@ import type { PreviewHost } from '../../chat/lib/host.ts';
 import { decodeText } from '../../chat/lib/files.ts';
 import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
+import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
 import { basename, displayPath, isStorytellerReport, resolvePath } from './report.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -201,7 +202,7 @@ export class Preview {
         const chat = this.chatKey ? agent?.chats[this.chatKey] : undefined;
         if (!chat) return;
         const outcome = chat.send(
-          `Feedback on ${displayPath(this.file.path)}, which you showed me in the code flower app:\n\n${message.text}`
+          feedbackText(displayPath(this.file.path), 'the code flower app', message.text, feedbackAnnotations(message.annotations), feedbackFigure(message.figure))
         );
         this.post({ type: 'feedbackSent', queued: outcome === 'queued' });
         break;
