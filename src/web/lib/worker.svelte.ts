@@ -227,6 +227,7 @@ export class WebWorker {
     chat.post({ type: 'transcript', entries: [] });
     chat.post({ type: 'config', options: connection.config(key) });
     chat.setState({ live: true, steer: connection.canSteer });
+    this.noticeMcp(chat, connection.mcpNotice(key));
     void this.refresh();
     return key;
   }
@@ -315,10 +316,16 @@ export class WebWorker {
       chat.post({ type: 'permission', request: activity.permission });
       chat.post({ type: 'question', request: activity.question });
       chat.setState({ live: true, busy: activity.busy, steer: connection.canSteer });
+      this.noticeMcp(chat, connection.mcpNotice(chat.key));
     } catch (error) {
       chat.loaded(await connection.transcript(chat.key).catch(() => []));
       this.report(chat, error);
     }
+  }
+
+  /** MCP servers from the app's config the chat is without, e.g. one that did not start. */
+  private noticeMcp(chat: ChatSession, notice: string | undefined): void {
+    if (notice) chat.notify('info', notice);
   }
 
   private report(chat: ChatSession, error: unknown): void {

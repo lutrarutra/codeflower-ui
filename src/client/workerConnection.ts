@@ -25,7 +25,7 @@ import {
   type TranscriptEntry
 } from '../protocol/messages.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
-import { AcpClient, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
+import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
 import {
   CodeflowerExtensions,
   WORKSPACE,
@@ -45,7 +45,15 @@ import { ConnectionClosed, RpcConnection } from './rpc.ts';
 import { sessionKey } from './sessionKey.ts';
 import type { Transport } from './transport.ts';
 
-export { AUTH_REQUIRED, isAuthRequired, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
+export {
+  AUTH_REQUIRED,
+  isAuthRequired,
+  mcpNotice,
+  type AttachedSession,
+  type ClientIdentity,
+  type McpLeftOut,
+  type UrlElicitation
+} from './acp.ts';
 export {
   TAKEN_OVER,
   WORKSPACE,
@@ -330,6 +338,11 @@ export class WorkerConnection {
 
   config(key: string): SessionConfigOption[] {
     return this.acp.config(key);
+  }
+
+  /** What to tell the user about the MCP servers from the app's config this session is without. */
+  mcpNotice(key: string): string | undefined {
+    return mcpNotice(this.acp.mcpLeftOut(key));
   }
 
   setConfigOption(key: string, configId: string, value: string | boolean): Promise<void> {

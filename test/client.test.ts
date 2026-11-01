@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { agentPresentation, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { sessionKey } from '../src/client/sessionKey.ts';
-import { TAKEN_OVER, WorkerConnection, type WorkerHandlers } from '../src/client/workerConnection.ts';
+import { TAKEN_OVER, WorkerConnection, mcpNotice, type WorkerHandlers } from '../src/client/workerConnection.ts';
 import { FakeAgent, tick } from './fakeAgent.ts';
 
 function recorder() {
@@ -295,4 +295,25 @@ test('echoes its own prompt itself on an older bridge', async () => {
   const key = await connection.newSession();
   await connection.prompt(key, 'hello');
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt', 'turn_end']);
+});
+
+test("keeps the MCP servers from the app's config a session is without, for the chat's notice", async () => {
+  const leftOut = [{ name: 'docs', reason: 'it did not start' }];
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'dsh', agentLabel: 'DeepSeek Harness', signedIn: true }),
+    initialize: () => ({ protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } }),
+    'session/new': () => ({ sessionId: 'new', _meta: { 'codeflower/mcpLeftOut': leftOut } }),
+    'session/resume': () => ({})
+  });
+  const { handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const key = await connection.newSession();
+  assert.equal(
+    connection.mcpNotice(key),
+    'This chat is without MCP servers from your config: docs (it did not start). Fix them under mcp_servers: in config.yaml, then restart the sandbox.'
+  );
+  // A session with all its servers has no notice.
+  const resumed = await connection.resumeSession('old', null);
+  assert.equal(connection.mcpNotice(resumed.key), undefined);
+  assert.equal(mcpNotice([]), undefined);
 });

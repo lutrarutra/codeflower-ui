@@ -64,7 +64,23 @@ interface SessionSettings {
     'codeflower/transcriptEntries'?: number;
     /** The agent was working on the session (a turn started by an earlier connection). */
     'codeflower/busy'?: boolean;
+    /** MCP servers from the app's config the session is without. */
+    'codeflower/mcpLeftOut'?: McpLeftOut[];
   } | null;
+}
+
+/** An MCP server from the app's config that a session is without, and why. */
+export interface McpLeftOut {
+  name: string;
+  /** E.g. "it did not start", "the agent does not support sse servers". */
+  reason: string;
+}
+
+/** What a chat tells the user about the MCP servers it is without. */
+export function mcpNotice(leftOut: McpLeftOut[]): string | undefined {
+  if (leftOut.length === 0) return undefined;
+  const servers = leftOut.map(({ name, reason }) => `${name} (${reason})`).join(', ');
+  return `This chat is without MCP servers from your config: ${servers}. Fix them under mcp_servers: in config.yaml, then restart the sandbox.`;
 }
 
 /** A session attached on this connection. */
@@ -140,6 +156,8 @@ export class AcpClient {
   private readonly replaying = new Set<string>();
   /** Each session's settings; `modesOnly` marks agents that predate config options. */
   private readonly configs = new Map<string, { options: SessionConfigOption[]; modesOnly: boolean }>();
+  /** The MCP servers each session is without, as the bridge reports them. */
+  private readonly leftOut = new Map<string, McpLeftOut[]>();
   private nextRequestId = 1;
   private readonly permissions = new Map<
     number,
@@ -228,6 +246,7 @@ export class AcpClient {
     const response = await this.rpc.request<NewSessionResponse>('session/new', { cwd, mcpServers: [] });
     const key = this.attach(response.sessionId);
     this.setConfig(key, response);
+    this.setLeftOut(key, (response as SessionSettings)._meta);
     return key;
   }
 
@@ -262,6 +281,7 @@ export class AcpClient {
     const key = this.attach(sessionId);
     this.setConfig(key, response ?? {});
     const meta = response?._meta;
+    this.setLeftOut(key, meta);
     // A turn an earlier connection started is still running.
     if (meta?.['codeflower/busy']) this.setRemoteBusy(key, true);
     const transcriptEntries = meta?.['codeflower/transcriptEntries'];
@@ -277,6 +297,11 @@ export class AcpClient {
 
   config(key: string): SessionConfigOption[] {
     return this.configs.get(key)?.options ?? [];
+  }
+
+  /** The MCP servers from the app's config this session is without. */
+  mcpLeftOut(key: string): McpLeftOut[] {
+    return this.leftOut.get(key) ?? [];
   }
 
   async setConfigOption(key: string, configId: string, value: string | boolean): Promise<void> {
@@ -419,6 +444,12 @@ export class AcpClient {
   private keyFor(sessionId: string): string | undefined {
     const key = this.keyOf(sessionId);
     return this.sessions.has(key) ? key : undefined;
+  }
+
+  private setLeftOut(key: string, meta: SessionSettings['_meta']): void {
+    const leftOut = meta?.['codeflower/mcpLeftOut'];
+    if (Array.isArray(leftOut) && leftOut.length) this.leftOut.set(key, leftOut);
+    else this.leftOut.delete(key);
   }
 
   private setConfig(key: string, settings: SessionSettings): void {
