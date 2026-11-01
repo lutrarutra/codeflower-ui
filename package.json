@@ -1,6 +1,6 @@
 {
   "name": "codeflower-ui",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "code flower's chat and its ACP client, shared by the VS Code extension and the app",
   "license": "MIT",
   "type": "module",
