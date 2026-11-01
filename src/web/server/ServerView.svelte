@@ -14,6 +14,8 @@
 
   const machine = $derived(app.serverMachine);
   const here = $derived(machine.workers.filter((worker) => worker.source !== 'added'));
+  // Added by their line: they run elsewhere, and only here can they be removed from the list.
+  const added = $derived(machine.workers.filter((worker) => worker.source === 'added'));
   const connectOnly = $derived(machine.system?.capabilities.connectOnly ?? false);
   // Through the tunnel (no connecting), the computer's app may not let remote browsers start sandboxes:
   // starting shows locked, with the setting that allows it.
@@ -48,7 +50,7 @@
       {locked
         ? 'Use and stop the sandboxes running on this computer. Starting new ones through the tunnel is locked; see below.'
         : connectOnly
-        ? 'This app only connects to sandboxes running elsewhere; add them in the sidebar.'
+        ? 'This app only connects to sandboxes running elsewhere; add them with + in the rail.'
         : 'Start a sandbox where an agent analyses your data. Sandboxes started here run while the app runs; closing this tab does not stop them.'}
     </p>
   </header>
@@ -65,6 +67,14 @@
     {:else if here.length}
       <section class="flex flex-col gap-3" aria-label="Sandboxes on {app.several ? machine.name : 'this computer'}">
         {#each here as worker (worker.id)}
+          <SandboxCard {worker} />
+        {/each}
+      </section>
+    {/if}
+    {#if machine.listed && added.length}
+      <section class="flex flex-col gap-3" aria-label="Sandboxes running elsewhere">
+        <h2 class="m-0 mt-2 font-display text-xl font-medium">Running elsewhere</h2>
+        {#each added as worker (worker.id)}
           <SandboxCard {worker} />
         {/each}
       </section>

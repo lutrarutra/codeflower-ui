@@ -5,6 +5,7 @@
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import { canForget, workerTitle } from './lib/format.ts';
+  import { badge } from './lib/rail.ts';
 
   let { worker = $bindable(null) }: { worker?: Worker | null } = $props();
   let dialog: HTMLDialogElement | undefined = $state();
@@ -90,6 +91,7 @@
         <span class="text-[0.9em] text-muted">Name in the list</span>
         <!-- svelte-ignore a11y_autofocus -->
         <input class="field" bind:value={name} placeholder={shown.label || 'Sandbox'} maxlength="80" spellcheck="false" autofocus />
+        <span class="text-[0.85em] text-muted">The rail shows it as <strong class="text-ink">{badge({ ...shown, name: name.trim() })}</strong>.</span>
       </label>
       {#if added}
         <fieldset class="m-0 flex flex-col gap-2 border-0 p-0">

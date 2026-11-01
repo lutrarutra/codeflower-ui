@@ -124,7 +124,7 @@
       </ul>
     {:else}
       <p class="m-0 px-2 py-3 text-[0.9em] text-muted">
-        {ready.length ? 'No agent at work. Start a chat, and it shows here while it works or waits for you.' : 'No sandbox is ready. Start one under Server.'}
+        {ready.length ? 'No agent at work. Start a chat, and it shows here while it works or waits for you.' : 'No sandbox is ready. Start one with + in the rail.'}
       </p>
     {/each}
   </div>

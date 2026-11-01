@@ -1,5 +1,4 @@
 <script lang="ts">
-  import AddRemoteDialog from './AddRemoteDialog.svelte';
   import AgentLinkDialog from './AgentLinkDialog.svelte';
   import ChatView from './ChatView.svelte';
   import FocusView from './focus/FocusView.svelte';
@@ -7,20 +6,22 @@
   import QuittingBanner from './QuittingBanner.svelte';
   import Toasts from './Toasts.svelte';
   import ServerView from './server/ServerView.svelte';
+  import NewSandboxDialog from './NewSandboxDialog.svelte';
   import PluginsDialog from './PluginsDialog.svelte';
+  import Rail from './Rail.svelte';
   import SignInDialog from './SignInDialog.svelte';
   import Sidebar from './Sidebar.svelte';
   import { app } from './lib/app.svelte.ts';
   import { workerTitle } from './lib/format.ts';
 
-  let adding = $state(false);
   // Narrow windows show the sidebar as a drawer.
   let drawer = $state(false);
   let width = $state(0);
   const wide = $derived(width >= 800);
 
-  // Wide windows can fold the sidebar to a rail of icons (Ctrl/⌘+B, as in VS Code); it stays so.
+  // Wide windows can fold the sidebar away, leaving the rail (Ctrl/⌘+B, as in VS Code); it stays so.
   const COLLAPSED = 'codeflower.sidebarCollapsed';
+  const shortcut = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
   let collapsed = $state(stored());
   const folded = $derived(collapsed && wide);
   // The narrow top bar names the sandbox of the chat in front.
@@ -50,12 +51,13 @@
 
   // Wide windows: the sidebar's width, dragged at its edge (double-click: back to the default); it stays so.
   const WIDTH = 'codeflower.sidebarWidth';
-  const DEFAULT_WIDTH = 288;
+  const DEFAULT_WIDTH = 264;
   const MIN_WIDTH = 200;
   let sidebarWidth = $state(storedWidth());
   /** The edge being dragged: the pointer and the width where the drag began. */
   let resizing: { from: number; width: number } | null = $state(null);
-  const maxWidth = () => Math.max(MIN_WIDTH, Math.min(640, width - 320));
+  // Beside the rail (4.5rem), the tabs keep at least 320px.
+  const maxWidth = () => Math.max(MIN_WIDTH, Math.min(640, width - 320 - 72));
 
   function storedWidth(): number {
     try {
@@ -118,40 +120,46 @@
   </main>
 {:else}
   <div class="flex h-full">
-    <div
-      class="fixed inset-y-0 left-0 z-20 shrink-0 -translate-x-full min-[800px]:relative min-[800px]:translate-x-0 {resizing
-        ? ''
-        : 'transition-[translate,width]'} {folded ? 'w-14' : 'w-72 max-[800px]:max-w-[85vw]'}"
+    <nav
+      aria-label="Sandboxes"
+      class="fixed inset-y-0 left-0 z-20 flex shrink-0 -translate-x-full min-[800px]:relative min-[800px]:translate-x-0 {resizing ? '' : 'transition-[translate]'}"
       class:translate-x-0={drawer}
-      style={wide && !folded ? `width: ${Math.min(sidebarWidth, maxWidth())}px` : undefined}
     >
-      <Sidebar collapsed={folded} canCollapse={wide} onToggle={toggle} onAdd={() => (adding = true)} onNavigate={() => (drawer = false)} />
-      {#if wide && !folded}
-        <!-- A focusable separator is a widget: it moves with the arrow keys too. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+      <Rail canFold={wide} {folded} {shortcut} onToggle={toggle} onNavigate={() => (drawer = false)} />
+      {#if !folded}
         <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the sidebar"
-          aria-valuenow={sidebarWidth}
-          tabindex="0"
-          title="Drag to resize; double-click for the default width"
-          class="group absolute inset-y-0 -right-[3px] z-10 w-[5px] cursor-col-resize"
-          onpointerdown={startResize}
-          onpointermove={moveResize}
-          onpointerup={endResize}
-          onpointercancel={endResize}
-          ondblclick={() => (setWidth(DEFAULT_WIDTH), keep())}
-          onkeydown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-            setWidth(sidebarWidth + (event.key === 'ArrowLeft' ? -16 : 16));
-            keep();
-          }}
+          class="relative shrink-0 border-r-[1.5px] border-soft-line {wide ? '' : 'w-72 max-w-[calc(85vw-4.5rem)]'}"
+          style={wide ? `width: ${Math.min(sidebarWidth, maxWidth())}px` : undefined}
         >
-          <span class="absolute inset-y-0 left-[2px] w-[1.5px] transition-colors group-hover:bg-indigo group-focus-visible:bg-indigo {resizing ? 'bg-indigo' : ''}"></span>
+          <Sidebar canFold={wide} {shortcut} onToggle={toggle} onNavigate={() => (drawer = false)} />
+          {#if wide}
+            <!-- A focusable separator is a widget: it moves with the arrow keys too. -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the sidebar"
+              aria-valuenow={sidebarWidth}
+              tabindex="0"
+              title="Drag to resize; double-click for the default width"
+              class="group absolute inset-y-0 -right-[3px] z-10 w-[5px] cursor-col-resize"
+              onpointerdown={startResize}
+              onpointermove={moveResize}
+              onpointerup={endResize}
+              onpointercancel={endResize}
+              ondblclick={() => (setWidth(DEFAULT_WIDTH), keep())}
+              onkeydown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                setWidth(sidebarWidth + (event.key === 'ArrowLeft' ? -16 : 16));
+                keep();
+              }}
+            >
+              <span class="absolute inset-y-0 left-[2px] w-[1.5px] transition-colors group-hover:bg-indigo group-focus-visible:bg-indigo {resizing ? 'bg-indigo' : ''}"></span>
+            </div>
+          {/if}
         </div>
       {/if}
-    </div>
+    </nav>
     {#if drawer}
       <button class="fixed inset-0 z-10 bg-black/30 min-[800px]:hidden" aria-label="Close the sidebar" onclick={() => (drawer = false)}></button>
     {/if}
@@ -187,13 +195,13 @@
         {:else if app.route.view === 'focus'}
           <FocusView />
         {:else}
-          <ChatView onAdd={() => (adding = true)} />
+          <ChatView />
         {/if}
       </div>
     </div>
   </div>
   <Toasts />
-  <AddRemoteDialog bind:open={adding} />
+  <NewSandboxDialog />
   <QuitDialog />
   <SignInDialog />
   <PluginsDialog />

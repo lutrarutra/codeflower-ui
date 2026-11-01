@@ -9,8 +9,8 @@
   import WorkerOverview from './WorkerOverview.svelte';
   import { app } from './lib/app.svelte.ts';
   import { plural } from './lib/format.ts';
+  import { inRail } from './lib/rail.ts';
 
-  let { onAdd }: { onAdd: () => void } = $props();
   const empty = $derived(app.workbench.layout.tabs().length === 0);
   // The sandbox of the tab in front, else the one the sidebar lists.
   const worker = $derived(app.worker(app.workbench.focusedWorker() ?? app.browsing ?? app.route.worker));
@@ -18,6 +18,8 @@
   const elsewhere = $derived(!!worker && app.elsewhere(worker));
   const wrapUp = $derived(worker ? app.wrapUps[worker.id] : undefined);
   const browsed = $derived(app.worker(app.browsing ?? undefined));
+  /** Some sandbox is in the rail to choose. */
+  const railed = $derived(app.workers.some((worker) => inRail(worker, app.machine(worker.id), app.browsing)));
 
   async function openHere(): Promise<void> {
     if (worker) await app.openHere(worker);
@@ -81,16 +83,16 @@
   <main class="grid h-full place-items-center p-8 text-center">
     <div class="flex max-w-md flex-col items-center gap-3">
       <Tulip size={56} />
-      <h1 class="m-0 font-display text-2xl font-medium">{app.workers.length ? 'Choose a sandbox' : 'No sandbox yet'}</h1>
+      <h1 class="m-0 font-display text-2xl font-medium">{railed ? 'Choose a sandbox' : app.workers.length ? 'No sandbox running' : 'No sandbox yet'}</h1>
       <p class="m-0 text-muted">
-        {app.workers.length ? 'Pick one in the sidebar to see its chats.' : 'Start one on this computer, or add one running elsewhere, for example in a batch job.'}
+        {railed ? 'Pick one in the rail on the left to see its chats.' : 'Start one on a computer, or connect one running elsewhere, for example in a batch job.'}
       </p>
       <div class="flex flex-wrap justify-center gap-2">
-        {#if !app.system?.capabilities.connectOnly}
-          <button class="pill pill-primary" onclick={() => app.go({ view: 'server' })}>Start a sandbox</button>
+        {#if !app.single && (!app.system?.capabilities.connectOnly || tunnelConnectorId() !== undefined)}
+          <button class="pill pill-primary" onclick={() => (app.creating = { tab: 'start' })}>Start a sandbox</button>
         {/if}
         {#if !app.single && tunnelConnectorId() === undefined}
-          <button class="pill" onclick={onAdd}>Add remote sandbox</button>
+          <button class="pill" onclick={() => (app.creating = { tab: 'connect' })}>Connect one running elsewhere</button>
         {/if}
       </div>
     </div>

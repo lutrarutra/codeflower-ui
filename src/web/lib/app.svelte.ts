@@ -90,6 +90,8 @@ class AppState {
   takeOver = $state<Record<string, boolean>>({});
   /** A sandbox's line from a link it printed, waiting for the user to add it. */
   offered = $state<string | null>(null);
+  /** The New sandbox dialog, open: starting on a computer (by its key), or connecting one running elsewhere. */
+  creating = $state<{ tab: 'start' | 'connect'; machine?: string } | null>(null);
   /** Opens the quit dialog; set by the shell. */
   askToQuit: () => void = () => {};
   /** The latest wrap-up a sandbox announced, by sandbox. */

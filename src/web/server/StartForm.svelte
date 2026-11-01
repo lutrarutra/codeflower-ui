@@ -6,7 +6,16 @@
   import { accent, FOLDER_KINDS, short, targets, type FolderKind } from '../lib/format.ts';
   import FolderBrowser from './FolderBrowser.svelte';
 
-  let { machine, recheck }: { machine: Machine; recheck: (query: { engine: string; image: string; imageTag: string }) => void } = $props();
+  let {
+    machine,
+    recheck,
+    onStarted
+  }: {
+    machine: Machine;
+    recheck: (query: { engine: string; image: string; imageTag: string }) => void;
+    /** The sandbox started, by the page's id; without it, the page scrolls to its card. */
+    onStarted?: (id: string) => void;
+  } = $props();
 
   // The choices start from the ones the app remembers from the last start.
   // The form starts from the computer's settings; the Server view makes a new one for another computer.
@@ -59,7 +68,8 @@
         body: { agent, ...folders, isolateNetwork: isolate, project: project.trim(), engine, image: image.trim(), imageTag: imageTag.trim() }
       });
       await app.refreshWorkers();
-      document.getElementById(`sandbox-${machine.qualify(worker.id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (onStarted) onStarted(machine.qualify(worker.id));
+      else document.getElementById(`sandbox-${machine.qualify(worker.id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     } finally {
