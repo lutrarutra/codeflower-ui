@@ -4,6 +4,7 @@
   // A tab of its own, and what an empty grid shows.
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
+  import AgentSetup from './lib/AgentSetup.svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
@@ -57,31 +58,7 @@
       {/if}
     </section>
     {#if !elsewhere}
-      <section class="card flex flex-wrap items-center gap-3 p-4">
-        <div class="min-w-0 flex-1">
-          <h2 class="m-0 flex items-center gap-2 font-display text-lg font-medium">
-            Agent sign-in
-            {#if agent.status?.signedIn === true}
-              <span class="tag bg-green-soft font-sans text-green">signed in</span>
-            {:else if agent.status?.signedIn === false}
-              <span class="tag bg-yellow-soft font-sans text-orange">not signed in</span>
-            {/if}
-          </h2>
-          <p class="m-0 text-muted">The agent's login or keys stay in this sandbox's project. Sign in again to switch accounts.</p>
-        </div>
-        <button class="pill pill-small {agent.status?.signedIn === false ? 'pill-primary' : ''}" onclick={() => void app.signIn.start(agent)}>
-          {agent.status?.signedIn ? 'Switch account…' : 'Sign in…'}
-        </button>
-      </section>
-      {#if agent.status?.capabilities?.plugins}
-        <section class="card flex flex-wrap items-center gap-3 p-4">
-          <div class="min-w-0 flex-1">
-            <h2 class="m-0 font-display text-lg font-medium">Plugins</h2>
-            <p class="m-0 text-muted">The agent's own plugins in this project: browse its catalog, or add one from its source.</p>
-          </div>
-          <button class="pill pill-small" onclick={() => (app.plugins = { worker, agent })}>Plugins…</button>
-        </section>
-      {/if}
+      <AgentSetup {worker} {agent} boxed />
     {/if}
   {:else if worker.error}
     <p class="m-0 text-red">{worker.error}</p>

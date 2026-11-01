@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { tunnelConnectorId } from '../../tunnel/connect.ts';
   import ActivityChips from '../lib/ActivityChips.svelte';
+  import AgentSetup from '../lib/AgentSetup.svelte';
   import ConnectLine from '../lib/ConnectLine.svelte';
   import StatusDot from '../lib/StatusDot.svelte';
   import UsageChips from '../lib/UsageChips.svelte';
@@ -36,7 +38,17 @@
     ].join('\n')
   );
   const forgettable = $derived(canForget(worker));
+  // The agent's sign-in and plugins, for a sandbox with a chat. It needs a connection, which an older
+  // sandbox that another window has would lose to this one: then it shows nothing.
+  const chats = $derived(worker.status === 'ready' && worker.kind !== 'task' && !!worker.url);
+  const agent = $derived(chats ? app.agent(worker.id) : undefined);
+  const elsewhere = $derived(app.elsewhere(worker));
   let log: HTMLPreElement | undefined = $state();
+
+  $effect(() => {
+    const current = agent;
+    if (current && !elsewhere && current.state === 'idle') untrack(() => void current.connect().catch(() => undefined));
+  });
 
   $effect(() => {
     void worker.log.length;
@@ -93,6 +105,9 @@
       >
     {/if}
   </header>
+  {#if agent && !elsewhere}
+    <div class="flex flex-col gap-3 border-t border-soft-line pt-3"><AgentSetup {worker} {agent} /></div>
+  {/if}
   {#if worker.url && tunnelConnectorId() === undefined}
     <details>
       <summary class="cursor-pointer text-[0.9em] font-semibold text-muted">Connect from VS Code</summary>
