@@ -1,0 +1,78 @@
+/* The code flower look: paper and ink, rounded cards, pill
+   buttons, and a playful palette. Borders are thin and quiet; depth comes from
+   the surfaces' shades (paper, card, code) and soft shadows, and color from
+   fills. Light themes get the paper, dark themes a deep ink.
+
+   Shared by the chat (the extension's webview and the app's page) and the docs
+   site. Dark values apply under `cf-dark` (which the chat's host sets on the
+   body) or `data-theme="dark"` (which the docs site sets on <html>). */
+:root {
+  --cf-paper: #f6efd9;
+  /* Below the paper: the frame around the work (sidebar, tab strips). */
+  --cf-sunken: #ede3c6;
+  --cf-card: #fffaf0;
+  --cf-ink: #1d1d1f;
+  --cf-muted: #6b5d45;
+  --cf-line: #d5c7a2;
+  --cf-soft-line: #e6dcc2;
+  --cf-shadow: transparent;
+  --cf-code: #efe5c9;
+
+  --cf-indigo: #4f46e5;
+  --cf-indigo-soft: #e4e1ff;
+  --cf-teal: #0f9d8a;
+  --cf-teal-soft: #d3f1eb;
+  --cf-pink: #e8668f;
+  --cf-pink-soft: #fde1ea;
+  --cf-yellow: #ffcf3f;
+  --cf-yellow-soft: #fff1c2;
+  --cf-orange: #ed9e4b;
+  --cf-red: #e5483b;
+  --cf-green: #3a9d4b;
+  --cf-green-soft: #dcf1d8;
+  --cf-violet: #8b5cf6;
+  --cf-violet-soft: #ece4ff;
+  --cf-cyan: #0f8fb0;
+  --cf-on-accent: #ffffff;
+
+  --cf-border-width: 1px;
+  --cf-lift: 0px;
+  /* Soft shadows: a card above the page, and a button under the pointer. */
+  --cf-elevation: 0 1px 2px rgb(77 61 31 / 0.05), 0 4px 16px rgb(77 61 31 / 0.06);
+  --cf-hover: 0 2px 8px rgb(77 61 31 / 0.12);
+}
+
+/* Dark themes are not the paper look inverted: surfaces are warm charcoal. */
+.cf-dark,
+[data-theme='dark'] {
+  --cf-paper: #1c1b21;
+  --cf-sunken: #16151a;
+  --cf-card: #25242c;
+  --cf-ink: #ece6d6;
+  --cf-muted: #a19a8b;
+  --cf-line: #45424f;
+  --cf-soft-line: #34323c;
+  --cf-shadow: transparent;
+  --cf-code: #2c2a33;
+
+  --cf-indigo: #7f78ff;
+  --cf-indigo-soft: #2b2946;
+  --cf-teal: #3cc9b4;
+  --cf-teal-soft: #1b3533;
+  --cf-pink: #f08cab;
+  --cf-pink-soft: #3d2530;
+  --cf-yellow: #ffd75e;
+  --cf-yellow-soft: #352f1e;
+  --cf-orange: #f2a65a;
+  --cf-green: #6cc77b;
+  --cf-green-soft: #1f3522;
+  --cf-red: #f07167;
+  --cf-violet: #a98bff;
+  --cf-violet-soft: #2f2846;
+  --cf-cyan: #5fd6f5;
+
+  --cf-border-width: 1px;
+  --cf-lift: 0px;
+  --cf-elevation: 0 6px 24px rgb(0 0 0 / 0.25);
+  --cf-hover: 0 2px 10px rgb(0 0 0 / 0.35);
+}

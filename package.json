@@ -8,7 +8,8 @@
   "exports": {
     "./protocol/*": "./src/protocol/*",
     "./client/*": "./src/client/*",
-    "./chat/*": "./src/chat/*"
+    "./chat/*": "./src/chat/*",
+    "./theme/*": "./src/theme/*"
   },
   "files": [
     "src"
