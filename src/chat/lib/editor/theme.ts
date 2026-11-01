@@ -25,7 +25,10 @@ export const editorTheme = EditorView.theme({
   '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--cf-orange) 45%, transparent)' },
   '&.cm-focused .cm-matchingBracket': { backgroundColor: 'color-mix(in srgb, var(--cf-teal) 25%, transparent)' },
   '&.cm-focused .cm-nonmatchingBracket': { backgroundColor: 'color-mix(in srgb, var(--cf-red) 25%, transparent)' },
-  '.cm-gutters': { backgroundColor: 'var(--cf-card)', color: 'var(--cf-muted)', border: 'none' },
+  // Line numbers at the left edge, set off from the code by a thin line, as in VS Code.
+  '.cm-gutters': { backgroundColor: 'var(--cf-card)', color: 'var(--cf-muted)', border: 'none', borderRight: '1px solid var(--cf-soft-line)' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 6px 0 8px' },
+  '.cm-line': { paddingLeft: '8px' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--cf-ink)' },
   '.cm-foldPlaceholder': { backgroundColor: 'var(--cf-code)', border: 'none', color: 'var(--cf-muted)', padding: '0 0.4em' },
   '.cm-panels': { backgroundColor: 'var(--cf-sunken)', color: 'var(--cf-ink)' },

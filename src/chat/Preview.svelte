@@ -342,7 +342,12 @@
       </div>
     {/if}
 
-    <section class="min-h-0 flex-1 overflow-auto px-4 py-3">
+    <!-- The editor fills the section edge to edge, as in VS Code; other views keep their margins. -->
+    <section
+      class="min-h-0 flex-1 {editing && text !== null && preview.data && !preview.error
+        ? 'mb-3 overflow-hidden border-b-[1.5px] border-soft-line'
+        : 'overflow-auto px-4 py-3'}"
+    >
       {#if preview.error}
         <div class="m-auto flex max-w-sm flex-col items-center gap-2 py-10 text-center text-muted">
           <span class="codicon codicon-warning text-2xl! text-pink"></span>
@@ -354,11 +359,11 @@
         </div>
       {:else if editing && text !== null}
         {#await loadEditor()}
-          <div class="flex items-center gap-2 py-10 text-muted">
+          <div class="flex items-center gap-2 px-4 py-10 text-muted">
             <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading the editor…
           </div>
         {:then { default: CodeEditor }}
-          <div class="card h-full overflow-hidden p-0">
+          <div class="h-full overflow-hidden">
             <CodeEditor
               bind:this={editor}
               {text}
