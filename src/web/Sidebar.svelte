@@ -48,12 +48,6 @@
     showing = 'chats';
   }
 
-  /** The sandbox's folders, in the sidebar. */
-  function files(worker: Worker): void {
-    app.browse(worker.id);
-    showing = 'files';
-  }
-
   const browsed = $derived(app.worker(app.browsing ?? undefined));
   /** Other sandboxes have chats that finished or wait: the way back says so. */
   const othersNeed = $derived(app.attention.othersNeed(app.browsing));
@@ -260,7 +254,7 @@
                   <span class="tag bg-soft-line text-muted" title={SOURCE_TITLE[worker.source]}>{SOURCE_TEXT[worker.source]}</span>
                 </span>
                 <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
-                <span class="pl-[1.1rem] {browsable(worker) ? 'pr-16' : ''}"><ActivityChips {worker} compact /></span>
+                <span class="pl-[1.1rem]"><ActivityChips {worker} compact /></span>
               </button>
               {#if !single}
                 <button
@@ -272,11 +266,6 @@
                   onclick={(event) => manage(event, worker)}
                 >
                   <span class="codicon codicon-settings-gear"></span>
-                </button>
-              {/if}
-              {#if browsable(worker)}
-                <button class="chip absolute right-2 bottom-2" title="Browse the folders in the sandbox" onclick={() => files(worker)}>
-                  <span class="codicon codicon-list-tree"></span>Files
                 </button>
               {/if}
             </div>
