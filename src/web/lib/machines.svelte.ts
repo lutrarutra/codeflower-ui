@@ -8,6 +8,7 @@ import { connectorStream } from '../../tunnel/connect.ts';
 import { tunnelTransport } from '../../tunnel/transport.ts';
 import type { SystemInfo, Worker } from './api.ts';
 import { pageApiFits, qualify, splitId } from './machineIds.ts';
+import { keyHeaders } from './pageKey.ts';
 
 /** How long a computer that stopped answering counts as unreachable before it counts as offline. */
 const OFFLINE_MS = 5 * 60_000;
@@ -88,11 +89,18 @@ export class Machine {
     return { ...worker, id: this.qualify(worker.id) };
   }
 
-  /** Its app's API: /api/… relative to the page locally, /m/{connector}/api/… through the tunnel. */
+  /**
+   * Its app's API: /api/… relative to the page locally, with the page's key,
+   * /m/{connector}/api/… through the tunnel, where the connector authenticated
+   * the browser.
+   */
   async api<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const response = await fetch(this.connectorId ? `/m/${this.connectorId}${path}` : `.${path}`, {
       method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-      headers: options.body === undefined ? {} : { 'Content-Type': 'application/json' },
+      headers: {
+        ...(this.connectorId ? {} : keyHeaders()),
+        ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' })
+      },
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
     const data = (await response.json().catch(() => ({}))) as T & { error?: string };
@@ -107,8 +115,11 @@ export class Machine {
    */
   async openTransport(path: string): Promise<Transport> {
     if (this.connectorId) return tunnelTransport(await connectorStream(this.connectorId), path);
+    // A WebSocket cannot send the key: it opens with a one-time ticket.
+    const { ticket } = await this.api<{ ticket: string }>('/api/ticket', { body: {} });
     const url = new URL(`.${path}`, location.href);
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('ticket', ticket);
     return webSocketTransport(url.toString());
   }
 
