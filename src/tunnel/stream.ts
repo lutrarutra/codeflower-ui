@@ -2,7 +2,7 @@
 // WebSocket to /c/{connector}/stream, the tunnel's `ready`, then the Noise IK
 // handshake. Everything after is sealed; the tunnel only passes frames on.
 
-import { Initiator, MAX_PLAINTEXT, PROTOCOL, type Channel, type Keypair } from './noise.ts';
+import { Initiator, MAX_PLAINTEXT, PROTOCOL, type Channel, type StaticKey } from './noise.ts';
 import { unframe } from './envelope.ts';
 
 export interface Hello {
@@ -27,12 +27,19 @@ export class RefusedError extends Error {
   }
 }
 
+/** The answer was not from the paired computer's key. */
+export class KeyMismatchError extends Error {
+  constructor() {
+    super('The computer\'s key does not match the paired one. Pair this browser again.');
+  }
+}
+
 export interface StreamOptions {
   /** The tunnel's origin; this page's by default. */
   origin?: string;
   connectorId: string;
   connectorKey: Uint8Array;
-  keys: Keypair;
+  keys: StaticKey;
   hello?: Hello;
   timeoutMs?: number;
   /** Opens the WebSocket; tests pass one that sends the session cookie. */
@@ -116,24 +123,30 @@ export function openStream(options: StreamOptions): Promise<SecureStream> {
       }
       reject(error);
     };
+    // The handshake's steps wait for the browser's key (WebCrypto); the
+    // connector says nothing more until the browser's first request, so no
+    // frame arrives meanwhile.
     const onMessage = (event: MessageEvent) => {
+      void handle(event).catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
+    };
+    const handle = async (event: MessageEvent) => {
       if (!initiator) {
         // The tunnel's `ready`: the connector dialled back. Start the handshake.
         if (typeof event.data !== 'string' || JSON.parse(event.data).type !== 'ready') return fail(new Error('Unexpected answer from the tunnel'));
         initiator = new Initiator(options.keys, options.connectorId, options.connectorKey);
-        socket.send(initiator.start(new TextEncoder().encode(JSON.stringify({ v: PROTOCOL, ...options.hello }))) as Uint8Array<ArrayBuffer>);
+        socket.send((await initiator.start(new TextEncoder().encode(JSON.stringify({ v: PROTOCOL, ...options.hello })))) as Uint8Array<ArrayBuffer>);
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return fail(new Error('Unexpected answer from the computer'));
       let welcome: { v: number; error?: string };
       let channel: Channel;
       try {
-        const finished = initiator.finish(new Uint8Array(event.data));
+        const finished = await initiator.finish(new Uint8Array(event.data));
         welcome = JSON.parse(new TextDecoder().decode(finished.payload));
         channel = finished.channel;
       } catch {
         // A wrong key: this is not the paired computer, or the tunnel interfered.
-        return fail(new Error('The computer\'s key does not match the paired one. Pair this browser again.'));
+        return fail(new KeyMismatchError());
       }
       if (welcome.error) return fail(new RefusedError(welcome.error));
       clearTimeout(timer);

@@ -23,6 +23,21 @@ export function keypairFrom(privateKey: Uint8Array): Keypair {
   return { privateKey, publicKey: x25519.getPublicKey(privateKey) };
 }
 
+/**
+ * The browser's static key as the handshake uses it: its public half, and
+ * Diffie-Hellman with it. In the browser the private half is a WebCrypto key
+ * that cannot be exported (keys.ts): page code can use it, never read it.
+ */
+export interface StaticKey {
+  publicKey: Uint8Array;
+  dh(publicKey: Uint8Array): Promise<Uint8Array>;
+}
+
+/** A static key whose private half is in memory (tests, browsers without X25519 in WebCrypto). */
+export function staticKeyFrom(keypair: Keypair): StaticKey {
+  return { publicKey: keypair.publicKey, dh: async (publicKey) => x25519.getSharedSecret(keypair.privateKey, publicKey) };
+}
+
 export function generateKeypair(): Keypair {
   return keypairFrom(x25519.utils.randomSecretKey());
 }
@@ -119,10 +134,10 @@ export interface Channel {
 export class Initiator {
   private readonly state = new SymmetricState();
   private readonly ephemeral: Keypair;
-  private readonly local: Keypair;
+  private readonly local: StaticKey;
   private readonly remote: Uint8Array;
 
-  constructor(local: Keypair, connectorId: string, connectorKey: Uint8Array, ephemeral: Keypair = generateKeypair()) {
+  constructor(local: StaticKey, connectorId: string, connectorKey: Uint8Array, ephemeral: Keypair = generateKeypair()) {
     this.local = local;
     this.remote = connectorKey;
     this.ephemeral = ephemeral;
@@ -132,22 +147,22 @@ export class Initiator {
   }
 
   /** -> e, es, s, ss, with `payload`. */
-  start(payload: Uint8Array): Uint8Array {
+  async start(payload: Uint8Array): Promise<Uint8Array> {
     const e = this.ephemeral.publicKey;
     this.state.mixHash(e);
     this.state.mixKey(x25519.getSharedSecret(this.ephemeral.privateKey, this.remote));
     const s = this.state.encryptAndHash(this.local.publicKey);
-    this.state.mixKey(x25519.getSharedSecret(this.local.privateKey, this.remote));
+    this.state.mixKey(await this.local.dh(this.remote));
     return concatBytes(e, s, this.state.encryptAndHash(payload));
   }
 
   /** <- e, ee, se: returns the connector's payload and the channel. */
-  finish(message: Uint8Array): { payload: Uint8Array; channel: Channel } {
+  async finish(message: Uint8Array): Promise<{ payload: Uint8Array; channel: Channel }> {
     if (message.length < 32 + 16) throw new Error('The connector\'s handshake message is too short');
     const e = message.subarray(0, 32);
     this.state.mixHash(e);
     this.state.mixKey(x25519.getSharedSecret(this.ephemeral.privateKey, e));
-    this.state.mixKey(x25519.getSharedSecret(this.local.privateKey, e));
+    this.state.mixKey(await this.local.dh(e));
     const payload = this.state.decryptAndHash(message.subarray(32));
     const [toConnector, toBrowser] = this.state.split();
     return { payload, channel: { send: toConnector, receive: toBrowser } };

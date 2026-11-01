@@ -8,6 +8,7 @@
 
 import { pairedComputers } from '../tunnel/computers.ts';
 import { appPath, connectorStream, tunnelConnectorId } from '../tunnel/connect.ts';
+import { PAGE_CACHE } from '../tunnel/keys.ts';
 import { tunnelFetch } from '../tunnel/http.ts';
 import { RefusedError } from '../tunnel/stream.ts';
 
@@ -33,7 +34,7 @@ async function errorPage(connectorId: string, title: string, message: string, st
 
 // ---- the page's code, kept per computer and build ----
 
-const CACHE = 'cf-page:';
+const CACHE = PAGE_CACHE;
 /** The build each computer's page last came from, by connector: the name of its cache. */
 const builds = new Map<string, string>();
 const buildMeta = /<meta name="codeflower-build" content="([0-9a-f]{8,64})"/;

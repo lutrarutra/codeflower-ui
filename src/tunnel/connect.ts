@@ -2,8 +2,8 @@
 // requests go there (through the service worker), and its chats open
 // encrypted streams to that connector.
 
-import { browserKeypair, fromBase64url, pairedConnector } from './keys.ts';
-import { RefusedError, openStream, type Hello, type SecureStream } from './stream.ts';
+import { browserKey, clearPageCode, fromBase64url, pairedConnector } from './keys.ts';
+import { KeyMismatchError, RefusedError, openStream, type Hello, type SecureStream } from './stream.ts';
 
 const tunnelPath = /^\/m\/([a-z0-9_]{1,64})(\/.*)?$/;
 
@@ -21,5 +21,11 @@ export function appPath(url: URL): string {
 export async function connectorStream(connectorId: string, hello?: Hello): Promise<SecureStream> {
   const paired = await pairedConnector(connectorId);
   if (!paired) throw new RefusedError('not_paired');
-  return openStream({ connectorId, connectorKey: fromBase64url(paired.key), keys: await browserKeypair(), hello });
+  try {
+    return await openStream({ connectorId, connectorKey: fromBase64url(paired.key), keys: await browserKey(), hello });
+  } catch (error) {
+    // The computers this browser trusts changed: their kept page code goes.
+    if (error instanceof KeyMismatchError || (error instanceof RefusedError && error.code === 'not_paired')) await clearPageCode();
+    throw error;
+  }
 }

@@ -1,7 +1,7 @@
 // /p#{connector}.{key}.{secret}: pairs this browser with a computer. The
 // fragment never reaches the tunnel; it is removed from the address at once.
 
-import { browserKeypair, fingerprint, fromBase64url, rememberConnector } from '../tunnel/keys.ts';
+import { browserKey, fingerprint, fromBase64url, rememberConnector } from '../tunnel/keys.ts';
 import { openStream } from '../tunnel/stream.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -93,7 +93,7 @@ async function start(): Promise<void> {
       const stream = await openStream({
         connectorId: link.connectorId,
         connectorKey: fromBase64url(link.key),
-        keys: await browserKeypair(),
+        keys: await browserKey(),
         hello: { pair: link.secret, device: ($('device') as HTMLInputElement).value.trim() || deviceName(navigator.userAgent) }
       });
       stream.close();
