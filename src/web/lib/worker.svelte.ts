@@ -13,22 +13,6 @@ import {
   type TranscriptEntry
 } from '../../protocol/messages.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
-import { webSocketTransport, type Transport } from '../../client/transport.ts';
-import { connectorStream, tunnelConnectorId } from '../../tunnel/connect.ts';
-import { tunnelTransport } from '../../tunnel/transport.ts';
-
-/**
- * A chat's connection: the app's relay on this page's origin, or through the
- * tunnel an encrypted stream to the connector (the service worker that serves
- * the tunnelled page's requests cannot intercept WebSockets).
- */
-async function openTransport(path: string): Promise<Transport> {
-  const connectorId = tunnelConnectorId();
-  if (connectorId) return tunnelTransport(await connectorStream(connectorId), path);
-  const url = new URL(`.${path}`, location.href);
-  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return webSocketTransport(url.toString());
-}
 import {
   isAuthRequired,
   isConnectionClosed,
@@ -41,7 +25,7 @@ import {
   type WorkerStatus,
   type WrapUpNotice
 } from '../../client/workerConnection.ts';
-import { api } from './api.ts';
+import type { Machine } from './machines.svelte.ts';
 import { ChatSession, type ChatActions } from './chatSession.svelte.ts';
 
 const RECONNECT_MS = 10_000;
@@ -90,9 +74,18 @@ export class WebWorker {
   /** The user's last mode per agent, for new chats. */
   private static readonly MODES = 'codeflower.modes';
 
-  constructor(id: string, events: WorkerEvents) {
+  /** The computer it runs on. */
+  readonly machine: Machine;
+
+  constructor(id: string, events: WorkerEvents, machine: Machine) {
     this.id = id;
     this.events = events;
+    this.machine = machine;
+  }
+
+  /** Its path on its computer's app, e.g. /api/workers/{id}/acp. */
+  private path(rest: string): string {
+    return `/api/workers/${encodeURIComponent(this.machine.remoteId(this.id))}${rest}`;
   }
 
   get connected(): boolean {
@@ -110,7 +103,7 @@ export class WebWorker {
       return true;
     }
     try {
-      this.sessions = (await api<{ sessions: SessionRecord[] }>(`/api/workers/${encodeURIComponent(this.id)}/sessions`)).sessions;
+      this.sessions = (await this.machine.api<{ sessions: SessionRecord[] }>(this.path('/sessions'))).sessions;
       this.sessionsKnown = true;
       return true;
     } catch {
@@ -128,10 +121,9 @@ export class WebWorker {
   private async establish(): Promise<void> {
     this.state = 'connecting';
     this.error = '';
-    const path = `/api/workers/${encodeURIComponent(this.id)}/acp`;
     let connection: WorkerConnection | undefined;
     try {
-      connection = await WorkerConnection.connect(await openTransport(path), this.handlers(++this.generation), CLIENT);
+      connection = await WorkerConnection.connect(await this.machine.openTransport(this.path('/acp')), this.handlers(++this.generation), CLIENT);
       const actions = await connection.actions();
       this.connection = connection;
       this.availableActions = actions;
@@ -235,7 +227,11 @@ export class WebWorker {
   /** The chat for a session, attached once connected. */
   async open(key: string): Promise<ChatSession> {
     const existing = this.chats[key];
-    if (existing) return existing;
+    if (existing) {
+      // Chosen again after its connection went (e.g. closed after idle minutes): at once, not at the next retry.
+      if (this.state === 'disconnected') void this.connect().catch(() => undefined);
+      return existing;
+    }
     const session = this.sessions.find((candidate) => candidate.key === key);
     const chat = this.create(key, session?.title ?? 'Chat');
     try {

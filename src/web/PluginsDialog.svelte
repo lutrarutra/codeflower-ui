@@ -7,7 +7,6 @@
   import { servePlugins } from '../client/pluginsService.ts';
   import type { PluginsHostMessage, PluginsWebviewMessage } from '../protocol/plugins.ts';
   import type { Host } from '../chat/lib/host.ts';
-  import { api } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
 
   let dialog: HTMLDialogElement | undefined = $state();
@@ -42,7 +41,7 @@
       appFetch:
         worker.source === 'started' && !app.single
           ? async () => {
-              await api(`/api/workers/${encodeURIComponent(worker.id)}/plugins/fetch`, { method: 'POST' });
+              await app.workerApi(worker.id, '/plugins/fetch', { method: 'POST' });
             }
           : undefined,
       fetchHint: `Run \`codeflower plugins fetch --agent ${worker.agent} --project ${worker.project}\` where the sandbox was started and there is internet access, then restart the agent.`

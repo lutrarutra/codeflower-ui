@@ -169,6 +169,18 @@
       {#if app.quit?.quitting}
         <QuittingBanner />
       {/if}
+      {#if app.pageCodeLost}
+        {@const others = app.machines.filter((machine) => machine !== app.head && machine.reach === 'reachable')}
+        <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-3" role="status">
+          <div class="min-w-0 flex-1">
+            <strong>Part of this page could not load.</strong>
+            It comes from {app.head.name}, which does not answer. {others.length ? 'Open the page from another computer:' : 'Reload once it is back.'}
+          </div>
+          {#each others as machine (machine.key)}
+            <a class="pill pill-small" href={app.pageFrom(machine)}>{machine.name}</a>
+          {/each}
+        </section>
+      {/if}
       <div class="min-h-0 flex-1 overflow-auto">
         {#if app.route.view === 'server'}
           <ServerView />

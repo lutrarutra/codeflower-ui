@@ -40,6 +40,8 @@ export interface Settings {
 
 export interface SystemInfo {
   version: string;
+  /** The version of the API pages use (see machineIds.ts); missing from older apps. */
+  pageApi?: number;
   system: string;
   home: string;
   projects: string;
@@ -185,21 +187,6 @@ export interface FolderListing {
   folders: { name: string; path: string }[];
   files: number;
   places: { name: string; path: string }[];
-}
-
-/**
- * The app's API, relative to the page: /api/… locally, and under
- * /m/{connector}/ when the page comes through the tunnel.
- */
-export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const response = await fetch(path.startsWith('/') ? `.${path}` : path, {
-    method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-    headers: options.body === undefined ? {} : { 'Content-Type': 'application/json' },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
-  });
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || `The app answered ${response.status}`);
-  return data;
 }
 
 export async function copyText(text: string): Promise<void> {

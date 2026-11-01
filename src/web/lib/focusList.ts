@@ -30,6 +30,8 @@ export interface FocusChat {
   pinned: boolean;
   /** It finished while the user looked elsewhere. */
   unseen: boolean;
+  /** Its computer does not answer: the list shows it as last seen. */
+  unreachable?: boolean;
 }
 
 export type FocusGroupId = 'waiting' | 'working' | 'done' | 'idle';
@@ -72,10 +74,13 @@ export function arrange(chats: FocusChat[], now: number): FocusGroup[] {
 const same = (chat: FocusChat, other: { workerId: string; key: string } | null | undefined) =>
   !!other && chat.workerId === other.workerId && chat.key === other.key;
 
-/** The chat to go to next: the one waiting longest, else the one that finished unseen first; never the current one. */
+/**
+ * The chat to go to next: the one waiting longest, else the one that finished
+ * unseen first; never the current one, nor one whose computer does not answer.
+ */
 export function nextUp(groups: FocusGroup[], current: { workerId: string; key: string } | null): FocusChat | undefined {
   for (const id of ['waiting', 'done'] as const) {
-    const next = groups.find((group) => group.id === id)?.chats.find((chat) => !same(chat, current));
+    const next = groups.find((group) => group.id === id)?.chats.find((chat) => !same(chat, current) && !chat.unreachable);
     if (next) return next;
   }
   return undefined;

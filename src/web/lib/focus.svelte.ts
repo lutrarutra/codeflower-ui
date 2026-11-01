@@ -20,6 +20,12 @@ export interface FocusOwner {
   workers(): Worker[];
   /** The sandbox's agent; made on first use, without connecting. */
   agent(id: string): WebWorker;
+  /** The page can reach the sandbox's computer now. */
+  reachable(id: string): boolean;
+  /** Connecting would take an older sandbox over from another window. */
+  elsewhere(worker: Worker): boolean;
+  /** The name of the computer the sandbox runs on, when the page shows several; else none. */
+  machineName?(id: string): string | undefined;
   need(workerId: string, key: string): Need | undefined;
   /** The page shows the Focus view. */
   active(): boolean;
@@ -57,11 +63,25 @@ export class Focus {
     this.owner = owner;
     $effect.root(() => {
       $effect(() => this.track());
+      // The next chat's sandbox connects ahead, so going there does not wait for its connection
+      // (through the tunnel: a stream to its computer, the handshake and the agent's setup).
+      $effect(() => {
+        if (!owner.active()) return;
+        const next = this.next;
+        if (!next || next.unreachable) return;
+        untrack(() => {
+          const worker = owner.workers().find((one) => one.id === next.workerId);
+          const agent = owner.agent(next.workerId);
+          if (!worker || worker.status !== 'ready' || owner.elsewhere(worker)) return;
+          if (agent.state !== 'connected' && agent.state !== 'connecting' && agent.state !== 'taken-over')
+            void agent.connect().catch(() => undefined);
+        });
+      });
       $effect(() => {
         if (!owner.active()) return;
         const list = () => {
           for (const worker of untrack(() => owner.workers()))
-            if (chatty(worker) && worker.status === 'ready') void owner.agent(worker.id).listSessions();
+            if (chatty(worker) && worker.status === 'ready' && owner.reachable(worker.id)) void owner.agent(worker.id).listSessions();
         };
         list();
         const timer = setInterval(list, SESSIONS_MS);
@@ -124,8 +144,12 @@ export class Focus {
       const polled = new Map((worker.activity?.chats ?? []).map((chat) => [chat.key, chat]));
       const sessions = new Map(agent.sessions.map((session) => [session.key, session]));
       const keys = new Set([...polled.keys(), ...Object.keys(agent.chats), ...sessions.keys()]);
-      const [name, where] = workerTitle(worker);
+      const [name, place] = workerTitle(worker);
+      // Through the tunnel, the computer says where too.
+      const machine = this.owner.machineName?.(worker.id);
+      const where = machine ? (place ? `${machine}: ${place}` : machine) : place;
       const sandbox = names.filter((other) => other === name).length > 1 && where ? `${name} · ${where}` : name;
+      const unreachable = !this.owner.reachable(worker.id);
       for (const key of keys) {
         const chat = agent.chats[key];
         const activity = polled.get(key);
@@ -150,7 +174,8 @@ export class Focus {
           since,
           ...(updatedAt !== undefined ? { updatedAt } : {}),
           pinned: this.pins.includes(tab),
-          unseen: this.owner.need(worker.id, key) === 'done'
+          unseen: this.owner.need(worker.id, key) === 'done',
+          ...(unreachable ? { unreachable } : {})
         });
       }
     }

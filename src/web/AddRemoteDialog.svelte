@@ -1,6 +1,6 @@
 <script lang="ts">
   // A sandbox running elsewhere (a batch job, another computer), added by the line it printed.
-  import { api, type Worker } from './lib/api.ts';
+  import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
@@ -33,7 +33,7 @@
     busy = true;
     error = '';
     try {
-      const worker = await api<Worker>('/api/workers/connect', { body: { address: address.trim() } });
+      const worker = app.head.adopt(await app.head.api<Worker>('/api/workers/connect', { body: { address: address.trim() } }));
       address = '';
       dialog?.close();
       await app.refreshWorkers();

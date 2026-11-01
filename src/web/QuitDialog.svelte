@@ -1,7 +1,7 @@
 <script lang="ts">
   // Quitting: chats working in the sandboxes started here are asked to save
   // their work first; sandboxes running elsewhere keep running.
-  import { api, type QuitPlan } from './lib/api.ts';
+  import type { QuitPlan } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import { plural } from './lib/format.ts';
 
@@ -11,7 +11,7 @@
   async function ask(): Promise<void> {
     let current: QuitPlan;
     try {
-      current = await api<QuitPlan>('/api/quit');
+      current = await app.head.api<QuitPlan>('/api/quit');
     } catch {
       return;
     }
@@ -29,7 +29,7 @@
 
   async function quit(wrapUp: boolean): Promise<void> {
     dialog?.close();
-    app.setQuit(await api<QuitPlan>('/api/quit', { body: { wrapUp } }).catch(() => ({ stopping: true }) as QuitPlan));
+    app.setQuit(await app.head.api<QuitPlan>('/api/quit', { body: { wrapUp } }).catch(() => ({ stopping: true }) as QuitPlan));
   }
 
   app.askToQuit = () => void ask();

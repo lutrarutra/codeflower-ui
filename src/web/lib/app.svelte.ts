@@ -1,7 +1,12 @@
-// What the whole page shares: the computer's system info, the sandboxes (polled),
-// a quit in progress, and where the page is (#/chat/…, #/focus/… or #/server).
+// What the whole page shares: the computers and their sandboxes (polled), a
+// quit in progress, and where the page is (#/chat/…, #/focus/… or #/server/…).
+// Through the tunnel the page shows every paired computer (machines.svelte.ts).
 import type { WrapUpNotice } from '../../client/workerConnection.ts';
-import { api, type QuitPlan, type SystemInfo, type Worker } from './api.ts';
+import { pairedComputers } from '../../tunnel/computers.ts';
+import { tunnelConnectorId } from '../../tunnel/connect.ts';
+import type { QuitPlan, SystemInfo, Worker } from './api.ts';
+import { chooseHead, fromLink, gone, splitId } from './machineIds.ts';
+import { Machine, type RequestOptions } from './machines.svelte.ts';
 import { Previews } from './previews.svelte.ts';
 import { SignIn } from './signIn.svelte.ts';
 import { Attention } from './attention.svelte.ts';
@@ -18,14 +23,36 @@ export interface Route {
   worker?: string;
   /** The chat the user looks at. */
   session?: string;
+  /** The computer the Server view shows (its connector); none: the head. */
+  machine?: string;
 }
 
 const WORKERS_MS = 1500;
+/** How often a hidden page asks for the sandboxes. */
+const HIDDEN_MS = 10_000;
+/** How often the page looks for paired computers, and asks new ones what they are. */
+const DISCOVER_MS = 30_000;
+/** The page moved to the newest computer's page once in this tab. */
+const HEAD_MOVED = 'cf_head_moved';
+/** The user keeps the page of the computer in the address. */
+export const KEEP_PAGE = 'codeflower.keepPage';
+
+/** The head: the computer in the address, through the tunnel. */
+const head = tunnelConnectorId();
 
 function parseHash(hash: string): Route | undefined {
   const [view, worker, session] = hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
   if (view !== 'chat' && view !== 'focus' && view !== 'server') return undefined;
-  return { view, ...(worker ? { worker } : {}), ...(session ? { session } : {}) };
+  if (view === 'server') return { view, ...(worker ? { machine: worker } : {}) };
+  return { view, ...(worker ? { worker: fromLink(worker, head) } : {}), ...(session ? { session } : {}) };
+}
+
+function stored(storage: () => Storage, key: string): string | null {
+  try {
+    return storage().getItem(key);
+  } catch {
+    return null;
+  }
 }
 
 /** The worker line in a link a sandbox printed (`#add=codeflower://…`), to offer to add. */
@@ -40,18 +67,19 @@ export function addLine(hash: string): string | undefined {
 }
 
 export function routeHash(route: Route): string {
-  return `#/${[route.view, route.worker, route.session]
+  return `#/${(route.view === 'server' ? [route.view, route.machine] : [route.view, route.worker, route.session])
     .filter(Boolean)
     .map((part) => encodeURIComponent(part!))
     .join('/')}`;
 }
 
 class AppState {
-  system = $state<SystemInfo | null>(null);
-  systemError = $state('');
-  workers = $state<Worker[]>([]);
-  /** Whether the first list of sandboxes arrived. */
-  listed = $state(false);
+  /** The computer whose page this is: the page's origin, or the connector in the address. */
+  readonly head = new Machine(head);
+  /** The computers whose sandboxes the page shows, the head first. */
+  machines = $state<Machine[]>([this.head]);
+  /** Every computer's sandboxes, in the order of the computers. */
+  readonly workers = $derived(this.machines.flatMap((machine) => machine.workers));
   quit = $state<QuitPlan | null>(null);
   /** The client has stopped: the page has nothing more to show. */
   stopped = $state(false);
@@ -81,6 +109,13 @@ class AppState {
       this.wrapUps[worker.id] = notice;
     }
   };
+  /** Part of the page's code could not load from the head (it stopped answering). */
+  pageCodeLost = $state(false);
+  /** The page knows which computers it shows: until then it lets no sandbox go. */
+  private discovered = head === undefined;
+  /** The user did something on the page: it no longer moves to another computer's page. */
+  private interacted = false;
+  private lastPoll = 0;
 
   /** Signing a sandbox's agent in, and the links agents ask the user to open. */
   readonly signIn = new SignIn();
@@ -110,15 +145,22 @@ class AppState {
   readonly focus = new Focus({
     workers: () => this.workers,
     agent: (id) => this.agent(id),
+    reachable: (id) => this.reachable(id),
+    elsewhere: (worker) => this.elsewhere(worker),
+    machineName: (id) => (this.several ? this.machine(id).name : undefined),
     need: (worker, key) => this.attention.need(worker, key),
     active: () => this.route.view === 'focus',
     selected: (chat) => {
+      this.wake(chat.workerId);
       if (this.route.view !== 'focus') return;
       this.route = { view: 'focus', worker: chat.workerId, session: chat.key };
       history.replaceState(null, '', routeHash(this.route));
     }
   });
   private quitting = false;
+  private firstListed = false;
+  /** Computers whose list of sandboxes the page is waiting for. */
+  private readonly polling = new Set<Machine>();
 
   constructor() {
     this.workbench.mayClose = (tab) => {
@@ -131,7 +173,9 @@ class AppState {
     };
     this.workbench.onChatFocus = (chat) => {
       this.follow(chat);
-      if (chat) this.agents.get(chat.workerId)?.refreshUsage();
+      if (!chat) return;
+      this.wake(chat.workerId);
+      this.agents.get(chat.workerId)?.refreshUsage();
     };
     // Back to the page: the chat in front shows the quota as it is now.
     window.addEventListener('focus', () => {
@@ -146,6 +190,71 @@ class AppState {
       const route = parseHash(location.hash);
       if (route) this.go(route);
     });
+    // Code the page loads later (e.g. the sign-in terminal) comes from the head too.
+    if (head !== undefined)
+      window.addEventListener('vite:preloadError', (event) => {
+        event.preventDefault();
+        this.pageCodeLost = true;
+      });
+    const interacted = () => (this.interacted = true);
+    window.addEventListener('pointerdown', interacted, { once: true, capture: true });
+    window.addEventListener('keydown', interacted, { once: true, capture: true });
+  }
+
+  /** The head's system info: what the page itself is (a sandbox's own page, connect only). */
+  get system(): SystemInfo | null {
+    return this.head.system;
+  }
+
+  /** The first list of sandboxes arrived, from any computer. */
+  get listed(): boolean {
+    return this.machines.some((machine) => machine.listed);
+  }
+
+  /** The page shows several computers' sandboxes. */
+  get several(): boolean {
+    return this.machines.length > 1;
+  }
+
+  /** The key of the computer a sandbox (by the page's id) runs on. */
+  private machineKey(id: string): string {
+    return head === undefined ? '' : (splitId(id).connectorId ?? '');
+  }
+
+  /** The computer a sandbox (by the page's id) runs on; the head for ids that name none. */
+  machine(id: string): Machine {
+    const key = this.machineKey(id);
+    return this.machines.find((machine) => machine.key === key) ?? this.head;
+  }
+
+  /**
+   * A chat came to the front: if its connection went (the tunnel closes chats
+   * after idle minutes), it connects again at once, not at the next retry.
+   */
+  private wake(workerId: string): void {
+    const agent = this.agents.get(workerId);
+    if (agent?.state === 'disconnected' && Object.keys(agent.chats).length) void agent.connect().catch(() => undefined);
+  }
+
+  /** A request about one sandbox to its computer's app: `rest` follows /api/workers/{its id}. */
+  workerApi<T>(id: string, rest: string, options?: RequestOptions): Promise<T> {
+    const machine = this.machine(id);
+    return machine.api<T>(`/api/workers/${encodeURIComponent(machine.remoteId(id))}${rest}`, options);
+  }
+
+  /** The address of this page, with the same route, as another computer serves it. */
+  pageFrom(machine: Machine): string {
+    return `/m/${machine.connectorId}/${routeHash(this.route)}`;
+  }
+
+  /** The computer the Server view shows. */
+  get serverMachine(): Machine {
+    return this.machines.find((machine) => machine.connectorId === this.route.machine) ?? this.head;
+  }
+
+  /** The page can reach the sandbox's computer now. */
+  reachable(id: string): boolean {
+    return this.machine(id).reach === 'reachable';
   }
 
   /**
@@ -172,6 +281,7 @@ class AppState {
   go(route: Route): void {
     // A sandbox's own page has no Server view.
     if (this.single && route.view === 'server') route = { view: 'chat', ...(this.workers[0] ? { worker: this.workers[0].id } : {}) };
+    if (route.view === 'server' && route.machine === this.head.connectorId) route = { view: 'server' };
     const again = route.view === 'chat' && route.worker !== undefined && route.worker === this.browsing && this.route.view === 'chat';
     // Back to the chats: the address names the chat in front, and the sidebar stays as it was.
     const focused = route.view === 'chat' && !route.worker ? this.workbench.focusedChat() : undefined;
@@ -251,7 +361,7 @@ class AppState {
   agent(id: string): WebWorker {
     let agent = this.agents.get(id);
     if (!agent) {
-      agent = new WebWorker(id, this.events);
+      agent = new WebWorker(id, this.events, this.machine(id));
       const worker = this.worker(id);
       if (worker) agent.place = worker.source === 'added' ? (worker.address ?? '') : worker.project;
       this.agents.set(id, agent);
@@ -259,53 +369,107 @@ class AppState {
     return agent;
   }
 
-  async loadSystem(query?: { engine: string; image: string; imageTag: string }): Promise<void> {
+  /**
+   * Asks every computer the page reaches for its sandboxes, each on its own, so
+   * one that is slow to answer holds up none of the others. A computer that
+   * does not answer keeps its last list, and its tabs; a sandbox goes when its
+   * own computer answers without it.
+   */
+  async refreshWorkers(): Promise<void> {
+    this.lastPoll = Date.now();
+    await Promise.all(this.machines.map((machine) => this.refreshMachine(machine)));
+  }
+
+  private async refreshMachine(machine: Machine): Promise<void> {
+    if (!machine.polled || this.polling.has(machine)) return;
+    this.polling.add(machine);
+    let answered: boolean;
     try {
-      this.system = await api<SystemInfo>(query ? `/api/system?${new URLSearchParams(query)}` : '/api/system');
-      this.systemError = '';
-    } catch (error) {
-      this.systemError = error instanceof Error ? error.message : String(error);
+      answered = await machine.refreshWorkers();
+    } finally {
+      this.polling.delete(machine);
+    }
+    if (machine === this.head) {
+      if (!answered) {
+        // The client stopped while it was quitting.
+        if (this.quitting) this.stopped = true;
+        return;
+      }
+      // A sandbox's own page opens on it.
+      const only = this.workers[0];
+      if (!this.firstListed && this.single && only && this.route.view !== 'focus' && (this.route.view !== 'chat' || this.route.worker !== only.id)) {
+        this.go({ view: 'chat', worker: only.id, ...(this.route.worker === only.id && this.route.session ? { session: this.route.session } : {}) });
+      }
+      this.firstListed = true;
+    }
+    if (!answered) return;
+    for (const worker of machine.workers) {
+      const agent = this.agents.get(worker.id);
+      if (agent) agent.place = worker.source === 'added' ? (worker.address ?? '') : worker.project;
+    }
+    if (this.discovered) this.letGo();
+    // A quit may have begun elsewhere: Ctrl+C in the terminal, or the tray.
+    if (machine === this.head && (this.quitting || machine.workers.some((worker) => worker.quitting))) {
+      this.setQuit(await machine.api<QuitPlan>('/api/quit').catch(() => ({ stopping: true }) as QuitPlan));
     }
   }
 
-  async refreshWorkers(): Promise<void> {
+  /** Sandboxes gone from their computer's list (stopped, forgotten) close their connection, and their tabs. */
+  private letGo(): void {
+    const listings = new Map(this.machines.map((machine) => [machine.key, machine.listed ? new Set(machine.workers.map((worker) => worker.id)) : undefined]));
+    const ids = new Set([...this.agents.keys(), ...this.workbench.layout.tabs().map((tab) => splitTab(tab).workerId)]);
+    if (this.browsing) ids.add(this.browsing);
+    for (const id of gone(ids, listings, (id) => this.machineKey(id))) {
+      const agent = this.agents.get(id);
+      if (agent) {
+        agent.close();
+        this.agents.delete(id);
+        this.previews.closeWorker(id);
+        this.signIn.closeWorker(id);
+      }
+      this.workbench.removeWorker(id);
+      if (this.browsing === id) this.browsing = null;
+    }
+  }
+
+  /**
+   * Through the tunnel: the computers this browser is paired with. New ones say
+   * what they are (their system info) before the page asks for their sandboxes.
+   */
+  private async discover(): Promise<void> {
+    if (head === undefined) return;
+    const found = await pairedComputers(head);
+    const machines = found.map((item) => {
+      const machine = this.machines.find((known) => known.connectorId === item.id) ?? new Machine(item.id);
+      if (item.name) machine.name = item.name;
+      if (item.online !== undefined) machine.online = item.online || machine === this.head;
+      if (item.onAccount !== undefined) machine.elsewhere = !item.onAccount;
+      return machine;
+    });
+    // The head first, then by name.
+    this.machines = [this.head, ...machines.filter((machine) => machine !== this.head).sort((a, b) => a.name.localeCompare(b.name))];
+    await Promise.all(this.machines.map((machine) => (!machine.system && machine.online && !machine.elsewhere ? machine.loadSystem() : undefined)));
+    this.discovered = true;
+  }
+
+  /**
+   * Once per tab, as the page loads: the newest computer's page runs, as a newer
+   * page can use older apps and not the other way round. The address keeps the
+   * route, whose ids name their computers.
+   */
+  private moveToNewestPage(): void {
+    if (head === undefined || this.interacted || stored(() => localStorage, KEEP_PAGE) === 'true' || stored(() => sessionStorage, HEAD_MOVED)) return;
+    const candidates = this.machines
+      .filter((machine) => machine.system && machine.online && !machine.elsewhere)
+      .map((machine) => ({ connectorId: machine.connectorId!, pageApi: machine.system!.pageApi, version: machine.system!.version }));
+    const target = chooseHead(head, candidates);
+    if (target === head) return;
     try {
-      this.workers = await api<Worker[]>('/api/workers');
-      const first = !this.listed;
-      this.listed = true;
-      // A sandbox's own page opens on it.
-      const only = this.workers[0];
-      if (first && this.single && only && this.route.view !== 'focus' && (this.route.view !== 'chat' || this.route.worker !== only.id)) {
-        this.go({ view: 'chat', worker: only.id, ...(this.route.worker === only.id && this.route.session ? { session: this.route.session } : {}) });
-      }
-      for (const worker of this.workers) {
-        const agent = this.agents.get(worker.id);
-        if (agent) agent.place = worker.source === 'added' ? (worker.address ?? '') : worker.project;
-      }
-      // A sandbox gone from the list (stopped, forgotten) closes its connection, and its tabs.
-      const listed = new Set(this.workers.map((worker) => worker.id));
-      for (const [id, agent] of this.agents) {
-        if (!listed.has(id)) {
-          agent.close();
-          this.agents.delete(id);
-          this.previews.closeWorker(id);
-          this.signIn.closeWorker(id);
-        }
-      }
-      for (const tab of this.workbench.layout.tabs()) {
-        const { workerId } = splitTab(tab);
-        if (!listed.has(workerId)) this.workbench.removeWorker(workerId);
-      }
-      if (this.browsing && !listed.has(this.browsing)) this.browsing = null;
+      sessionStorage.setItem(HEAD_MOVED, target);
     } catch {
-      // The client stopped while it was quitting.
-      if (this.quitting) this.stopped = true;
       return;
     }
-    // A quit may have begun elsewhere: Ctrl+C in the terminal, or the tray.
-    if (this.quitting || this.workers.some((worker) => worker.quitting)) {
-      this.setQuit(await api<QuitPlan>('/api/quit').catch(() => ({ stopping: true }) as QuitPlan));
-    }
+    location.replace(`/m/${target}/${routeHash(this.route)}`);
   }
 
   /** The page is served by one sandbox itself, and shows only it. */
@@ -324,8 +488,16 @@ class AppState {
 
   start(): void {
     // The system first: it says whether this is a sandbox's own page.
-    void this.loadSystem().then(() => this.refreshWorkers());
-    setInterval(() => void this.refreshWorkers(), WORKERS_MS);
+    void this.head.loadSystem().then(async () => {
+      await this.discover().catch(() => undefined);
+      this.moveToNewestPage();
+      await this.refreshWorkers();
+    });
+    setInterval(() => {
+      if (document.hidden && Date.now() - this.lastPoll < HIDDEN_MS) return;
+      void this.refreshWorkers();
+    }, WORKERS_MS);
+    if (head !== undefined) setInterval(() => void this.discover().catch(() => undefined), DISCOVER_MS);
   }
 }
 

@@ -294,7 +294,7 @@
     depth,
     !mount.readOnly,
     'folder',
-    `${short(mount.source, app.system?.home)} · ${mount.readOnly ? 'read-only' : 'read-write'}`,
+    `${short(mount.source, app.machine(workerId).system?.home)} · ${mount.readOnly ? 'read-only' : 'read-write'}`,
     `${mount.target}\nfrom ${mount.source}`
   )}
 {/snippet}

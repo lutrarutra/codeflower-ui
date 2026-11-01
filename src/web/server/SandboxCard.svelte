@@ -4,7 +4,7 @@
   import ConnectLine from '../lib/ConnectLine.svelte';
   import StatusDot from '../lib/StatusDot.svelte';
   import UsageChips from '../lib/UsageChips.svelte';
-  import { api, type Worker } from '../lib/api.ts';
+  import type { Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
   import { canForget, canStop, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
 
@@ -44,12 +44,12 @@
   });
 
   async function stop(): Promise<void> {
-    await api(`/api/workers/${worker.id}/stop`, { body: {} }).catch(() => undefined);
+    await app.workerApi(worker.id, '/stop', { body: {} }).catch(() => undefined);
     await app.refreshWorkers();
   }
 
   async function forget(): Promise<void> {
-    await api(`/api/workers/${worker.id}`, { method: 'DELETE', body: {} }).catch(() => undefined);
+    await app.workerApi(worker.id, '', { method: 'DELETE', body: {} }).catch(() => undefined);
     await app.refreshWorkers();
   }
 </script>

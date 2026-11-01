@@ -1,8 +1,10 @@
 <script lang="ts">
   // This computer's processors and memory, refreshed like htop while the page shows.
-  import { api, type Resources } from '../lib/api.ts';
-  import { app } from '../lib/app.svelte.ts';
+  import type { Resources } from '../lib/api.ts';
   import { bytes } from '../lib/format.ts';
+  import type { Machine } from '../lib/machines.svelte.ts';
+
+  let { machine }: { machine: Machine } = $props();
 
   let resources = $state<Resources | null>(null);
 
@@ -12,7 +14,7 @@
       if (loading || document.hidden) return;
       loading = true;
       try {
-        resources = await api<Resources>('/api/resources');
+        resources = await machine.api<Resources>('/api/resources');
       } catch {
         // The app may be busy or gone; the next refresh tries again.
       } finally {
@@ -28,7 +30,7 @@
   const share = (value: number, total: number) => (total ? (100 * value) / total : 0);
   const average = $derived(resources?.cores.length ? resources.cores.reduce((sum, core) => sum + busy(core), 0) / resources.cores.length : 0);
   // Docker Desktop's virtual machine has its own share of this computer.
-  const desktop = $derived(app.system?.engine === 'docker' && /macOS|Windows/.test(app.system.system || ''));
+  const desktop = $derived(machine.system?.engine === 'docker' && /macOS|Windows/.test(machine.system.system || ''));
 </script>
 
 {#snippet meter(segments: [string, number][])}

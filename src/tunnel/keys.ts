@@ -83,6 +83,12 @@ export async function pairedConnector(id: string): Promise<PairedConnector | und
   return run<PairedConnector | undefined>('readonly', (store) => store.get(`connector:${id}`));
 }
 
+/** Every computer this browser is paired with. */
+export async function pairedConnectors(): Promise<PairedConnector[]> {
+  const range = IDBKeyRange.bound('connector:', 'connector;', false, true);
+  return run<PairedConnector[]>('readonly', (store) => store.getAll(range));
+}
+
 export async function rememberConnector(connector: PairedConnector): Promise<void> {
   await run('readwrite', (store) => store.put(connector, `connector:${connector.id}`));
 }

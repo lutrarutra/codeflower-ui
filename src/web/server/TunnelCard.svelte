@@ -3,7 +3,7 @@
   // browsers and phones, turn it off. Only on the computer itself (the app
   // refuses /api/tunnel through the tunnel), and hidden by apps without it.
   import { tunnelConnectorId } from '../../tunnel/connect.ts';
-  import { api, copyText, type TunnelPairing, type TunnelStatus } from '../lib/api.ts';
+  import { copyText, type TunnelPairing, type TunnelStatus } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
   import Status from './Status.svelte';
 
@@ -15,7 +15,7 @@
   let chosen = $state<string[]>([]);
   let copied = $state(false);
 
-  const here = $derived(app.workers.filter((worker) => worker.source !== 'added'));
+  const here = $derived(app.head.workers.filter((worker) => worker.source !== 'added'));
 
   $effect(() => {
     if (!local) return;
@@ -24,7 +24,7 @@
       if (loading || document.hidden) return;
       loading = true;
       try {
-        status = await api<TunnelStatus>('/api/tunnel');
+        status = await app.head.api<TunnelStatus>('/api/tunnel');
       } catch {
         // An app without remote access from the page; the card stays hidden.
       } finally {
@@ -44,7 +44,7 @@
     busy = true;
     error = '';
     try {
-      const answer = await api<TunnelStatus & { warning?: string }>(path, { method, body });
+      const answer = await app.head.api<TunnelStatus & { warning?: string }>(path, { method, body });
       status = answer;
       if (answer.warning) error = answer.warning;
     } catch (err) {
@@ -61,7 +61,7 @@
     error = '';
     copied = false;
     try {
-      pairing = await api<TunnelPairing>('/api/tunnel/pair', { body: status?.hardened ? { workers: chosen } : {} });
+      pairing = await app.head.api<TunnelPairing>('/api/tunnel/pair', { body: status?.hardened ? { workers: chosen } : {} });
     } catch (err) {
       error = (err as Error).message;
     } finally {

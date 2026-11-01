@@ -2,7 +2,7 @@
   // A sandbox's name in the list; an added one's address and token, as when it
   // restarted elsewhere or with a new token; and removing it from the list.
   import { tick } from 'svelte';
-  import { api, type Worker } from './lib/api.ts';
+  import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import { canForget, workerTitle } from './lib/format.ts';
 
@@ -55,7 +55,7 @@
     busy = true;
     error = '';
     try {
-      await api<Worker>(`/api/workers/${shown.id}`, { method: 'PATCH', body });
+      await app.workerApi<Worker>(shown.id, '', { method: 'PATCH', body });
       await app.refreshWorkers();
       dialog?.close();
     } catch (failure) {
@@ -70,7 +70,7 @@
     busy = true;
     error = '';
     try {
-      await api(`/api/workers/${shown.id}`, { method: 'DELETE', body: {} });
+      await app.workerApi(shown.id, '', { method: 'DELETE', body: {} });
       if (app.route.worker === shown.id) app.go({ view: 'chat' });
       await app.refreshWorkers();
       dialog?.close();

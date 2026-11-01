@@ -1,24 +1,45 @@
 <script lang="ts">
-  // Starting sandboxes on this computer, and the ones that run here.
+  // Starting sandboxes on a computer, and the ones that run there. Through the
+  // tunnel the page may show several computers: one at a time, chosen on top.
   import Skeleton from '../../chat/lib/Skeleton.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { REACH_TEXT } from '../lib/format.ts';
   import EngineCard from './EngineCard.svelte';
   import ResourcesCard from './ResourcesCard.svelte';
   import SandboxCard from './SandboxCard.svelte';
   import StartForm from './StartForm.svelte';
+  import Status from './Status.svelte';
   import TunnelCard from './TunnelCard.svelte';
 
-  const here = $derived(app.workers.filter((worker) => worker.source !== 'added'));
-  const connectOnly = $derived(app.system?.capabilities.connectOnly ?? false);
+  const machine = $derived(app.serverMachine);
+  const here = $derived(machine.workers.filter((worker) => worker.source !== 'added'));
+  const connectOnly = $derived(machine.system?.capabilities.connectOnly ?? false);
+  const reach = $derived(machine.reach);
 
   function recheck(query?: { engine: string; image: string; imageTag: string }): void {
-    void app.loadSystem(query);
+    void machine.loadSystem(query);
   }
 </script>
 
 <main class="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6">
+  {#if app.several}
+    <div class="flex flex-wrap gap-1.5" role="tablist" aria-label="Computer">
+      {#each app.machines as one (one.key)}
+        <button
+          role="tab"
+          aria-selected={one === machine}
+          class="pill pill-small {one === machine ? 'pill-primary' : ''} {one.reach === 'reachable' || one.reach === 'loading' ? '' : 'opacity-60'}"
+          title={one === app.head ? 'This page comes from this computer' : REACH_TEXT[one.reach]}
+          onclick={() => app.go({ view: 'server', ...(one === app.head ? {} : { machine: one.connectorId }) })}
+        >
+          <span class="codicon codicon-{one === app.head ? 'home' : 'vm'}"></span>{one.name}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <header>
-    <h1 class="m-0 font-display text-2xl font-medium">This computer</h1>
+    <h1 class="m-0 font-display text-2xl font-medium">{app.several ? machine.name : 'This computer'}</h1>
     <p class="m-0 text-muted">
       {connectOnly
         ? 'This app only connects to sandboxes running elsewhere; add them in the sidebar.'
@@ -26,24 +47,34 @@
     </p>
   </header>
 
-  {#if !app.listed}
-    <div class="card p-4" role="status" aria-label="Loading the sandboxes"><Skeleton lines={['35%', '55%']} /></div>
-  {:else if here.length}
-    <section class="flex flex-col gap-3" aria-label="Sandboxes on this computer">
-      {#each here as worker (worker.id)}
-        <SandboxCard {worker} />
-      {/each}
-    </section>
+  {#if reach !== 'reachable' && reach !== 'loading'}
+    <Status kind={reach === 'unreachable' ? 'warn' : 'bad'} title={REACH_TEXT[reach]} detail={machine.error || undefined} />
   {/if}
 
-  <TunnelCard />
-
-  {#if !connectOnly}
-    <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
-    <EngineCard recheck={() => recheck()} />
-    <ResourcesCard />
-    {#if app.system}
-      <StartForm {recheck} />
+  {#key machine}
+    {#if !machine.listed}
+      {#if reach === 'loading' || reach === 'reachable'}
+        <div class="card p-4" role="status" aria-label="Loading the sandboxes"><Skeleton lines={['35%', '55%']} /></div>
+      {/if}
+    {:else if here.length}
+      <section class="flex flex-col gap-3" aria-label="Sandboxes on {app.several ? machine.name : 'this computer'}">
+        {#each here as worker (worker.id)}
+          <SandboxCard {worker} />
+        {/each}
+      </section>
     {/if}
-  {/if}
+
+    {#if machine === app.head}
+      <TunnelCard />
+    {/if}
+
+    {#if !connectOnly && reach !== 'newer' && reach !== 'elsewhere'}
+      <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
+      <EngineCard {machine} recheck={() => recheck()} />
+      <ResourcesCard {machine} />
+      {#if machine.system}
+        <StartForm {machine} {recheck} />
+      {/if}
+    {/if}
+  {/key}
 </main>

@@ -1,14 +1,16 @@
 <script lang="ts">
   // Picks a folder on this computer through the app, which can see the disk.
-  import { api, type FolderListing } from '../lib/api.ts';
+  import type { FolderListing } from '../lib/api.ts';
+  import type { Machine } from '../lib/machines.svelte.ts';
 
   let {
+    machine,
     title,
     canCreate,
     start,
     onchoose,
     onclose
-  }: { title: string; canCreate: boolean; start: string; onchoose: (path: string) => void; onclose: () => void } = $props();
+  }: { machine: Machine; title: string; canCreate: boolean; start: string; onchoose: (path: string) => void; onclose: () => void } = $props();
 
   let dialog: HTMLDialogElement | undefined = $state();
   let listing = $state<FolderListing | null>(null);
@@ -18,7 +20,7 @@
   async function browse(path: string): Promise<void> {
     error = '';
     try {
-      listing = await api<FolderListing>(`/api/folders?${new URLSearchParams({ path })}`);
+      listing = await machine.api<FolderListing>(`/api/folders?${new URLSearchParams({ path })}`);
       location = listing.path;
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
@@ -29,7 +31,7 @@
     const name = prompt('Name of the new folder:', 'results');
     if (!name || !listing) return;
     try {
-      const folder = await api<{ path: string }>('/api/folders', { body: { parent: listing.path, name } });
+      const folder = await machine.api<{ path: string }>('/api/folders', { body: { parent: listing.path, name } });
       await browse(folder.path);
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);

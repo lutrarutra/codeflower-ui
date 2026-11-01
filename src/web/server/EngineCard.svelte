@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { app } from '../lib/app.svelte.ts';
+  import type { Machine } from '../lib/machines.svelte.ts';
   import Status from './Status.svelte';
   import Steps from './Steps.svelte';
 
-  let { recheck }: { recheck: () => void } = $props();
+  let { machine, recheck }: { machine: Machine; recheck: () => void } = $props();
   let tab = $state(0);
-  const system = $derived(app.system);
+  const system = $derived(machine.system);
   const engine = $derived(system?.engines.find((item) => item.name === system.engine));
 </script>
 
@@ -13,8 +13,8 @@
   <h2 class="m-0 mb-3 flex items-center gap-2 font-display text-lg font-medium">
     <span class="grid size-6 place-items-center rounded-full bg-indigo text-[0.8em] text-on-accent">1</span> Container engine
   </h2>
-  {#if app.systemError}
-    <Status kind="bad" title="Could not check this computer" detail={app.systemError} />
+  {#if machine.systemError}
+    <Status kind="bad" title="Could not check this computer" detail={machine.systemError} />
     <button class="pill mt-3" onclick={recheck}>Check again</button>
   {:else if !system}
     <p class="m-0 text-muted"><span class="spinner"></span> Looking for Docker, Podman or Apptainer…</p>

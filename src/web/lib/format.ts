@@ -1,5 +1,6 @@
 // How the page words and measures things.
 import type { Worker } from './api.ts';
+import type { Reach } from './machines.svelte.ts';
 
 export const STATUS_TEXT: Record<string, string> = {
   starting: 'starting',
@@ -65,6 +66,16 @@ export function canForget(worker: Worker): boolean {
 export function canStop(worker: Worker): boolean {
   return worker.source !== 'added' && ['starting', 'ready', 'unreachable', 'task'].includes(worker.status);
 }
+
+/** How the page reaches a computer, as its heading and the Server view say. */
+export const REACH_TEXT: Record<Reach, string> = {
+  loading: 'Connecting…',
+  reachable: 'Connected',
+  unreachable: 'Not answering: its sandboxes show as last seen',
+  offline: 'Offline: the computer is off, asleep or not running code flower',
+  elsewhere: 'On another tunnel account than the one this browser is signed in with',
+  newer: 'Runs a newer code flower than this page: open it from that computer'
+};
 
 export const WAITING_FOR: Record<string, string> = { plan: 'plan approval', permission: 'permission', question: 'an answer' };
 

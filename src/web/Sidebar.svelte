@@ -9,9 +9,10 @@
   import FocusList from './focus/FocusList.svelte';
   import { PHASE_DOT } from './focus/phase.ts';
   import StatusDot from './lib/StatusDot.svelte';
-  import { app, type View } from './lib/app.svelte.ts';
-  import { SOURCE_TEXT, SOURCE_TITLE, workerTitle } from './lib/format.ts';
+  import { app, KEEP_PAGE, type View } from './lib/app.svelte.ts';
+  import { REACH_TEXT, SOURCE_TEXT, SOURCE_TITLE, workerTitle } from './lib/format.ts';
   import type { Worker } from './lib/api.ts';
+  import type { Machine } from './lib/machines.svelte.ts';
 
   let {
     collapsed = false,
@@ -66,6 +67,39 @@
   let showUnreachable = $state(false);
   const listed = $derived(showUnreachable ? [...reachable, ...unreachable] : reachable);
 
+  // Through the tunnel, with several computers: their sandboxes under a heading each.
+  const sections: { machine?: Machine; workers: Worker[] }[] = $derived(
+    app.several ? app.machines.map((machine) => ({ machine, workers: listed.filter((worker) => app.machine(worker.id) === machine) })) : [{ workers: listed }]
+  );
+  /** The sandbox's computer does not answer: it shows as last seen. */
+  const dim = (worker: Worker) => away(worker) || (app.several && !app.reachable(worker.id));
+  const REACH_DOT: Record<Machine['reach'], string> = {
+    loading: 'bg-soft-line',
+    reachable: 'bg-green',
+    unreachable: 'bg-orange',
+    offline: 'bg-muted',
+    elsewhere: 'bg-muted',
+    newer: 'bg-orange'
+  };
+
+  /** Whether the page stays on this computer's page instead of the newest computer's. */
+  let keepPage = $state(stored(KEEP_PAGE) === 'true');
+  function stored(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function setKeepPage(keep: boolean): void {
+    keepPage = keep;
+    try {
+      localStorage.setItem(KEEP_PAGE, String(keep));
+    } catch {
+      // Not kept, e.g. in a private window.
+    }
+  }
+
   // The sandbox whose name, address or place in the list the user manages.
   let managing: Worker | null = $state(null);
   function manage(event: Event, worker: Worker): void {
@@ -114,10 +148,16 @@
           </li>
         {/each}
       {:else}
-      {#each listed as worker (worker.id)}
+      {#each sections as section (section.machine?.key ?? '')}
+      {#if section.machine}
+        <li class="mt-1 flex w-8 justify-center border-t-[1.5px] border-soft-line pt-1 first:mt-0 first:border-t-0" title="{section.machine.name}: {REACH_TEXT[section.machine.reach]}">
+          <span class="size-1.5 rounded-full {REACH_DOT[section.machine.reach]}"></span>
+        </li>
+      {/if}
+      {#each section.workers as worker (worker.id)}
         {@const [name, where] = workerTitle(worker)}
         {@const selected = app.browsing === worker.id}
-        <li class={away(worker) ? 'opacity-60' : ''}>
+        <li class={dim(worker) ? 'opacity-60' : ''}>
           <button
             class="relative grid size-9 place-items-center rounded-lg font-semibold uppercase {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'text-muted hover:bg-card'}"
             aria-current={selected ? 'page' : undefined}
@@ -136,6 +176,7 @@
             {/if}
           </button>
         </li>
+      {/each}
       {/each}
       {#if unreachable.length}
         <li>
@@ -281,11 +322,25 @@
       <div class="eyebrow px-4 pb-1 text-muted">{single ? 'Sandbox' : 'Sandboxes'}</div>
       <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
       <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-1">
-        {#each listed as worker (worker.id)}
+        {#each sections as section (section.machine?.key ?? '')}
+        {#if section.machine}
+          {@const machine = section.machine}
+          <li class="flex items-center gap-2 px-2.5 pt-2 pb-1 text-[0.8em] text-muted" title={REACH_TEXT[machine.reach]}>
+            <span class="size-2 shrink-0 rounded-full {REACH_DOT[machine.reach]}"></span>
+            <span class="min-w-0 truncate font-semibold">{machine.name}</span>
+            {#if machine === app.head}
+              <span class="codicon codicon-home text-[12px]!" title="This page comes from this computer"></span>
+            {/if}
+            {#if machine.reach !== 'reachable' && machine.reach !== 'loading'}
+              <span class="ml-auto shrink-0">{machine.reach === 'newer' ? 'newer' : machine.reach === 'elsewhere' ? 'other account' : machine.reach}</span>
+            {/if}
+          </li>
+        {/if}
+        {#each section.workers as worker (worker.id)}
           {@const [name, where] = workerTitle(worker)}
           {@const selected = app.browsing === worker.id}
           {@const needs = app.attention.count(worker.id)}
-          <li class={away(worker) ? 'opacity-60' : ''}>
+          <li class={dim(worker) ? 'opacity-60' : ''}>
             <div class="group relative">
               <button
                 class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'hover:bg-card'}"
@@ -318,7 +373,9 @@
               {/if}
             </div>
           </li>
-        {:else}
+        {/each}
+        {/each}
+        {#if !listed.length}
           {#if unreachable.length}
             <!-- Every sandbox is out of reach: the toggle below lists them. -->
           {:else if !app.listed}
@@ -330,7 +387,7 @@
               No sandboxes yet. {connectOnly ? 'Add one running elsewhere.' : 'Start one under Server, or add one running elsewhere.'}
             </li>
           {/if}
-        {/each}
+        {/if}
         {#if unreachable.length}
           <li>
             <button
@@ -349,6 +406,12 @@
     <div class="flex flex-col gap-2 border-t-[1.5px] border-soft-line p-3">
       {#if !single && !remote}
         <button class="pill pill-small justify-center" onclick={onAdd}><span class="codicon codicon-add"></span>Add remote sandbox</button>
+      {/if}
+      {#if remote && app.several}
+        <label class="flex items-center gap-2 self-center text-[0.8em] text-muted" title="Otherwise the page opens from the computer with the newest code flower">
+          <input type="checkbox" checked={keepPage} onchange={(event) => setKeepPage(event.currentTarget.checked)} />
+          Keep {app.head.name}'s page
+        </label>
       {/if}
       {#if !remote}
         <button class="link self-center text-[0.85em]" onclick={() => app.askToQuit()}>{single ? 'Stop the sandbox' : connectOnly ? 'Quit' : 'Stop all and quit'}</button>

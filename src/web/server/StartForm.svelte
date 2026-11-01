@@ -1,14 +1,17 @@
 <script lang="ts">
-  import { api, type Worker } from '../lib/api.ts';
+  import { untrack } from 'svelte';
+  import type { Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
+  import type { Machine } from '../lib/machines.svelte.ts';
   import { accent, FOLDER_KINDS, short, targets, type FolderKind } from '../lib/format.ts';
   import FolderBrowser from './FolderBrowser.svelte';
 
-  let { recheck }: { recheck: (query: { engine: string; image: string; imageTag: string }) => void } = $props();
+  let { machine, recheck }: { machine: Machine; recheck: (query: { engine: string; image: string; imageTag: string }) => void } = $props();
 
   // The choices start from the ones the app remembers from the last start.
-  const settings = app.system!.settings;
-  let agent = $state(settings.agent || app.system!.agents[0]?.id || '');
+  // The form starts from the computer's settings; the Server view makes a new one for another computer.
+  const settings = untrack(() => machine.system!.settings);
+  let agent = $state(settings.agent || untrack(() => machine.system!.agents[0]?.id) || '');
   let folders = $state<Record<FolderKind, string[]>>({
     inputs: [...(settings.inputs ?? [])],
     outputs: [...(settings.outputs ?? [])],
@@ -24,7 +27,7 @@
   let error = $state('');
   let starting = $state(false);
 
-  const system = $derived(app.system!);
+  const system = $derived(machine.system!);
   const canStart = $derived(!!(system.capabilities.start && system.image && (system.image.ready || system.image.download)));
   const chosenEngine = $derived(engine === 'auto' ? system.engine : engine);
   const isolationProblem = $derived(system.isolation[chosenEngine]);
@@ -52,11 +55,11 @@
     if (!folders.inputs.length && !folders.code.length && !confirm('No input or code folder is chosen, so the agent will not see any of your data. Start anyway?')) return;
     starting = true;
     try {
-      const worker = await api<Worker>('/api/workers', {
+      const worker = await machine.api<Worker>('/api/workers', {
         body: { agent, ...folders, isolateNetwork: isolate, project: project.trim(), engine, image: image.trim(), imageTag: imageTag.trim() }
       });
       await app.refreshWorkers();
-      document.getElementById(`sandbox-${worker.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById(`sandbox-${machine.qualify(worker.id)}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
     } finally {
@@ -187,6 +190,7 @@
 {#if browsing}
   {@const kind = browsing}
   <FolderBrowser
+    {machine}
     title={FOLDER_KINDS[kind].title}
     canCreate={kind !== 'inputs'}
     start={browseStart(kind)}

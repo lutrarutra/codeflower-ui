@@ -65,6 +65,16 @@ test('next is the chat waiting longest, else the first done one, never the curre
   assert.equal(nextUp(doneOnly, { workerId: 'w', key: 'd' }), undefined);
 });
 
+test("next skips chats whose computer does not answer; they stay listed", () => {
+  const groups = arrange(
+    [chat('far', { phase: 'waiting', since: NOW - 5000, unreachable: true }), chat('near', { phase: 'waiting', since: NOW - 1000 })],
+    NOW
+  );
+  assert.deepEqual(keys(groups[0]?.chats), ['far', 'near']);
+  assert.equal(nextUp(groups, null)?.key, 'near');
+  assert.equal(nextUp(groups, { workerId: 'w', key: 'near' }), undefined);
+});
+
 test('stepping follows the list and stops at its ends', () => {
   const groups = arrange([chat('a', { phase: 'waiting' }), chat('b', { phase: 'working' })], NOW);
   assert.equal(step(groups, null, 1)?.key, 'a');
