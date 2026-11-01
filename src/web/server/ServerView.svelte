@@ -8,12 +8,16 @@
   import ResourcesCard from './ResourcesCard.svelte';
   import SandboxCard from './SandboxCard.svelte';
   import StartForm from './StartForm.svelte';
+  import StartLocked from './StartLocked.svelte';
   import Status from './Status.svelte';
   import TunnelCard from './TunnelCard.svelte';
 
   const machine = $derived(app.serverMachine);
   const here = $derived(machine.workers.filter((worker) => worker.source !== 'added'));
   const connectOnly = $derived(machine.system?.capabilities.connectOnly ?? false);
+  // Through the tunnel (no connecting), the computer's app may not let remote browsers start sandboxes:
+  // starting shows locked, with the setting that allows it.
+  const locked = $derived(machine.system?.capabilities.connect === false && !machine.system.capabilities.start && connectOnly);
   const reach = $derived(machine.reach);
 
   function recheck(query?: { engine: string; image: string; imageTag: string }): void {
@@ -41,7 +45,9 @@
   <header>
     <h1 class="m-0 font-display text-2xl font-medium">{app.several ? machine.name : 'This computer'}</h1>
     <p class="m-0 text-muted">
-      {connectOnly
+      {locked
+        ? 'Use and stop the sandboxes running on this computer. Starting new ones through the tunnel is locked; see below.'
+        : connectOnly
         ? 'This app only connects to sandboxes running elsewhere; add them in the sidebar.'
         : 'Start a sandbox where an agent analyses your data. Sandboxes started here run while the app runs; closing this tab does not stop them.'}
     </p>
@@ -68,7 +74,10 @@
       <TunnelCard />
     {/if}
 
-    {#if !connectOnly && reach !== 'newer' && reach !== 'elsewhere'}
+    {#if locked && reach === 'reachable'}
+      <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
+      <StartLocked {machine} />
+    {:else if !connectOnly && reach !== 'newer' && reach !== 'elsewhere'}
       <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
       <EngineCard {machine} recheck={() => recheck()} />
       <ResourcesCard {machine} />
