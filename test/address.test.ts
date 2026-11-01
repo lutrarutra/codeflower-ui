@@ -25,3 +25,11 @@ test('rejects incomplete addresses', () => {
   assert.throws(() => parseWorkerAddress('codeflower://10.20.3.17:41234'), /no token/);
   assert.throws(() => parseWorkerAddress('codeflower://10.20.3.17?token=t'), /no port/);
 });
+
+test('a fingerprint makes the address TLS, pinned to it', () => {
+  const fp = 'x1Yz'.repeat(10) + 'abc';
+  const address = parseWorkerAddress(`codeflower://10.0.0.5:41234?token=t&fp=${fp}`);
+  assert.equal(address.url, 'wss://10.0.0.5:41234/acp');
+  assert.equal(address.fingerprint, fp);
+  assert.throws(() => parseWorkerAddress('codeflower://10.0.0.5:41234?token=t&fp=short'), /fingerprint/);
+});
