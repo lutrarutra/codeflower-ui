@@ -6,6 +6,8 @@
   import FileTree from './FileTree.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import SessionList from './SessionList.svelte';
+  import FocusList from './focus/FocusList.svelte';
+  import { PHASE_DOT } from './focus/phase.ts';
   import StatusDot from './lib/StatusDot.svelte';
   import { app, type View } from './lib/app.svelte.ts';
   import { SOURCE_TEXT, SOURCE_TITLE, workerTitle } from './lib/format.ts';
@@ -20,15 +22,17 @@
   }: { collapsed?: boolean; canCollapse?: boolean; onToggle: () => void; onAdd: () => void; onNavigate: () => void } = $props();
   const shortcut = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
 
-  const views: { id: View; label: string; icon: string }[] = [
-    { id: 'chat', label: 'Chat', icon: 'comment-discussion' },
-    { id: 'server', label: 'Server', icon: 'server-process' }
-  ];
   const connectOnly = $derived(app.system?.capabilities.connectOnly ?? false);
   // Through the tunnel, adding sandboxes and quitting stay on the computer itself.
   const remote = tunnelConnectorId() !== undefined;
   // A sandbox's own page (`--server`): only it, nothing to start or add.
   const single = $derived(app.single);
+  const views: { id: View; label: string; icon: string }[] = $derived([
+    { id: 'chat', label: 'Chat', icon: 'comment-discussion' },
+    { id: 'focus', label: 'Focus', icon: 'pulse' },
+    ...(single ? [] : [{ id: 'server' as const, label: 'Server', icon: 'server-process' }])
+  ]);
+  const focusing = $derived(app.route.view === 'focus');
 
   function show(view: View): void {
     app.go({ view });
@@ -54,6 +58,14 @@
 
   const browsable = (worker: Worker) => !!worker.url && worker.kind !== 'task';
 
+  // Sandboxes that cannot be reached fold away under a toggle; the selected one stays.
+  const REACHABLE_NOT = ['unreachable', 'stopped', 'failed'];
+  const away = (worker: Worker) => REACHABLE_NOT.includes(worker.status) && app.browsing !== worker.id;
+  const reachable = $derived(app.workers.filter((worker) => !away(worker)));
+  const unreachable = $derived(app.workers.filter(away));
+  let showUnreachable = $state(false);
+  const listed = $derived(showUnreachable ? [...reachable, ...unreachable] : reachable);
+
   // The sandbox whose name, address or place in the list the user manages.
   let managing: Worker | null = $state(null);
   function manage(event: Event, worker: Worker): void {
@@ -69,8 +81,7 @@
     <button class="grid size-9 place-items-center rounded-lg hover:bg-card" title="Expand the sidebar ({shortcut})" aria-label="Expand the sidebar" onclick={onToggle}>
       <Tulip size={24} />
     </button>
-    {#if !single}
-      <div class="my-1 flex flex-col gap-1" role="tablist" aria-label="View">
+    <div class="my-1 flex flex-col gap-1" role="tablist" aria-label="View">
         {#each views as view (view.id)}
           <button
             role="tab"
@@ -83,13 +94,30 @@
             <span class="codicon codicon-{view.icon}"></span>
           </button>
         {/each}
-      </div>
-    {/if}
+    </div>
     <ul class="m-0 flex min-h-0 w-full flex-1 list-none flex-col items-center gap-1 overflow-auto border-t-[1.5px] border-soft-line p-0 pt-2">
-      {#each app.workers as worker (worker.id)}
+      {#if focusing}
+        <!-- Focus, folded: its chats, in its order, by their initial and state. -->
+        {#each app.focus.groups.flatMap((group) => group.chats) as chat (chat.workerId + '/' + chat.key)}
+          {@const selected = app.focus.selected?.workerId === chat.workerId && app.focus.selected.key === chat.key}
+          <li>
+            <button
+              class="relative grid size-9 place-items-center rounded-lg font-semibold uppercase {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'text-muted hover:bg-card'}"
+              aria-current={selected ? 'page' : undefined}
+              aria-label="{chat.title}, {chat.sandbox}"
+              title="{chat.title} · {chat.sandbox}"
+              onclick={() => app.focus.select(chat)}
+            >
+              {chat.title.slice(0, 1)}
+              <span class="absolute right-1 bottom-1 size-2.5 rounded-full {PHASE_DOT[chat.unseen ? 'done' : chat.phase]}" class:animate-pulse={chat.phase === 'working'}></span>
+            </button>
+          </li>
+        {/each}
+      {:else}
+      {#each listed as worker (worker.id)}
         {@const [name, where] = workerTitle(worker)}
         {@const selected = app.browsing === worker.id}
-        <li>
+        <li class={away(worker) ? 'opacity-60' : ''}>
           <button
             class="relative grid size-9 place-items-center rounded-lg font-semibold uppercase {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'text-muted hover:bg-card'}"
             aria-current={selected ? 'page' : undefined}
@@ -109,6 +137,19 @@
           </button>
         </li>
       {/each}
+      {#if unreachable.length}
+        <li>
+          <button
+            class="grid size-9 place-items-center rounded-lg text-[0.8em] text-muted hover:bg-card hover:text-ink"
+            title="{showUnreachable ? 'Hide' : 'Show'} {unreachable.length} not reachable"
+            aria-expanded={showUnreachable}
+            onclick={() => (showUnreachable = !showUnreachable)}
+          >
+            {showUnreachable ? '−' : `+${unreachable.length}`}
+          </button>
+        </li>
+      {/if}
+      {/if}
     </ul>
     {#if !single && !remote}
       <button class="grid size-9 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink" title="Add remote sandbox" aria-label="Add remote sandbox" onclick={onAdd}>
@@ -139,13 +180,18 @@
       {/if}
     </header>
 
-    {#if !single}
-      <div class="mx-4 mb-3 grid grid-cols-2 gap-1 rounded-full border-[1.5px] border-soft-line bg-card p-1" role="tablist" aria-label="View">
+    {#if views.length > 1}
+      <div
+        class="mx-4 mb-3 grid gap-1 rounded-full border-[1.5px] border-soft-line bg-card p-1"
+        style="grid-template-columns: repeat({views.length}, minmax(0, 1fr))"
+        role="tablist"
+        aria-label="View"
+      >
         {#each views as view (view.id)}
           <button
             role="tab"
             aria-selected={app.route.view === view.id}
-            class="flex items-center justify-center gap-1.5 rounded-full px-3 py-1 text-[0.9em] font-semibold {app.route.view === view.id
+            class="flex min-w-0 items-center justify-center gap-1.5 rounded-full px-2 py-1 text-[0.9em] font-semibold {app.route.view === view.id
               ? 'bg-indigo text-on-accent'
               : 'text-muted hover:text-ink'}"
             onclick={() => show(view.id)}
@@ -156,7 +202,9 @@
       </div>
     {/if}
 
-    {#if browsed}
+    {#if focusing}
+      <FocusList {onNavigate} />
+    {:else if browsed}
       {@const [name, where] = workerTitle(browsed)}
       <!-- One sandbox: its chats, and the way back to the others. -->
       <div class="flex items-center gap-1.5 px-2 pb-2">
@@ -233,11 +281,11 @@
       <div class="eyebrow px-4 pb-1 text-muted">{single ? 'Sandbox' : 'Sandboxes'}</div>
       <!-- Padded, so the selected row's outline is not clipped by the scrolling list. -->
       <ul class="m-0 min-h-0 flex-1 list-none overflow-auto px-2 py-1">
-        {#each app.workers as worker (worker.id)}
+        {#each listed as worker (worker.id)}
           {@const [name, where] = workerTitle(worker)}
           {@const selected = app.browsing === worker.id}
           {@const needs = app.attention.count(worker.id)}
-          <li>
+          <li class={away(worker) ? 'opacity-60' : ''}>
             <div class="group relative">
               <button
                 class="flex w-full flex-col gap-1 rounded-xl px-2.5 py-2 text-left {selected ? 'bg-card shadow-[0_0_0_1px_var(--cf-line)]' : 'hover:bg-card'}"
@@ -271,7 +319,9 @@
             </div>
           </li>
         {:else}
-          {#if !app.listed}
+          {#if unreachable.length}
+            <!-- Every sandbox is out of reach: the toggle below lists them. -->
+          {:else if !app.listed}
             <li class="flex flex-col gap-2 rounded-xl px-2.5 py-2.5" role="status" aria-label="Loading the sandboxes">
               <Skeleton lines={['60%', '40%']} height="0.75rem" />
             </li>
@@ -281,6 +331,18 @@
             </li>
           {/if}
         {/each}
+        {#if unreachable.length}
+          <li>
+            <button
+              class="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-[0.85em] text-muted hover:bg-card hover:text-ink"
+              aria-expanded={showUnreachable}
+              onclick={() => (showUnreachable = !showUnreachable)}
+            >
+              <span class="codicon codicon-chevron-{showUnreachable ? 'down' : 'right'} text-[13px]!"></span>
+              {unreachable.length} not reachable
+            </button>
+          </li>
+        {/if}
       </ul>
     {/if}
 

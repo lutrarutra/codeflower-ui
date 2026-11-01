@@ -2,6 +2,7 @@
   import AddRemoteDialog from './AddRemoteDialog.svelte';
   import AgentLinkDialog from './AgentLinkDialog.svelte';
   import ChatView from './ChatView.svelte';
+  import FocusView from './focus/FocusView.svelte';
   import QuitDialog from './QuitDialog.svelte';
   import QuittingBanner from './QuittingBanner.svelte';
   import Toasts from './Toasts.svelte';
@@ -24,7 +25,7 @@
   const folded = $derived(collapsed && wide);
   // The narrow top bar names the sandbox of the chat in front.
   const sandbox = $derived.by(() => {
-    const worker = app.route.view === 'chat' ? app.worker(app.route.worker) : undefined;
+    const worker = app.route.view !== 'server' ? app.worker(app.route.worker) : undefined;
     return worker && workerTitle(worker);
   });
   /** Chats finished or wait for the user somewhere: the closed drawer says so. */
@@ -171,6 +172,8 @@
       <div class="min-h-0 flex-1 overflow-auto">
         {#if app.route.view === 'server'}
           <ServerView />
+        {:else if app.route.view === 'focus'}
+          <FocusView />
         {:else}
           <ChatView onAdd={() => (adding = true)} />
         {/if}

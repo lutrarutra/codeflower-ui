@@ -1,14 +1,16 @@
 // What the whole page shares: the computer's system info, the sandboxes (polled),
-// a quit in progress, and where the page is (#/chat/… or #/server).
+// a quit in progress, and where the page is (#/chat/…, #/focus/… or #/server).
 import type { WrapUpNotice } from '../../client/workerConnection.ts';
 import { api, type QuitPlan, type SystemInfo, type Worker } from './api.ts';
 import { Previews } from './previews.svelte.ts';
 import { SignIn } from './signIn.svelte.ts';
 import { Attention } from './attention.svelte.ts';
-import { Workbench, chatKeyOf, splitTab, tabOf } from './workbench.svelte.ts';
+import { Focus } from './focus.svelte.ts';
+import { INTERACTIVE } from './previews.svelte.ts';
+import { Workbench, chatKeyOf, chatTab, splitTab, tabOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
-export type View = 'chat' | 'server';
+export type View = 'chat' | 'focus' | 'server';
 
 export interface Route {
   view: View;
@@ -22,7 +24,7 @@ const WORKERS_MS = 1500;
 
 function parseHash(hash: string): Route | undefined {
   const [view, worker, session] = hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
-  if (view !== 'chat' && view !== 'server') return undefined;
+  if (view !== 'chat' && view !== 'focus' && view !== 'server') return undefined;
   return { view, ...(worker ? { worker } : {}), ...(session ? { session } : {}) };
 }
 
@@ -92,7 +94,7 @@ class AppState {
     visible: (id, tab) => this.shows(tabOf(id, tab)),
     open: (id, tab) => this.workbench.openFile(id, tab),
     remove: (id, tab) => this.workbench.remove(tabOf(id, tab)),
-    showChat: (worker, session) => this.go({ view: 'chat', worker, session })
+    showChat: (worker, session) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker, session })
   });
 
   /** The tabs from every sandbox, in one grid. */
@@ -102,7 +104,19 @@ class AppState {
     workers: () => this.workers,
     agent: (id) => this.agents.get(id),
     shows: (tab) => this.shows(tab),
-    open: (worker, session) => this.go({ view: 'chat', worker, session })
+    open: (worker, session) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker, session })
+  });
+  /** Every sandbox's chats in one list, for keeping agents in parallel moving. */
+  readonly focus = new Focus({
+    workers: () => this.workers,
+    agent: (id) => this.agent(id),
+    need: (worker, key) => this.attention.need(worker, key),
+    active: () => this.route.view === 'focus',
+    selected: (chat) => {
+      if (this.route.view !== 'focus') return;
+      this.route = { view: 'focus', worker: chat.workerId, session: chat.key };
+      history.replaceState(null, '', routeHash(this.route));
+    }
   });
   private quitting = false;
 
@@ -124,7 +138,8 @@ class AppState {
       const chat = this.workbench.focusedChat();
       if (chat) this.agents.get(chat.workerId)?.refreshUsage();
     });
-    if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
+    if (this.route.view === 'focus' && this.route.worker && this.route.session) this.focus.selected = { workerId: this.route.worker, key: this.route.session };
+    else if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
     this.offer();
     window.addEventListener('hashchange', () => {
       if (this.offer()) return;
@@ -167,9 +182,12 @@ class AppState {
       if (location.hash !== hash) history.pushState(null, '', hash);
       return;
     }
+    // Focus without a chat: the one it showed last.
+    if (route.view === 'focus' && !route.session && this.focus.selected) route = { view: 'focus', worker: this.focus.selected.workerId, session: this.focus.selected.key };
     this.route = route;
     const hash = routeHash(route);
     if (location.hash !== hash) history.pushState(null, '', hash);
+    if (route.view === 'focus' && route.worker && route.session) this.focus.select({ workerId: route.worker, key: route.session });
     if (route.view !== 'chat' || !route.worker) return;
     this.browsing = route.worker;
     if (route.session) this.workbench.openChat(route.worker, route.session);
@@ -188,6 +206,11 @@ class AppState {
 
   /** The tab is in front of its group, on the page in front. */
   shows(tab: string): boolean {
+    if (this.route.view === 'focus') {
+      const chat = this.focus.selected;
+      const file = this.focus.shownTab();
+      return (!!chat && tab === tabOf(chat.workerId, chatTab(chat.key))) || (!!file && (tab === file || tab === file + INTERACTIVE));
+    }
     return this.route.view === 'chat' && this.workbench.layout.visible(tab);
   }
 
@@ -252,7 +275,7 @@ class AppState {
       this.listed = true;
       // A sandbox's own page opens on it.
       const only = this.workers[0];
-      if (first && this.single && only && (this.route.view !== 'chat' || this.route.worker !== only.id)) {
+      if (first && this.single && only && this.route.view !== 'focus' && (this.route.view !== 'chat' || this.route.worker !== only.id)) {
         this.go({ view: 'chat', worker: only.id, ...(this.route.worker === only.id && this.route.session ? { session: this.route.session } : {}) });
       }
       for (const worker of this.workers) {

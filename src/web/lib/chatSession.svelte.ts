@@ -46,6 +46,8 @@ export class ChatSession {
   lastUsed = Date.now();
   /** The user's `!commands` running now; files they show belong to this chat. */
   shellsRunning = 0;
+  /** The files the agent showed in this chat (`codeflower-show`), the latest last, each once. */
+  shown = $state<string[]>([]);
 
   private entries: TranscriptEntry[] = [];
   /** The transcript arrived: until then the view shows it loading, not an empty chat. */
@@ -190,9 +192,11 @@ export class ChatSession {
       case 'transcript':
         this.entries = [...message.entries];
         this.transcriptKnown = true;
+        this.shown = shownFiles(this.entries, []);
         break;
       case 'entry':
         this.entries.push(message.entry);
+        if (message.entry.kind === 'show') this.shown = shownFiles([message.entry], this.shown);
         break;
       case 'permission':
         this.permission = message.request;
@@ -311,4 +315,18 @@ export class ChatSession {
       }
     }
   }
+}
+
+/** The files shown in the entries, after those shown before: the latest last, each once. */
+export function shownFiles(entries: TranscriptEntry[], before: string[]): string[] {
+  const files = [...before];
+  for (const entry of entries) {
+    if (entry.kind !== 'show') continue;
+    for (const file of entry.files) {
+      const at = files.indexOf(file);
+      if (at >= 0) files.splice(at, 1);
+      files.push(file);
+    }
+  }
+  return files;
 }

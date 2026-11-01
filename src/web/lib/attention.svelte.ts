@@ -4,6 +4,7 @@
 // at the top of the page names it, and opens it on a click.
 import type { ChatActivity, Worker } from './api.ts';
 import { workerTitle } from './format.ts';
+import { chatPhase, type ChatPhase } from './focusList.ts';
 import { chatTab, tabOf } from './workbench.svelte.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -29,8 +30,6 @@ export interface AttentionOwner {
   shows(tab: string): boolean;
   open(workerId: string, key: string): void;
 }
-
-type ChatPhase = 'working' | 'waiting' | 'idle';
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -94,7 +93,7 @@ export class Attention {
         // A chat whose connection dropped says nothing about its agent.
         if (status === 'offline') continue;
         const polled = active.get(key);
-        const phase: ChatPhase = status ? (status === 'ready' ? 'idle' : status) : (polled?.state ?? 'idle');
+        const phase: ChatPhase = chatPhase(status, polled);
         const tab = tabOf(worker.id, chatTab(key));
         present.add(tab);
         const before = this.phases.get(tab);
