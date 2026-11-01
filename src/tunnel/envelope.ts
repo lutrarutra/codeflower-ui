@@ -1,6 +1,6 @@
 // What one transport message carries: a kind byte, then data. A stream
 // carries one HTTP exchange or one WebSocket. Mirrors codeflower-app's
-// internal/tunnel/envelope.go; see the tunnel's PROTOCOL.md, "Envelope".
+// internal/tunnel/envelope.go; see the tunnel's docs/PROTOCOL.md, "Envelope".
 
 export const Kind = {
   open: 1,
