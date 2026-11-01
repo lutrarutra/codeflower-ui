@@ -83,6 +83,9 @@ class AppState {
   /** Signing a sandbox's agent in, and the links agents ask the user to open. */
   readonly signIn = new SignIn();
 
+  /** The sandbox whose agent's plugins the Plugins dialog shows. */
+  plugins = $state<{ worker: Worker; agent: WebWorker } | null>(null);
+
   /** Files shown from the sandboxes, in tabs of their workbenches. */
   readonly previews = new Previews({
     agent: (id) => this.agents.get(id),

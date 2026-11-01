@@ -6,6 +6,7 @@
   import QuittingBanner from './QuittingBanner.svelte';
   import Toasts from './Toasts.svelte';
   import ServerView from './server/ServerView.svelte';
+  import PluginsDialog from './PluginsDialog.svelte';
   import SignInDialog from './SignInDialog.svelte';
   import Sidebar from './Sidebar.svelte';
   import { app } from './lib/app.svelte.ts';
@@ -180,5 +181,6 @@
   <AddRemoteDialog bind:open={adding} />
   <QuitDialog />
   <SignInDialog />
+  <PluginsDialog />
   <AgentLinkDialog />
 {/if}

@@ -27,6 +27,87 @@ export interface WorkerStatus {
   allocationEnd?: string;
   /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
   mounts?: Mount[];
+  /** What the worker offers beyond chats; missing from older workers. */
+  capabilities?: { plugins?: boolean };
+}
+
+/** What a plugin adds, when known before it is fetched. */
+export interface PluginContents {
+  commands: number;
+  skills: number;
+  agents: number;
+  hooks: boolean;
+  mcpServers: boolean;
+  lspServers: boolean;
+}
+
+/** One of the agent's plugins in the project (docs/plugins.md). */
+export interface PluginEntry {
+  /** `agent:source`. */
+  id: string;
+  /** marketplace:NAME@CATALOG, github:OWNER/REPO[#REF], git:URL[#REF], npm:PACKAGE@VERSION, url:…, path:/… */
+  source: string;
+  kind: string;
+  /** config: from the app's config.yaml (switched off, not removed, per project); project: added here. */
+  origin: 'config' | 'project';
+  enabled: boolean;
+  /**
+   * pending: not fetched yet; fetching; error: the fetch failed; fetched: the
+   * agent gets it at its next start; active: the agent runs with it; disabled.
+   */
+  state: 'pending' | 'fetching' | 'error' | 'fetched' | 'active' | 'disabled';
+  version?: string;
+  error?: string;
+  fetchedAt?: string;
+}
+
+/** A plugin the agent has of its own, installed outside code flower; shown, not changed. */
+export interface NativePlugin {
+  name: string;
+  version?: string;
+  enabled: boolean;
+  origin: 'native';
+}
+
+export interface PluginCatalog {
+  /** Known once fetched, or from the agent's descriptor. */
+  name?: string;
+  source: string;
+  /** agent: comes with the agent; project: added here. */
+  origin: 'agent' | 'project';
+  fetched: boolean;
+  error?: string;
+}
+
+export interface PluginsOverview {
+  /** False: this agent has no plugins in code flower. */
+  available: boolean;
+  /** The source kinds the agent takes. */
+  kinds?: string[];
+  /** The sandbox reaches the network: adding fetches at once. Otherwise the app fetches (codeflower plugins fetch). */
+  canFetch?: boolean;
+  fetching?: boolean;
+  /** Something changed since the agent started: restart it to apply. */
+  restartPending?: boolean;
+  /** Catalogs can be browsed. */
+  browsable?: boolean;
+  entries?: PluginEntry[];
+  native?: NativePlugin[];
+  catalogs?: PluginCatalog[];
+}
+
+export interface CatalogPlugin {
+  name: string;
+  displayName?: string;
+  description: string;
+  category?: string;
+  version?: string;
+  homepage?: string;
+  author?: string;
+  /** The source to add it with. */
+  source: string;
+  /** Unknown for plugins outside the catalog's own repository until fetched. */
+  contents?: PluginContents;
 }
 
 export interface Mount {
@@ -156,6 +237,8 @@ export interface CodeflowerHandlers {
   wrapUp(notice: WrapUpNotice & { key?: string; prompt?: string }): void;
   terminalOutput(terminalId: string, data: string): void;
   terminalExit(terminalId: string, exitCode: number): void;
+  /** The plugins changed (added, fetched, switched, or the agent restarted): list them again. */
+  pluginsChanged?(): void;
 }
 
 export class CodeflowerExtensions {
@@ -185,6 +268,7 @@ export class CodeflowerExtensions {
       const { terminalId, exitCode } = params as { terminalId: string; exitCode: number };
       handlers.terminalExit(terminalId, exitCode);
     });
+    rpc.on('_codeflower/plugins/changed', () => handlers.pluginsChanged?.());
   }
 
   /** Undefined when no bridge answers: the agent was reached directly. */
@@ -335,6 +419,47 @@ export class CodeflowerExtensions {
   /** dsh keys; the agent must be restarted to pick them up. */
   async setCredentials(credentials: DshCredentials): Promise<void> {
     await this.rpc.request('_codeflower/credentials/set', credentials);
+  }
+
+  /** The agent's plugins; `{available: false}` from older bridges and agents without plugins. */
+  async plugins(): Promise<PluginsOverview> {
+    try {
+      return await this.rpc.request<PluginsOverview>('_codeflower/plugins/list', {});
+    } catch (error) {
+      if (isMethodNotFound(error)) return { available: false };
+      throw error;
+    }
+  }
+
+  /** A fetched catalog's plugins; `fetched: false` until it is fetched. */
+  pluginCatalog(catalog: string): Promise<{ name: string; fetched: boolean; plugins: CatalogPlugin[] }> {
+    return this.rpc.request('_codeflower/plugins/catalog', { catalog });
+  }
+
+  /** Adds a plugin to the project. `pendingFetch`: the sandbox has no network, so the app has to fetch it. */
+  addPlugin(source: string): Promise<{ id: string; pendingFetch: boolean }> {
+    return this.rpc.request('_codeflower/plugins/add', { source });
+  }
+
+  async removePlugin(id: string): Promise<void> {
+    await this.rpc.request('_codeflower/plugins/remove', { id });
+  }
+
+  async setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+    await this.rpc.request('_codeflower/plugins/setEnabled', { id, enabled });
+  }
+
+  addPluginCatalog(source: string): Promise<{ source: string; pendingFetch: boolean }> {
+    return this.rpc.request('_codeflower/plugins/catalogs/add', { source });
+  }
+
+  async removePluginCatalog(source: string): Promise<void> {
+    await this.rpc.request('_codeflower/plugins/catalogs/remove', { source });
+  }
+
+  /** Fetches what is missing in the sandbox; refused (`pendingFetch`) without its network. */
+  async fetchPlugins(): Promise<void> {
+    await this.rpc.request('_codeflower/plugins/fetch', {});
   }
 
   /** Ends the worker's agent (refused while chats are working); the next connection starts a fresh one. */

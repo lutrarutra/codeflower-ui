@@ -39,7 +39,9 @@ import {
   type UploadTarget,
   type UploadedFile,
   type WorkerStatus,
-  type WrapUpNotice
+  type WrapUpNotice,
+  type CatalogPlugin,
+  type PluginsOverview
 } from './codeflower.ts';
 import { ConnectionClosed, RpcConnection } from './rpc.ts';
 import { sessionKey } from './sessionKey.ts';
@@ -70,7 +72,13 @@ export {
   type UploadedFile,
   type WorkerActivity,
   type WorkerStatus,
-  type WrapUpNotice
+  type WrapUpNotice,
+  type CatalogPlugin,
+  type NativePlugin,
+  type PluginCatalog,
+  type PluginContents,
+  type PluginEntry,
+  type PluginsOverview
 } from './codeflower.ts';
 export { ConnectionClosed, METHOD_NOT_FOUND, RpcError } from './rpc.ts';
 
@@ -122,6 +130,7 @@ export class WorkerConnection {
   private readonly shells = new Map<string, ShellRun>();
   /** Shell commands the agent has not been told about yet, by session. */
   private readonly shellContext = new Map<string, string[]>();
+  private readonly pluginListeners = new Set<() => void>();
 
   private constructor(transport: Transport, handlers: WorkerHandlers) {
     this.handlers = handlers;
@@ -164,7 +173,10 @@ export class WorkerConnection {
         if (prompt && !this.acp.multiClient) handlers.entry(key, { t: now(), kind: 'prompt', prompt: [{ type: 'text', text: prompt }] });
       },
       terminalOutput: (terminalId, data) => handlers.terminalOutput(terminalId, data),
-      terminalExit: (terminalId, exitCode) => handlers.terminalExit(terminalId, exitCode)
+      terminalExit: (terminalId, exitCode) => handlers.terminalExit(terminalId, exitCode),
+      pluginsChanged: () => {
+        for (const listener of this.pluginListeners) listener();
+      }
     });
     // After the ACP layer's own close handling, which hides open requests.
     this.rpc.onClose((reason, code) => handlers.closed(reason, code));
@@ -456,6 +468,46 @@ export class WorkerConnection {
 
   restartAgent(): Promise<void> {
     return this.bridge.restartAgent();
+  }
+
+  // ---- the agent's plugins ----
+
+  /** Calls `listener` whenever the worker says its plugins changed; returns the unsubscribe. */
+  onPluginsChanged(listener: () => void): () => void {
+    this.pluginListeners.add(listener);
+    return () => this.pluginListeners.delete(listener);
+  }
+
+  plugins(): Promise<PluginsOverview> {
+    return this.bridge.plugins();
+  }
+
+  pluginCatalog(catalog: string): Promise<{ name: string; fetched: boolean; plugins: CatalogPlugin[] }> {
+    return this.bridge.pluginCatalog(catalog);
+  }
+
+  addPlugin(source: string): Promise<{ id: string; pendingFetch: boolean }> {
+    return this.bridge.addPlugin(source);
+  }
+
+  removePlugin(id: string): Promise<void> {
+    return this.bridge.removePlugin(id);
+  }
+
+  setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+    return this.bridge.setPluginEnabled(id, enabled);
+  }
+
+  addPluginCatalog(source: string): Promise<{ source: string; pendingFetch: boolean }> {
+    return this.bridge.addPluginCatalog(source);
+  }
+
+  removePluginCatalog(source: string): Promise<void> {
+    return this.bridge.removePluginCatalog(source);
+  }
+
+  fetchPlugins(): Promise<void> {
+    return this.bridge.fetchPlugins();
   }
 
   private requireAgent(): AgentName {

@@ -73,6 +73,15 @@
           {agent.status?.signedIn ? 'Switch account…' : 'Sign in…'}
         </button>
       </section>
+      {#if agent.status?.capabilities?.plugins}
+        <section class="card flex flex-wrap items-center gap-3 p-4">
+          <div class="min-w-0 flex-1">
+            <h2 class="m-0 font-display text-lg font-medium">Plugins</h2>
+            <p class="m-0 text-muted">The agent's own plugins in this project: browse its catalog, or add one from its source.</p>
+          </div>
+          <button class="pill pill-small" onclick={() => (app.plugins = { worker, agent })}>Plugins…</button>
+        </section>
+      {/if}
     {/if}
   {:else if worker.error}
     <p class="m-0 text-red">{worker.error}</p>
