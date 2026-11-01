@@ -32,6 +32,11 @@ export interface PreviewOwner {
   /** Takes the tab away, e.g. an interactive report whose preview closed. */
   remove(workerId: string, tab: string): void;
   showChat(workerId: string, key: string): void;
+  /**
+   * The sandbox's network is isolated: its reports' scripts do not run unless
+   * the user asks, since a script can send the report out of the browser.
+   */
+  isolated(workerId: string): boolean;
 }
 
 export class Preview {
@@ -141,7 +146,7 @@ export class Preview {
           this.wantsInteractive = false;
           // Charts, explorers and comments only work with the scripts running; the
           // static preview stays in its own tab with the feedback box.
-          if (isStorytellerReport(this.html)) this.owner.openInteractive(this);
+          if (isStorytellerReport(this.html) && !this.owner.page.isolated(this.workerId)) this.owner.openInteractive(this);
         }
         if (this.noteShown) {
           this.messageFor = file.mtimeMs;
@@ -246,7 +251,7 @@ export class Preview {
         if (this.chatKey) this.owner.page.showChat(this.workerId, this.chatKey);
         break;
       case 'interactive':
-        this.owner.openInteractive(this);
+        this.owner.openInteractive(this, { asked: true });
         break;
     }
   }
@@ -344,8 +349,16 @@ export class Previews {
     preview.update(options);
   }
 
-  openInteractive(preview: Preview): void {
+  openInteractive(preview: Preview, { asked = false } = {}): void {
     if (!preview.html) return;
+    // A report's scripts can send its content anywhere by loading another
+    // page: past the network isolation the sandbox has, so only when asked.
+    if (asked && this.page.isolated(preview.workerId) && !preview.interactive) {
+      const run = confirm(
+        `This sandbox's network is isolated, but a report's scripts run in your browser and can send its content anywhere. Run the scripts of ${preview.title}?`
+      );
+      if (!run) return;
+    }
     preview.interactive = true;
     this.activate(preview.workerId, preview.id + INTERACTIVE);
   }
