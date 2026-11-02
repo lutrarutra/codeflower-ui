@@ -273,6 +273,14 @@ export class WorkerConnection {
     return this.bridge.readFile(path);
   }
 
+  readPreview(path: string): Promise<SandboxFile & { data: string }> {
+    return this.bridge.readPreview(path);
+  }
+
+  thumbnail(path: string, height: number): Promise<{ mimeType: string; data: string }> {
+    return this.bridge.thumbnail(path, height);
+  }
+
   statFile(path: string): Promise<SandboxFile> {
     return this.bridge.statFile(path);
   }

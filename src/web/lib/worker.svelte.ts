@@ -378,9 +378,10 @@ export class WebWorker {
     setAutoApprove: (chat, enabled) => this.connection?.setAutoApprove(chat.key, enabled),
     answerPermission: (_chat, requestId, optionId) => this.connection?.answerPermission(requestId, optionId),
     answerQuestion: (_chat, requestId, action, content) => this.connection?.answerQuestion(requestId, action, content),
-    fileData: async (_chat, path) => {
+    fileData: async (_chat, path, thumbnail) => {
       try {
-        const file = await this.require().readFile(path);
+        const connection = this.require();
+        const file = thumbnail ? await connection.thumbnail(path, thumbnail) : await connection.readFile(path);
         return `data:${file.mimeType};base64,${file.data}`;
       } catch {
         return null;

@@ -360,6 +360,28 @@ export class CodeflowerExtensions {
     return this.rpc.request<SandboxFile & { data: string }>('_codeflower/files/read', { path });
   }
 
+  /**
+   * The file for a preview. Images a browser cannot show (TIFF) or too large
+   * to send whole come drawn by the worker, at most PREVIEW_HEIGHT pixels high.
+   */
+  async readPreview(path: string): Promise<SandboxFile & { data: string }> {
+    const file = await this.statFile(path);
+    if (file.mimeType.startsWith('image/') && (!BROWSER_IMAGES.has(file.mimeType) || file.size > MAX_READ_BYTES)) {
+      return { ...file, ...(await this.thumbnail(path, PREVIEW_HEIGHT)) };
+    }
+    return this.readFile(path);
+  }
+
+  /** A small WebP of the image, at most `height` pixels high; older workers send the whole file. */
+  async thumbnail(path: string, height: number): Promise<{ mimeType: string; data: string }> {
+    try {
+      return await this.rpc.request<{ mimeType: string; data: string }>('_codeflower/files/thumbnail', { path, height });
+    } catch (error) {
+      if (isMethodNotFound(error)) return this.readFile(path);
+      throw error;
+    }
+  }
+
   statFile(path: string): Promise<SandboxFile> {
     return this.rpc.request<SandboxFile>('_codeflower/files/stat', { path });
   }

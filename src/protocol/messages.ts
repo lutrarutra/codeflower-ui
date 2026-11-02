@@ -252,7 +252,8 @@ export type WebviewMessage =
   | { type: 'questionResponse'; requestId: number; action: QuestionAction; content: FormContent | null }
   /** A file path in the chat was clicked: show it in a preview tab. */
   | { type: 'openFile'; path: string }
-  | { type: 'fileData'; path: string; key: string }
+  /** With `thumbnail`, a small version at most that many pixels high, for the chat to show. */
+  | { type: 'fileData'; path: string; key: string; thumbnail?: number }
   | { type: 'setAutoApprove'; enabled: boolean }
   | { type: 'action'; id: string }
   | { type: 'removeQueued'; id: string }

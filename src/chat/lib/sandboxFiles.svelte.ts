@@ -1,7 +1,7 @@
 // Files from the sandbox that a chat shows, e.g. figures the agent looked at.
 // Fetched through the chat's host once per key (a file as one tool call saw it,
-// since the agent may rewrite it later); undefined while loading, null if
-// unavailable.
+// since the agent may rewrite it later), as thumbnails when asked; undefined
+// while loading, null if unavailable.
 import { getContext, setContext } from 'svelte';
 import type { ChatHost } from './host.ts';
 
@@ -14,10 +14,10 @@ export class SandboxFiles {
     this.host = host;
   }
 
-  url(path: string, key: string): string | null | undefined {
+  url(path: string, key: string, thumbnail?: number): string | null | undefined {
     if (!this.requested.has(key)) {
       this.requested.add(key);
-      this.host.send({ type: 'fileData', path, key });
+      this.host.send({ type: 'fileData', path, key, ...(thumbnail ? { thumbnail } : {}) });
     }
     return this.urls[key];
   }

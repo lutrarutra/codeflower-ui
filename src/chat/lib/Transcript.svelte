@@ -232,16 +232,13 @@
       {#if item.status === 'completed' && item.files.some(isImage)}
         <div class="-mt-1.5 flex flex-wrap gap-2 pl-9">
           {#each item.files.filter(isImage) as path (path)}
-            {@const url = fileUrl(path, `${item.id}|${path}`)}
-            {#if url}
-              <button
-                class="overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 hover:border-indigo"
-                title="Show {path}"
-                onclick={() => send({ type: 'openFile', path })}
-              >
-                <img class="block max-h-40 max-w-full" src={url} alt={path} />
-              </button>
-            {/if}
+            <button
+              class="max-w-full overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 hover:border-indigo"
+              title="Show {path}"
+              onclick={() => send({ type: 'openFile', path })}
+            >
+              <Thumbnail {path} key="{item.id}|{path}" height={160} alt={path} />
+            </button>
           {/each}
         </div>
       {/if}
@@ -332,13 +329,12 @@
           {#each item.files as path (path)}
             {@const name = path.split('/').pop()}
             {#if isImage(path)}
-              {@const url = fileUrl(path, `${item.id}|${path}`)}
               <button
-                class="flex flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
+                class="flex max-w-full flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
                 title="Open {path}"
                 onclick={() => send({ type: 'openFile', path })}
               >
-                {#if url}<img class="block max-h-48 max-w-full" src={url} alt={name} />{/if}
+                <Thumbnail {path} key="{item.id}|{path}" height={192} alt={name ?? path} />
                 <span class="bg-card px-2 py-0.5 font-mono text-[0.75em] text-muted">{name}</span>
               </button>
             {:else}

@@ -138,7 +138,7 @@ export class Preview {
       try {
         const connection = this.owner.page.agent(this.workerId)?.connection;
         if (!connection) throw new Error('The sandbox is not connected');
-        const { data, ...file } = await connection.readFile(this.file.path);
+        const { data, ...file } = await connection.readPreview(this.file.path);
         this.file = file;
         this.data = data;
         this.error = null;
