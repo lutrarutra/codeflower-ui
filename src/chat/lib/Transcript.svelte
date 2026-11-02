@@ -4,7 +4,8 @@
   import { highlighted } from './editor/highlight.ts';
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
-  import { buildItems } from './transcript.ts';
+  import { activity, buildItems, foldTurns, type ChatItem } from './transcript.ts';
+  import Elapsed from './Elapsed.svelte';
   import type { SubagentFeatures, SubagentSummary } from '../../protocol/subagents.ts';
   import SubagentCard from './SubagentCard.svelte';
   import { duration } from './time.ts';
@@ -30,7 +31,9 @@
     live,
     suggest,
     subagents = [],
-    subagentFeatures
+    subagentFeatures,
+    fold = false,
+    waiting = false
   }: {
     entries: TranscriptEntry[];
     /** The index of `entries[0]` in the chat's transcript; above 0, earlier entries load on scrolling up. */
@@ -43,9 +46,14 @@
     /** The chat's subagents as the worker reports them, for their cards. */
     subagents?: SubagentSummary[];
     subagentFeatures?: SubagentFeatures;
+    /** Each turn shows only its prompt, a line while it runs, and its final message; the steps fold. */
+    fold?: boolean;
+    /** A permission or question waits for the user. */
+    waiting?: boolean;
   } = $props();
   const summaries = $derived(new Map(subagents.map((subagent) => [subagent.sessionId, subagent])));
   const items = $derived(buildItems(entries, start));
+  const turns = $derived(fold ? foldTurns(items) : []);
   let container: HTMLElement | undefined = $state();
 
   // Follow the output while the user is at the bottom: whatever makes the
@@ -182,6 +190,242 @@
   };
 </script>
 
+{#snippet row(item: ChatItem, previous: ChatItem | undefined)}
+  {#if item.kind === 'user'}
+    <div
+      class="bubble-user max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
+    >
+      {item.text}
+    </div>
+  {:else if item.kind === 'action'}
+    <details
+      class="bubble-user group max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
+    >
+      <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
+        <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
+        {item.title}
+      </summary>
+      <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
+    </details>
+  {:else if item.kind === 'assistant'}
+    <div class="max-w-[95%]"><Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} /></div>
+  {:else if item.kind === 'thought'}
+    <details class="group self-start text-muted">
+      <summary
+        class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
+      >
+        <span class="codicon codicon-sparkle text-violet"></span>
+        Thinking
+        <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
+      </summary>
+      <div class="mt-2 border-l-2 border-soft-line pl-3 text-[0.9em] whitespace-pre-wrap">{item.text}</div>
+    </details>
+  {:else if item.kind === 'tool'}
+    {@const [icon, tile] = toolIcon[item.toolKind] ?? ['tools', 'bg-yellow-soft']}
+    {@const took = elapsed(item.started, item.ended)}
+    <details class="group rounded-xl border-[1.5px] border-soft-line bg-card">
+      <summary class="flex cursor-pointer list-none items-center gap-2.5 px-2.5 py-1.5 select-none">
+        <span class="grid size-6 shrink-0 place-items-center rounded-lg border-[1.5px] border-line {tile}">
+          <span class="codicon codicon-{icon} text-[13px]!"></span>
+        </span>
+        {#if item.description}
+          <span class="flex min-w-0 flex-1 items-baseline gap-2" title={item.title}>
+            <span class="shrink-0 truncate text-[0.92em]">{item.description}</span>
+            <span class="min-w-0 truncate font-mono text-[0.78em] text-muted">{item.title}</span>
+          </span>
+        {:else}
+          <span class="min-w-0 flex-1 truncate font-mono text-[0.85em]">{item.title}</span>
+        {/if}
+        {#each item.files as path (path)}
+          <button
+            class="link shrink-0 text-[0.85em]"
+            title="Show {path}"
+            onclick={(event) => {
+              event.preventDefault();
+              send({ type: 'openFile', path });
+            }}
+          >
+            <span class="codicon codicon-eye"></span>
+          </button>
+        {/each}
+        {#if took}
+          <span class="shrink-0 font-mono text-[0.78em] text-muted tabular-nums" title={item.ended === null ? 'Running for' : 'Took'}>{took}</span>
+        {/if}
+        <span class="codicon {statusIcon[item.status] ?? statusIcon.pending}"></span>
+        {#if item.details.length || item.description}
+          <span class="codicon codicon-chevron-right text-muted transition-transform group-open:rotate-90"></span>
+        {/if}
+      </summary>
+      {#if item.description && item.toolKind === 'execute'}
+        <pre
+          class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
+          use:highlighted={{ text: item.title, language: 'shell' }}></pre>
+      {/if}
+      {#each item.details as detail, index (index)}
+        <pre
+          class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
+          use:highlighted={{ text: detail, language: looksLikeDiff(detail) ? 'diff' : undefined }}></pre>
+      {/each}
+    </details>
+    <!-- Figures the agent looked at, so the user sees them too. -->
+    {#if item.status === 'completed' && item.files.some(isImage)}
+      <div class="-mt-1.5 flex flex-wrap gap-2 pl-9">
+        {#each item.files.filter(isImage) as path (path)}
+          <button
+            class="max-w-full overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 hover:border-indigo"
+            title="Show {path}"
+            onclick={() => send({ type: 'openFile', path })}
+          >
+            <Thumbnail {path} key="{item.id}|{path}" height={160} alt={path} />
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {:else if item.kind === 'plan'}
+    <div class="rounded-xl border-[1.5px] border-soft-line bg-card px-3.5 py-2.5">
+      <div class="eyebrow mb-1.5 text-indigo">Plan</div>
+      <ul class="m-0 flex list-none flex-col gap-1 p-0">
+        {#each item.entries as step, index (index)}
+          <li class="flex items-start gap-2 {step.status === 'completed' ? 'text-muted line-through' : ''}">
+            <span
+              class="codicon mt-[3px] {step.status === 'completed'
+                ? 'codicon-pass-filled text-green'
+                : step.status === 'in_progress'
+                  ? 'codicon-circle-large-filled text-yellow'
+                  : 'codicon-circle-large-outline text-muted'}"
+            ></span>
+            <span>{step.content}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {:else if item.kind === 'permission' && item.outcome !== null}
+    <!-- An unanswered request is the prompt card; answered ones read as a note. -->
+    <div class="-mt-1.5 flex items-center gap-1.5 self-start pl-1 text-[0.8em] text-muted">
+      {#if allowed(item.outcome, item.options)}
+        <span class="codicon codicon-check text-green"></span> Allowed
+      {:else}
+        <span class="codicon codicon-circle-slash text-pink"></span> Not allowed
+      {/if}
+      {#if previous?.kind !== 'tool' || previous.title !== item.title}
+        <span class="truncate font-mono">{item.title}</span>
+      {/if}
+    </div>
+  {:else if item.kind === 'shell'}
+    <!-- The user's own `!command`, run in the sandbox. -->
+    <div class="flex max-w-full flex-col overflow-hidden rounded-xl border-[1.5px] border-soft-line bg-code">
+      <div class="flex items-center gap-2 px-3 py-1.5">
+        <span class="font-mono font-bold text-teal">$</span>
+        <span
+          class="min-w-0 flex-1 truncate font-mono text-[0.88em]"
+          title={item.command}
+          use:highlighted={{ text: item.command, language: 'shell' }}
+        ></span>
+        {#if item.exitCode === null}
+          <span class="codicon codicon-loading codicon-modifier-spin text-cyan"></span>
+          <button class="link text-[0.85em]" onclick={() => send({ type: 'cancelShell', runId: item.runId })}>Stop</button>
+        {:else if item.exitCode === 0}
+          <span class="codicon codicon-pass-filled text-green" title="Exit code 0"></span>
+        {:else}
+          <span class="rounded-full bg-pink-soft px-2 text-[0.8em] font-semibold text-pink">
+            {item.timedOut ? 'timed out' : `exit ${item.exitCode}`}
+          </span>
+        {/if}
+      </div>
+      {#if item.output}
+        <pre
+          class="m-0 max-h-72 overflow-auto border-t-[1.5px] border-soft-line px-3 py-2 font-mono text-[0.8em] whitespace-pre-wrap">{item.output}</pre>
+      {/if}
+    </div>
+  {:else if item.kind === 'question' && item.answers !== null}
+    <!-- An open question is the card above the composer; answered ones stay in the chat. -->
+    <div class="flex max-w-[90%] flex-col gap-1 self-start rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2">
+      <div class="flex items-center gap-1.5 text-[0.85em] text-muted">
+        <span class="codicon codicon-comment-unresolved text-orange"></span>
+        {item.message || 'The agent asked'}
+      </div>
+      {#if item.skipped}
+        <div class="text-[0.85em] text-muted italic">Skipped</div>
+      {:else}
+        {#each item.answers as answer, index (index)}
+          <div>
+            {#if item.answers.length > 1}<span class="text-[0.85em] text-muted">{answer.question} </span>{/if}
+            <span class="font-semibold">{answer.answer}</span>
+          </div>
+        {/each}
+      {/if}
+    </div>
+  {:else if item.kind === 'show'}
+    <!-- Files the agent opened for the user; they also open as tabs. -->
+    <div class="flex flex-col gap-2 rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2.5">
+      <div class="flex items-start gap-1.5 text-[0.85em]">
+        <span class="codicon codicon-eye mt-[2px] text-teal"></span>
+        <span class="eyebrow mt-[1px] shrink-0 text-teal">Shown to you</span>
+        {#if item.message}<span class="text-muted">· {item.message}</span>{/if}
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {#each item.files as path (path)}
+          {@const name = path.split('/').pop()}
+          {#if isImage(path)}
+            <button
+              class="flex max-w-full flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
+              title="Open {path}"
+              onclick={() => send({ type: 'openFile', path })}
+            >
+              <Thumbnail {path} key="{item.id}|{path}" height={192} alt={name ?? path} />
+              <span class="bg-card px-2 py-0.5 font-mono text-[0.75em] text-muted">{name}</span>
+            </button>
+          {:else}
+            <button class="chip" title="Open {path}" onclick={() => send({ type: 'openFile', path })}>
+              <span class="codicon codicon-file"></span>
+              <span class="font-mono">{name}</span>
+            </button>
+          {/if}
+        {/each}
+      </div>
+    </div>
+  {:else if item.kind === 'subagent'}
+    <SubagentCard {item} summary={summaries.get(item.sessionId)} features={subagentFeatures} />
+  {:else if item.kind === 'task'}
+    <!-- A subagent's chat: what its parent asked of it. -->
+    <div class="max-w-[95%] self-start rounded-xl border-[1.5px] border-soft-line bg-violet-soft px-3.5 py-2">
+      <div class="eyebrow mb-1 text-violet">Task</div>
+      <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />
+    </div>
+  {:else if item.kind === 'stop'}
+    <div class="flex items-center gap-1.5 self-start rounded-full bg-pink-soft px-2.5 py-0.5 text-[0.85em]">
+      <span class="codicon codicon-debug-stop text-pink"></span>
+      Turn ended: {item.reason}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet empty()}
+  {#if loading}
+    <div class="flex flex-col gap-4" role="status" aria-label="Loading the chat">
+      <div class="skeleton h-9 w-[55%] self-end rounded-[18px]!"></div>
+      <Skeleton lines={['92%', '84%', '60%']} />
+      <div class="skeleton h-8 w-full rounded-xl!"></div>
+      <Skeleton lines={['88%', '45%']} />
+    </div>
+  {:else}
+    <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-8 text-center">
+      <Tulip size={72} sway />
+      <h2 class="m-0 font-display text-2xl font-semibold ">What shall we grow today?</h2>
+      <p class="m-0 text-muted">
+        Ask the agent about your data. It analyses it in its own sandbox, shows you figures and writes up what it finds.
+      </p>
+      {#if live}
+        <div class="flex flex-wrap justify-center gap-2 pt-2">
+          {#each suggestions as suggestion (suggestion)}
+            <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
 <!-- Items keep their size and the list scrolls; shrinking would squash cards that clip their content. -->
 <div bind:this={container} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 max-[640px]:px-2.5 *:shrink-0">
   {#if start > 0 && items.length}
@@ -190,242 +434,58 @@
       Loading earlier messages…
     </div>
   {/if}
-  {#each items as item, index (item.id)}
-    {#if item.kind === 'user'}
-      <div
-        class="bubble-user max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
-      >
-        {item.text}
-      </div>
-    {:else if item.kind === 'action'}
-      <details
-        class="bubble-user group max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
-      >
-        <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
-          <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
-          {item.title}
-        </summary>
-        <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
-      </details>
-    {:else if item.kind === 'assistant'}
-      <div class="max-w-[95%]"><Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} /></div>
-    {:else if item.kind === 'thought'}
-      <details class="group self-start text-muted">
-        <summary
-          class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
-        >
-          <span class="codicon codicon-sparkle text-violet"></span>
-          Thinking
-          <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
-        </summary>
-        <div class="mt-2 border-l-2 border-soft-line pl-3 text-[0.9em] whitespace-pre-wrap">{item.text}</div>
-      </details>
-    {:else if item.kind === 'tool'}
-      {@const [icon, tile] = toolIcon[item.toolKind] ?? ['tools', 'bg-yellow-soft']}
-      {@const took = elapsed(item.started, item.ended)}
-      <details class="group rounded-xl border-[1.5px] border-soft-line bg-card">
-        <summary class="flex cursor-pointer list-none items-center gap-2.5 px-2.5 py-1.5 select-none">
-          <span class="grid size-6 shrink-0 place-items-center rounded-lg border-[1.5px] border-line {tile}">
-            <span class="codicon codicon-{icon} text-[13px]!"></span>
-          </span>
-          {#if item.description}
-            <span class="flex min-w-0 flex-1 items-baseline gap-2" title={item.title}>
-              <span class="shrink-0 truncate text-[0.92em]">{item.description}</span>
-              <span class="min-w-0 truncate font-mono text-[0.78em] text-muted">{item.title}</span>
-            </span>
-          {:else}
-            <span class="min-w-0 flex-1 truncate font-mono text-[0.85em]">{item.title}</span>
+  {#if !items.length}
+    {@render empty()}
+  {:else if fold}
+    {#each turns as turn, index (turn.id)}
+      {@const last = index === turns.length - 1}
+      <!-- The turn runs: what it found is not known yet. -->
+      {@const running = busy && last && (turn.prompt?.ended ?? null) === null}
+      {@const took = turn.prompt?.started != null && turn.prompt.ended != null ? turn.prompt.ended - turn.prompt.started : null}
+      {#if turn.prompt}{@render row(turn.prompt, undefined)}{/if}
+      {#if !running && turn.steps.length}
+        <!-- Full width, so the steps inside lay out as in the chat. -->
+        <details class="group min-w-0 text-muted">
+          <summary
+            class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
+          >
+            <span class="codicon codicon-checklist"></span>
+            {took !== null && took >= 1000 ? `Worked ${duration(took)} · ` : ''}{turn.steps.length} {turn.steps.length === 1 ? 'step' : 'steps'}
+            <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
+          </summary>
+          <div class="mt-3 flex flex-col gap-3 text-ink *:shrink-0">
+            {#each turn.steps as item, step (item.id)}{@render row(item, turn.steps[step - 1])}{/each}
+          </div>
+        </details>
+      {/if}
+      {#each turn.shown as item (item.id)}{@render row(item, undefined)}{/each}
+      {#if !running}
+        {#each turn.answer as item (item.id)}{@render row(item, undefined)}{/each}
+      {/if}
+      {#if busy && last}
+        {@const doing = running ? activity(turn.work) : 'Subagents at work'}
+        <div class="flex min-w-0 flex-col gap-0.5 py-1" role="status" aria-label={waiting ? 'The agent waits for you' : 'The agent is working'}>
+          <div class="flex items-center gap-2 text-[0.9em]">
+            {#if waiting}
+              <span class="size-2 shrink-0 rounded-full bg-orange"></span>
+              <span class="font-semibold">Waiting for you</span>
+            {:else}
+              <span class="codicon codicon-loading codicon-modifier-spin text-indigo"></span>
+              <span class="font-semibold">Working</span>
+            {/if}
+            <Elapsed started={turn.prompt?.started ?? null} ended={null} running />
+          </div>
+          {#if doing}
+            <div class="truncate pl-6 text-[0.8em] text-muted" title={doing}>{doing}</div>
           {/if}
-          {#each item.files as path (path)}
-            <button
-              class="link shrink-0 text-[0.85em]"
-              title="Show {path}"
-              onclick={(event) => {
-                event.preventDefault();
-                send({ type: 'openFile', path });
-              }}
-            >
-              <span class="codicon codicon-eye"></span>
-            </button>
-          {/each}
-          {#if took}
-            <span class="shrink-0 font-mono text-[0.78em] text-muted tabular-nums" title={item.ended === null ? 'Running for' : 'Took'}>{took}</span>
-          {/if}
-          <span class="codicon {statusIcon[item.status] ?? statusIcon.pending}"></span>
-          {#if item.details.length || item.description}
-            <span class="codicon codicon-chevron-right text-muted transition-transform group-open:rotate-90"></span>
-          {/if}
-        </summary>
-        {#if item.description && item.toolKind === 'execute'}
-          <pre
-            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
-            use:highlighted={{ text: item.title, language: 'shell' }}></pre>
-        {/if}
-        {#each item.details as detail, index (index)}
-          <pre
-            class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
-            use:highlighted={{ text: detail, language: looksLikeDiff(detail) ? 'diff' : undefined }}></pre>
-        {/each}
-      </details>
-      <!-- Figures the agent looked at, so the user sees them too. -->
-      {#if item.status === 'completed' && item.files.some(isImage)}
-        <div class="-mt-1.5 flex flex-wrap gap-2 pl-9">
-          {#each item.files.filter(isImage) as path (path)}
-            <button
-              class="max-w-full overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 hover:border-indigo"
-              title="Show {path}"
-              onclick={() => send({ type: 'openFile', path })}
-            >
-              <Thumbnail {path} key="{item.id}|{path}" height={160} alt={path} />
-            </button>
-          {/each}
         </div>
       {/if}
-    {:else if item.kind === 'plan'}
-      <div class="rounded-xl border-[1.5px] border-soft-line bg-card px-3.5 py-2.5">
-        <div class="eyebrow mb-1.5 text-indigo">Plan</div>
-        <ul class="m-0 flex list-none flex-col gap-1 p-0">
-          {#each item.entries as step, index (index)}
-            <li class="flex items-start gap-2 {step.status === 'completed' ? 'text-muted line-through' : ''}">
-              <span
-                class="codicon mt-[3px] {step.status === 'completed'
-                  ? 'codicon-pass-filled text-green'
-                  : step.status === 'in_progress'
-                    ? 'codicon-circle-large-filled text-yellow'
-                    : 'codicon-circle-large-outline text-muted'}"
-              ></span>
-              <span>{step.content}</span>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {:else if item.kind === 'permission' && item.outcome !== null}
-      {@const previous = items[index - 1]}
-      <!-- An unanswered request is the prompt card; answered ones read as a note. -->
-      <div class="-mt-1.5 flex items-center gap-1.5 self-start pl-1 text-[0.8em] text-muted">
-        {#if allowed(item.outcome, item.options)}
-          <span class="codicon codicon-check text-green"></span> Allowed
-        {:else}
-          <span class="codicon codicon-circle-slash text-pink"></span> Not allowed
-        {/if}
-        {#if previous?.kind !== 'tool' || previous.title !== item.title}
-          <span class="truncate font-mono">{item.title}</span>
-        {/if}
-      </div>
-    {:else if item.kind === 'shell'}
-      <!-- The user's own `!command`, run in the sandbox. -->
-      <div class="flex max-w-full flex-col overflow-hidden rounded-xl border-[1.5px] border-soft-line bg-code">
-        <div class="flex items-center gap-2 px-3 py-1.5">
-          <span class="font-mono font-bold text-teal">$</span>
-          <span
-            class="min-w-0 flex-1 truncate font-mono text-[0.88em]"
-            title={item.command}
-            use:highlighted={{ text: item.command, language: 'shell' }}
-          ></span>
-          {#if item.exitCode === null}
-            <span class="codicon codicon-loading codicon-modifier-spin text-cyan"></span>
-            <button class="link text-[0.85em]" onclick={() => send({ type: 'cancelShell', runId: item.runId })}>Stop</button>
-          {:else if item.exitCode === 0}
-            <span class="codicon codicon-pass-filled text-green" title="Exit code 0"></span>
-          {:else}
-            <span class="rounded-full bg-pink-soft px-2 text-[0.8em] font-semibold text-pink">
-              {item.timedOut ? 'timed out' : `exit ${item.exitCode}`}
-            </span>
-          {/if}
-        </div>
-        {#if item.output}
-          <pre
-            class="m-0 max-h-72 overflow-auto border-t-[1.5px] border-soft-line px-3 py-2 font-mono text-[0.8em] whitespace-pre-wrap">{item.output}</pre>
-        {/if}
-      </div>
-    {:else if item.kind === 'question' && item.answers !== null}
-      <!-- An open question is the card above the composer; answered ones stay in the chat. -->
-      <div class="flex max-w-[90%] flex-col gap-1 self-start rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2">
-        <div class="flex items-center gap-1.5 text-[0.85em] text-muted">
-          <span class="codicon codicon-comment-unresolved text-orange"></span>
-          {item.message || 'The agent asked'}
-        </div>
-        {#if item.skipped}
-          <div class="text-[0.85em] text-muted italic">Skipped</div>
-        {:else}
-          {#each item.answers as answer, index (index)}
-            <div>
-              {#if item.answers.length > 1}<span class="text-[0.85em] text-muted">{answer.question} </span>{/if}
-              <span class="font-semibold">{answer.answer}</span>
-            </div>
-          {/each}
-        {/if}
-      </div>
-    {:else if item.kind === 'show'}
-      <!-- Files the agent opened for the user; they also open as tabs. -->
-      <div class="flex flex-col gap-2 rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2.5">
-        <div class="flex items-start gap-1.5 text-[0.85em]">
-          <span class="codicon codicon-eye mt-[2px] text-teal"></span>
-          <span class="eyebrow mt-[1px] shrink-0 text-teal">Shown to you</span>
-          {#if item.message}<span class="text-muted">· {item.message}</span>{/if}
-        </div>
-        <div class="flex flex-wrap gap-2">
-          {#each item.files as path (path)}
-            {@const name = path.split('/').pop()}
-            {#if isImage(path)}
-              <button
-                class="flex max-w-full flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
-                title="Open {path}"
-                onclick={() => send({ type: 'openFile', path })}
-              >
-                <Thumbnail {path} key="{item.id}|{path}" height={192} alt={name ?? path} />
-                <span class="bg-card px-2 py-0.5 font-mono text-[0.75em] text-muted">{name}</span>
-              </button>
-            {:else}
-              <button class="chip" title="Open {path}" onclick={() => send({ type: 'openFile', path })}>
-                <span class="codicon codicon-file"></span>
-                <span class="font-mono">{name}</span>
-              </button>
-            {/if}
-          {/each}
-        </div>
-      </div>
-    {:else if item.kind === 'subagent'}
-      <SubagentCard {item} summary={summaries.get(item.sessionId)} features={subagentFeatures} />
-    {:else if item.kind === 'task'}
-      <!-- A subagent's chat: what its parent asked of it. -->
-      <div class="max-w-[95%] self-start rounded-xl border-[1.5px] border-soft-line bg-violet-soft px-3.5 py-2">
-        <div class="eyebrow mb-1 text-violet">Task</div>
-        <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />
-      </div>
-    {:else if item.kind === 'stop'}
-      <div class="flex items-center gap-1.5 self-start rounded-full bg-pink-soft px-2.5 py-0.5 text-[0.85em]">
-        <span class="codicon codicon-debug-stop text-pink"></span>
-        Turn ended: {item.reason}
-      </div>
-    {/if}
+    {/each}
   {:else}
-    {#if loading}
-      <div class="flex flex-col gap-4" role="status" aria-label="Loading the chat">
-        <div class="skeleton h-9 w-[55%] self-end rounded-[18px]!"></div>
-        <Skeleton lines={['92%', '84%', '60%']} />
-        <div class="skeleton h-8 w-full rounded-xl!"></div>
-        <Skeleton lines={['88%', '45%']} />
-      </div>
-    {:else}
-      <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-8 text-center">
-        <Tulip size={72} sway />
-        <h2 class="m-0 font-display text-2xl font-semibold ">What shall we grow today?</h2>
-        <p class="m-0 text-muted">
-          Ask the agent about your data. It analyses it in its own sandbox, shows you figures and writes up what it finds.
-        </p>
-        {#if live}
-          <div class="flex flex-wrap justify-center gap-2 pt-2">
-            {#each suggestions as suggestion (suggestion)}
-              <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-  {/each}
+    {#each items as item, index (item.id)}{@render row(item, items[index - 1])}{/each}
+  {/if}
 
-  {#if busy}
+  {#if busy && !fold}
     <div class="flex items-center gap-1.5 py-1" aria-label="The agent is working">
       {#each ['bg-indigo', 'bg-pink', 'bg-yellow'] as color, index (color)}
         <span

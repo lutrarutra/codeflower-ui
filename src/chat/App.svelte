@@ -26,7 +26,16 @@
   import Elapsed from './lib/Elapsed.svelte';
   import { epoch } from './lib/time.ts';
 
-  let { host }: { host: ChatHost } = $props();
+  let {
+    host,
+    fold,
+    onFold
+  }: {
+    host: ChatHost;
+    /** Whether the turns' steps fold, when the view keeps the choice itself; else the host keeps it (`chat.foldSteps`). */
+    fold?: boolean;
+    onFold?: (fold: boolean) => void;
+  } = $props();
   // svelte-ignore state_referenced_locally
   provideChatHost(host);
   // svelte-ignore state_referenced_locally
@@ -35,6 +44,11 @@
   const send = (message: Parameters<ChatHost['send']>[0]) => host.send(message);
 
   let chat = $state<ChatState>({ title: '', subtitle: '', live: false, busy: false });
+  const folded = $derived(fold ?? chat.foldSteps ?? false);
+  function toggleFold(): void {
+    if (onFold) onFold(!folded);
+    else send({ type: 'foldSteps', fold: !folded });
+  }
   let entries = $state<TranscriptEntry[]>([]);
   /** The index of `entries[0]` in the chat's transcript; earlier entries load on request. */
   let start = $state(0);
@@ -280,6 +294,16 @@
         choose={(id) => send({ type: 'action', id })}
       />
     {/if}
+    <button
+      type="button"
+      class="link shrink-0"
+      title={folded ? 'Show every step' : 'Show only the answers'}
+      aria-label={folded ? 'Show every step' : 'Show only the answers'}
+      aria-pressed={!folded}
+      onclick={toggleFold}
+    >
+      <span class="codicon {folded ? 'codicon-eye-closed' : 'codicon-eye'}"></span>
+    </button>
     <span
       class="inline-flex shrink-0 items-center gap-1.5 text-[0.8em] font-semibold {statusLook[status][1]}"
       title={statusLook[status][2]}
@@ -320,6 +344,8 @@
     {suggest}
     {subagents}
     subagentFeatures={subagentSettings?.features}
+    fold={folded}
+    waiting={!!permission || !!question}
   />
 
   {#if permission}

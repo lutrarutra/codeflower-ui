@@ -11,9 +11,15 @@ import {
   type TranscriptEntry
 } from '../../protocol/messages.ts';
 
+/** When a prompt's turn started and ended, in ms since the epoch; null when unknown or still running. */
+interface TurnTimes {
+  started: number | null;
+  ended: number | null;
+}
+
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string }
-  | { kind: 'action'; id: string; title: string; text: string }
+  | ({ kind: 'user'; id: string; text: string } & TurnTimes)
+  | ({ kind: 'action'; id: string; title: string; text: string } & TurnTimes)
   | { kind: 'assistant'; id: string; text: string; messageId?: string | null }
   | { kind: 'thought'; id: string; text: string }
   | {
@@ -165,6 +171,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   const tools = new Map<string, Extract<ChatItem, { kind: 'tool' }>>();
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
   let pendingQuestion: Extract<ChatItem, { kind: 'question' }> | undefined;
+  let prompted: Extract<ChatItem, { kind: 'user' | 'action' }> | undefined;
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
   const subagents = new Map<string, Extract<ChatItem, { kind: 'subagent' }>>();
 
@@ -178,12 +185,15 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           const prompt = entry.prompt.filter((block) => !block._meta?.[SHELL_CONTEXT_META]);
           const text = prompt.map(blockText).join('\n');
           const action = promptAction(prompt);
-          items.push(action ? { kind: 'action', id, title: action.title, text } : { kind: 'user', id, text });
+          const times = { started: time(entry.t), ended: null };
+          prompted = action ? { kind: 'action', id, title: action.title, text, ...times } : { kind: 'user', id, text, ...times };
+          items.push(prompted);
         }
         break;
       case 'turn_end':
         // A call the agent never finished, e.g. one the user stopped, ran until the turn ended.
         for (const tool of tools.values()) tool.ended ??= time(entry.t);
+        if (prompted) prompted.ended ??= time(entry.t);
         if (entry.stopReason && entry.stopReason !== 'end_turn') {
           items.push({ kind: 'stop', id, reason: entry.stopReason.replace(/_/g, ' ') });
         }
@@ -362,4 +372,83 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
     const previous = items[index - 1];
     return !(item.kind === 'assistant' && previous?.kind === 'assistant' && previous.text.trim() === item.text.trim());
   });
+}
+
+/** One prompt and what the agent did for it, as the chat shows it with its steps folded. */
+export interface Turn {
+  /** The prompt's id, or `start` for the first page's entries from before its first prompt. */
+  id: string;
+  prompt: Extract<ChatItem, { kind: 'user' | 'action' }> | null;
+  /** What folds: thinking, tool calls, commentary, plans, subagents, answered requests. */
+  steps: ChatItem[];
+  /** What always shows, in order: files shown to the user, their own commands, a turn that stopped. */
+  shown: ChatItem[];
+  /** The agent's final message: its last, with those right before it. */
+  answer: ChatItem[];
+  /** Everything after the prompt, in order: while the turn runs, its answer is not known yet. */
+  work: ChatItem[];
+}
+
+const SHOWN = new Set<ChatItem['kind']>(['show', 'shell', 'stop', 'task']);
+
+/**
+ * Splits the chat at each prompt. No agent marks its final answer, so it is the
+ * last message of the turn, also when tool calls follow it (e.g. showing a
+ * file). Output after a turn ended, with no new prompt (e.g. Claude Code's
+ * after its background subagents), belongs to that turn.
+ */
+export function foldTurns(items: ChatItem[]): Turn[] {
+  const turns: Turn[] = [];
+  let work: ChatItem[] = [];
+  let prompt: Turn['prompt'] = null;
+  const close = () => {
+    if (!prompt && !work.length) return;
+    const last = work.findLastIndex((item) => item.kind === 'assistant');
+    let first = last;
+    while (first > 0 && work[first - 1]!.kind === 'assistant') first--;
+    const answer = last === -1 ? [] : work.slice(first, last + 1);
+    turns.push({
+      id: prompt?.id ?? 'start',
+      prompt,
+      steps: work.filter((item) => !SHOWN.has(item.kind) && !answer.includes(item)),
+      shown: work.filter((item) => SHOWN.has(item.kind)),
+      answer,
+      work
+    });
+  };
+  for (const item of items) {
+    if (item.kind === 'user' || item.kind === 'action') {
+      close();
+      prompt = item;
+      work = [];
+    } else work.push(item);
+  }
+  close();
+  return turns;
+}
+
+/** A line on what the agent does now, from its latest step; null when there is none yet. */
+export function activity(work: ChatItem[]): string | null {
+  const step = work.findLast((item) => !SHOWN.has(item.kind));
+  switch (step?.kind) {
+    case 'tool':
+      return step.description ?? step.title;
+    case 'thought':
+      return 'Thinking…';
+    case 'assistant':
+      // Its newest line, as it streams.
+      return step.text.trim().split('\n').at(-1)!.trim() || null;
+    case 'plan': {
+      const now = step.entries.find((entry) => entry.status === 'in_progress');
+      return now ? now.content : 'Planning';
+    }
+    case 'subagent':
+      return `Subagent: ${step.title ?? step.description ?? 'working'}`;
+    case 'permission':
+      return step.outcome === null ? 'Waiting for permission' : step.title;
+    case 'question':
+      return step.answers === null ? 'Waiting for an answer' : step.message;
+    default:
+      return null;
+  }
 }

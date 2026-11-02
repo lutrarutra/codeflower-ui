@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { TranscriptEntry } from '../src/protocol/messages.ts';
-import { buildItems } from '../src/chat/lib/transcript.ts';
+import { activity, buildItems, foldTurns, type ChatItem } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
 const chunk = (text: string, messageId?: string) =>
@@ -52,8 +52,8 @@ test('renders action prompts compactly and falls back when metadata is missing',
     }
   ]);
   const plain = buildItems([{ t: '', kind: 'prompt', prompt: [{ type: 'text', text: 'Make a checkpoint.' }] }]);
-  assert.deepEqual(action, [{ kind: 'action', id: '0', title: 'Checkpoint', text: 'Make a checkpoint.' }]);
-  assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.' }]);
+  assert.deepEqual(action, [{ kind: 'action', id: '0', title: 'Checkpoint', text: 'Make a checkpoint.', started: null, ended: null }]);
+  assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.', started: null, ended: null }]);
 });
 
 test('times tool calls, until the turn ends for those left running', () => {
@@ -67,5 +67,106 @@ test('times tool calls, until the turn ends for those left running', () => {
   assert.deepEqual(
     items.flatMap((item) => (item.kind === 'tool' ? [[item.started, item.ended]] : [])),
     [[0, 5000], [6000, 9000]]
+  );
+});
+
+const at = (seconds: number) => new Date(seconds * 1000).toISOString();
+const prompt = (text: string, seconds = 0): TranscriptEntry => ({ t: at(seconds), kind: 'prompt', prompt: [{ type: 'text', text }] });
+const tool = (toolCallId: string, title: string, rawInput?: unknown) =>
+  update({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'execute', status: 'completed', ...(rawInput ? { rawInput } : {}) });
+const thought = (text: string) => update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } });
+const describe = (items: ChatItem[]) => items.map((item) => (item.kind === 'assistant' ? item.text : item.kind));
+
+test('folds a turn to its prompt, its steps and its final message', () => {
+  const [turn, ...rest] = foldTurns(
+    buildItems([
+      prompt('Cluster the data', 10),
+      thought('Hm'),
+      tool('a', 'ls /data'),
+      chunk('Let me check the files.', 'm1'),
+      tool('b', 'python cluster.py'),
+      chunk('I found 8 clusters.', 'm2'),
+      { t: at(250), kind: 'turn_end', stopReason: 'end_turn' }
+    ])
+  );
+  assert.equal(rest.length, 0);
+  assert.equal(turn!.prompt?.kind, 'user');
+  assert.equal(turn!.prompt?.started, 10_000);
+  assert.equal(turn!.prompt?.ended, 250_000);
+  assert.deepEqual(describe(turn!.steps), ['thought', 'tool', 'Let me check the files.', 'tool']);
+  assert.deepEqual(describe(turn!.answer), ['I found 8 clusters.']);
+  assert.deepEqual(turn!.shown, []);
+});
+
+test('the final message stays the answer when tool calls follow it', () => {
+  const [turn] = foldTurns(
+    buildItems([
+      prompt('Plot it'),
+      tool('a', 'python plot.py'),
+      chunk('Here is the figure.', 'm1'),
+      tool('b', 'codeflower-show umap.png'),
+      { t: '', kind: 'show', files: ['umap.png'] },
+      { t: '', kind: 'turn_end', stopReason: 'end_turn' }
+    ])
+  );
+  assert.deepEqual(describe(turn!.answer), ['Here is the figure.']);
+  assert.deepEqual(describe(turn!.steps), ['tool', 'tool']);
+  assert.deepEqual(describe(turn!.shown), ['show']);
+});
+
+test('keeps what the user did and a stopped turn in sight, and pages that start mid-turn', () => {
+  const turns = foldTurns(
+    buildItems([
+      tool('a', 'ls'),
+      chunk('Done before.'),
+      prompt('Go on'),
+      { t: '', kind: 'shell', runId: 'r', command: 'ls' },
+      { t: '', kind: 'shell_end', runId: 'r', exitCode: 0, timedOut: false, output: '' },
+      tool('b', 'sleep 100'),
+      { t: '', kind: 'turn_end', stopReason: 'cancelled' }
+    ])
+  );
+  assert.deepEqual(
+    turns.map((turn) => [turn.id, turn.prompt?.kind ?? null, describe(turn.steps), describe(turn.shown), describe(turn.answer)]),
+    [
+      ['start', null, ['tool'], [], ['Done before.']],
+      ['2', 'user', ['tool'], ['shell', 'stop'], []]
+    ]
+  );
+});
+
+test('output after a turn ended, with no new prompt, is that turn\'s answer', () => {
+  const [turn] = foldTurns(
+    buildItems([
+      prompt('Run the subagents'),
+      chunk('They run in the background.', 'm1'),
+      { t: '', kind: 'turn_end', stopReason: 'end_turn' },
+      tool('a', 'read results'),
+      chunk('Both finished: all good.', 'm2')
+    ])
+  );
+  assert.deepEqual(describe(turn!.answer), ['Both finished: all good.']);
+  assert.deepEqual(describe(turn!.steps), ['They run in the background.', 'tool']);
+});
+
+test('says what the agent does now, from its latest step', () => {
+  const now = (...entries: TranscriptEntry[]) => activity(foldTurns(buildItems([prompt('x'), ...entries]))[0]!.work);
+  assert.equal(now(), null);
+  assert.equal(now(tool('a', 'pytest -q')), 'pytest -q');
+  assert.equal(now(tool('a', 'pytest -q', { description: 'Run the tests' })), 'Run the tests');
+  assert.equal(now(thought('Hm')), 'Thinking…');
+  assert.equal(now(chunk('\nLooking at the data.\nThen more.\n')), 'Then more.');
+  assert.equal(now(tool('a', 'ls'), { t: '', kind: 'show', files: ['a.png'] }), 'ls');
+  assert.equal(
+    now(
+      update({
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Load', priority: 'medium', status: 'completed' },
+          { content: 'Cluster', priority: 'medium', status: 'in_progress' }
+        ]
+      })
+    ),
+    'Cluster'
   );
 });

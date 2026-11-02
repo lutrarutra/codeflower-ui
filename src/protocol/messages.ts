@@ -191,6 +191,8 @@ export interface ChatState {
   steer?: boolean;
   /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
   subagent?: SubagentSummary & { parentTitle?: string };
+  /** The chat shows only each turn's prompt and final message, its steps folded (VS Code keeps the choice). */
+  foldSteps?: boolean;
 }
 
 export interface ChatAction {
@@ -272,6 +274,8 @@ export type WebviewMessage =
   /** With `thumbnail`, a small version at most that many pixels high, for the chat to show. */
   | { type: 'fileData'; path: string; key: string; thumbnail?: number }
   | { type: 'setAutoApprove'; enabled: boolean }
+  /** The eye button in the chat's header: fold the turns' steps, or show them. */
+  | { type: 'foldSteps'; fold: boolean }
   | { type: 'action'; id: string }
   | { type: 'removeQueued'; id: string }
   /** Send a queued message now, as `prompt` with `now` does. */

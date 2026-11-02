@@ -6,6 +6,7 @@
   import App from '../../chat/App.svelte';
   import Skeleton from '../../chat/lib/Skeleton.svelte';
   import { app } from '../lib/app.svelte.ts';
+  import { foldSteps, setFoldSteps } from '../lib/foldSteps.svelte.ts';
   import { WAITING_FOR, workerTitle } from '../lib/format.ts';
   import ShowPane from './ShowPane.svelte';
 
@@ -155,7 +156,7 @@
       {#if !narrow || front === 'chat'}
         <div class="min-w-0 {narrow || !pane ? 'flex-1' : ''}" style={!narrow && pane ? `width: ${split * 100}%` : undefined}>
           {#if chat}
-            {#key chat}<App host={chat.host} />{/key}
+            {#key chat}<App host={chat.host} fold={foldSteps.focus} onFold={(fold) => setFoldSteps('focus', fold)} />{/key}
           {:else}
             <div class="mx-auto w-full max-w-3xl p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>
           {/if}
