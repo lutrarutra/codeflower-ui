@@ -33,6 +33,10 @@
 
   let chat = $state<ChatState>({ title: '', subtitle: '', live: false, busy: false });
   let entries = $state<TranscriptEntry[]>([]);
+  /** The index of `entries[0]` in the chat's transcript; earlier entries load on request. */
+  let start = $state(0);
+  /** Entries from before those shown that the view needs, e.g. the agent's slash commands. */
+  let context = $state<TranscriptEntry[]>([]);
   /** The host sent the transcript; until then it is loading, not empty. */
   let transcriptLoaded = $state(false);
   let permission = $state<PendingPermission | null>(null);
@@ -59,7 +63,13 @@
         break;
       case 'transcript':
         entries = message.entries;
+        start = message.start ?? 0;
+        context = message.context ?? [];
         transcriptLoaded = true;
+        break;
+      case 'earlier':
+        entries = [...message.entries, ...entries];
+        start = message.start;
         break;
       case 'entry':
         entries.push(message.entry);
@@ -108,8 +118,9 @@
 
   // The agent's slash commands, as it last listed them for this session.
   const commands = $derived.by(() => {
-    for (let index = entries.length - 1; index >= 0; index--) {
-      const entry = entries[index];
+    const known = [...context, ...entries];
+    for (let index = known.length - 1; index >= 0; index--) {
+      const entry = known[index];
       if (entry.kind === 'update' && entry.update.sessionUpdate === 'available_commands_update') {
         return entry.update.availableCommands;
       }
@@ -265,7 +276,7 @@
     </div>
   {/if}
 
-  <Transcript {entries} loading={!transcriptLoaded} busy={chat.busy} live={chat.live} {suggest} />
+  <Transcript {entries} {start} loadEarlier={() => send({ type: 'loadEarlier' })} loading={!transcriptLoaded} busy={chat.busy} live={chat.live} {suggest} />
 
   {#if permission}
     <PermissionPrompt request={permission} />

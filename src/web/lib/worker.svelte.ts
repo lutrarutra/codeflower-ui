@@ -238,7 +238,7 @@ export class WebWorker {
       await this.connect();
       await this.attach(chat);
     } catch (error) {
-      chat.loaded([]);
+      chat.loaded(EMPTY_TRANSCRIPT);
       this.report(chat, error);
     }
     return chat;
@@ -337,6 +337,7 @@ export class WebWorker {
   }
 
   private readonly actions: ChatActions = {
+    transcriptPage: (chat, before) => this.require().transcriptPage(chat.key, before),
     prompt: async (chat, text, action) => {
       try {
         await this.require().prompt(chat.key, text, action);

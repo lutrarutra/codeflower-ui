@@ -18,6 +18,7 @@ import {
 } from '../../protocol/messages.ts';
 import type { ChatUsage } from '../../protocol/usage.ts';
 import { PromptQueue } from '../../client/promptQueue.ts';
+import type { TranscriptPage } from '../../client/codeflower.ts';
 
 /** What a chat asks of the sandbox it runs on. */
 export interface ChatActions {
@@ -31,7 +32,10 @@ export interface ChatActions {
   setAutoApprove(chat: ChatSession, enabled: boolean): void;
   answerPermission(chat: ChatSession, requestId: number, optionId: string | null): void;
   answerQuestion(chat: ChatSession, requestId: number, action: QuestionAction, content: FormContent | null): void;
-  fileData(chat: ChatSession, path: string): Promise<string | null>;
+  /** The file as a data URL; with `thumbnail`, a small version at most that many pixels high. */
+  fileData(chat: ChatSession, path: string, thumbnail?: number): Promise<string | null>;
+  /** A page of the chat's entries, those just before `before`. */
+  transcriptPage(chat: ChatSession, before: number): Promise<TranscriptPage>;
   openFile(chat: ChatSession, path: string): void;
   signIn(chat: ChatSession): void;
 }
@@ -50,6 +54,10 @@ export class ChatSession {
   shown = $state<string[]>([]);
 
   private entries: TranscriptEntry[] = [];
+  /** The index of `entries[0]` in the transcript; earlier ones load when the view asks. */
+  private start = 0;
+  private context: TranscriptEntry[] = [];
+  private loadingEarlier = false;
   /** The transcript arrived: until then the view shows it loading, not an empty chat. */
   private transcriptKnown = false;
   private config: SessionConfigOption[] = [];
@@ -177,10 +185,25 @@ export class ChatSession {
     this.held ??= [];
   }
 
-  loaded(entries: TranscriptEntry[]): void {
+  loaded(page: TranscriptPage): void {
     const held = this.held ?? [];
     this.held = undefined;
-    this.post({ type: 'transcript', entries: [...entries, ...held] });
+    this.post({ type: 'transcript', entries: [...page.entries, ...held], start: page.start, context: page.context });
+  }
+
+  private async loadEarlier(): Promise<void> {
+    const before = this.start;
+    if (before === 0 || this.loadingEarlier) return;
+    this.loadingEarlier = true;
+    try {
+      const page = await this.actions.transcriptPage(this, before);
+      // A transcript that arrived meanwhile (a reconnect) replaced the one this page goes before.
+      if (this.start === before) this.post({ type: 'earlier', entries: page.entries, start: page.start });
+    } catch (error) {
+      this.notify('error', `Could not load earlier messages: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.loadingEarlier = false;
+    }
   }
 
   post(message: HostMessage): void {
@@ -191,7 +214,14 @@ export class ChatSession {
     switch (message.type) {
       case 'transcript':
         this.entries = [...message.entries];
+        this.start = message.start ?? 0;
+        this.context = message.context ?? [];
         this.transcriptKnown = true;
+        this.shown = shownFiles(this.entries, []);
+        break;
+      case 'earlier':
+        this.entries = [...message.entries, ...this.entries];
+        this.start = message.start;
         this.shown = shownFiles(this.entries, []);
         break;
       case 'entry':
@@ -237,7 +267,9 @@ export class ChatSession {
 
   private replay(listener: (message: HostMessage) => void): void {
     listener({ type: 'state', state: this.state });
-    if (this.transcriptKnown) listener({ type: 'transcript', entries: [...this.entries] });
+    if (this.transcriptKnown) {
+      listener({ type: 'transcript', entries: [...this.entries], start: this.start, context: this.context });
+    }
     listener({ type: 'permission', request: this.permission });
     listener({ type: 'question', request: this.question });
     listener({ type: 'config', options: this.config });
@@ -250,6 +282,9 @@ export class ChatSession {
     switch (message.type) {
       case 'ready':
         for (const listener of this.listeners) this.replay(listener);
+        break;
+      case 'loadEarlier':
+        await this.loadEarlier();
         break;
       case 'prompt':
         this.lastUsed = Date.now();
@@ -291,7 +326,11 @@ export class ChatSession {
         this.actions.answerQuestion(this, message.requestId, message.action, message.content);
         break;
       case 'fileData':
-        this.post({ type: 'fileData', key: message.key, dataUrl: await this.actions.fileData(this, message.path) });
+        this.post({
+          type: 'fileData',
+          key: message.key,
+          dataUrl: await this.actions.fileData(this, message.path, message.thumbnail)
+        });
         break;
       case 'openFile':
         this.actions.openFile(this, message.path);

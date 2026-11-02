@@ -11,6 +11,31 @@ export const WORKSPACE = '/codeflower-state/workspace';
 /** An older bridge closes a connection with this code when another window takes the worker over. */
 export const TAKEN_OVER = 4001;
 
+/**
+ * Part of a chat's transcript: `entries` from index `start` on, and `context`,
+ * entries from before it the view needs (the agent's slash commands).
+ */
+export interface TranscriptPage {
+  entries: TranscriptEntry[];
+  start: number;
+  context: TranscriptEntry[];
+}
+
+export const EMPTY_TRANSCRIPT: TranscriptPage = { entries: [], start: 0, context: [] };
+
+// The worker's limit for files/read, and the images browsers show.
+const MAX_READ_BYTES = 10 * 1024 * 1024;
+const BROWSER_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
+const PREVIEW_HEIGHT = 4096;
+
+// About 1 MiB per page; the worker caps it well under a message's 16 MiB.
+const TRANSCRIPT_PAGE_BYTES = 1 << 20;
+
+/** The page without the entries after the first `count`, e.g. those that came live after an attach. */
+export function pageUpTo(page: TranscriptPage, count: number | undefined): TranscriptPage {
+  return count === undefined ? page : { ...page, entries: page.entries.slice(0, Math.max(0, count - page.start)) };
+}
+
 export interface WorkerStatus {
   instanceId: string;
   agent: AgentName;
@@ -307,6 +332,15 @@ export class CodeflowerExtensions {
 
   async transcript(key: string): Promise<TranscriptEntry[]> {
     return (await this.rpc.request<{ entries: TranscriptEntry[] }>('_codeflower/sessions/transcript', { key })).entries;
+  }
+
+  /** The newest entries before `before` (the end by default); older workers send the whole transcript. */
+  async transcriptPage(key: string, before?: number): Promise<TranscriptPage> {
+    const result = await this.rpc.request<{ entries: TranscriptEntry[]; start?: number; context?: TranscriptEntry[] }>(
+      '_codeflower/sessions/transcript',
+      { key, maxBytes: TRANSCRIPT_PAGE_BYTES, ...(before === undefined ? {} : { before }) }
+    );
+    return { entries: result.entries, start: result.start ?? 0, context: result.context ?? [] };
   }
 
   async renameSession(key: string, title: string): Promise<void> {

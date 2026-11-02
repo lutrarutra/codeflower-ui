@@ -36,6 +36,7 @@ import {
   type FileTransfers,
   type SessionRecord,
   type ShowRequest,
+  type TranscriptPage,
   type UploadTarget,
   type UploadedFile,
   type WorkerStatus,
@@ -59,6 +60,8 @@ export {
 export {
   TAKEN_OVER,
   WORKSPACE,
+  EMPTY_TRANSCRIPT,
+  pageUpTo,
   type DirectoryEntry,
   type DirectoryListing,
   type DownloadChunk,
@@ -250,6 +253,10 @@ export class WorkerConnection {
 
   transcript(key: string): Promise<TranscriptEntry[]> {
     return this.bridge.transcript(key);
+  }
+
+  transcriptPage(key: string, before?: number): Promise<TranscriptPage> {
+    return this.bridge.transcriptPage(key, before);
   }
 
   renameSession(key: string, title: string): Promise<void> {

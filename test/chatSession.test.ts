@@ -40,10 +40,39 @@ function actions(
     answerPermission: () => {},
     answerQuestion: () => {},
     fileData: async () => null,
+    transcriptPage: async () => ({ entries: [], start: 0, context: [] }),
     openFile: () => {},
     signIn: () => {}
   };
 }
+
+test('loads earlier entries when the view asks, and replays them with the rest', async () => {
+  const t = '2026-11-02T10:00:00.000Z';
+  const prompt = (text: string) => ({ t, kind: 'prompt' as const, prompt: [{ type: 'text' as const, text }] });
+  const asked: number[] = [];
+  const chat = new ChatSession('worker', 'session', {}, {
+    ...actions(async () => {}),
+    transcriptPage: async (_chat, before) => {
+      asked.push(before);
+      return { entries: [prompt('first'), prompt('second')], start: 0, context: [] };
+    }
+  });
+  const posted: HostMessage[] = [];
+  chat.host.listen((message) => posted.push(message));
+  chat.loaded({ entries: [prompt('third')], start: 2, context: [] });
+  chat.host.send({ type: 'loadEarlier' });
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(asked, [2]);
+  assert.deepEqual(posted.at(-1), { type: 'earlier', entries: [prompt('first'), prompt('second')], start: 0 });
+  // Nothing is left before the first entry.
+  chat.host.send({ type: 'loadEarlier' });
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(asked, [2]);
+  posted.length = 0;
+  chat.host.send({ type: 'ready' });
+  const transcript = posted.find((message) => message.type === 'transcript');
+  assert.deepEqual(transcript, { type: 'transcript', entries: [prompt('first'), prompt('second'), prompt('third')], start: 0, context: [] });
+});
 
 test('enables DSH auto-approval by default and lets the user turn it off', () => {
   const choices: boolean[] = [];

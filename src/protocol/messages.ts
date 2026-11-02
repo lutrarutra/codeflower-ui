@@ -214,7 +214,14 @@ export function sessionStatus(state: ChatState, waitingForUser: boolean): Sessio
 
 export type HostMessage =
   | { type: 'state'; state: ChatState }
-  | { type: 'transcript'; entries: TranscriptEntry[] }
+  /**
+   * The chat's newest entries; `start` is the index of the first in the whole
+   * transcript, and earlier ones load on `loadEarlier`. `context` holds what the
+   * view needs from before them (the agent's slash commands), not shown.
+   */
+  | { type: 'transcript'; entries: TranscriptEntry[]; start?: number; context?: TranscriptEntry[] }
+  /** Entries before those shown, from `start`, in answer to `loadEarlier`. */
+  | { type: 'earlier'; entries: TranscriptEntry[]; start: number }
   | { type: 'entry'; entry: TranscriptEntry }
   | { type: 'permission'; request: PendingPermission | null }
   | { type: 'question'; request: PendingQuestion | null }
@@ -233,6 +240,8 @@ export type HostMessage =
 
 export type WebviewMessage =
   | { type: 'ready' }
+  /** The user scrolled to the top of the transcript, and there is more before it. */
+  | { type: 'loadEarlier' }
   /** While the agent works it waits for the turn to end, unless sent `now`. */
   | { type: 'prompt'; text: string; now?: boolean }
   | { type: 'cancel' }

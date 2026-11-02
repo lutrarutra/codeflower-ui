@@ -1,31 +1,42 @@
 <script lang="ts">
+  import type { PermissionOption } from '@agentclientprotocol/sdk';
   import type { TranscriptEntry } from '../../protocol/messages.ts';
   import { highlighted } from './editor/highlight.ts';
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
   import { buildItems } from './transcript.ts';
-  import { sandboxFiles } from './sandboxFiles.svelte.ts';
   import Skeleton from './Skeleton.svelte';
+  import Thumbnail from './Thumbnail.svelte';
   import Tulip from './Tulip.svelte';
 
   /** Tool output that is a unified diff, e.g. from `git diff`. */
   const looksLikeDiff = (text: string) => /^@@ .* @@/m.test(text) && /^[+-]/m.test(text);
 
-  const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+  // Microscopy TIFFs too: the worker draws them, as browsers cannot.
+  const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg|tiff?|btf|lsm|stk|svs|scn|qptiff)$/i.test(path);
 
   const host = chatHost();
   const send: ChatHost['send'] = (message) => host.send(message);
-  const files = sandboxFiles();
-  const fileUrl = (path: string, key: string) => files.url(path, key);
 
   let {
     entries,
+    start = 0,
+    loadEarlier,
     loading = false,
     busy,
     live,
     suggest
-  }: { entries: TranscriptEntry[]; loading?: boolean; busy: boolean; live: boolean; suggest: (text: string) => void } = $props();
-  const items = $derived(buildItems(entries));
+  }: {
+    entries: TranscriptEntry[];
+    /** The index of `entries[0]` in the chat's transcript; above 0, earlier entries load on scrolling up. */
+    start?: number;
+    loadEarlier?: () => void;
+    loading?: boolean;
+    busy: boolean;
+    live: boolean;
+    suggest: (text: string) => void;
+  } = $props();
+  const items = $derived(buildItems(entries, start));
   let container: HTMLElement | undefined = $state();
 
   // Follow the output while the user is at the bottom: whatever makes the
@@ -66,6 +77,38 @@
       children.disconnect();
       element.removeEventListener('scroll', scrolled);
     };
+  });
+
+  // Earlier entries load when the top comes into view, once per page; those
+  // added above keep what the user is reading where it was.
+  let earlier: HTMLElement | undefined = $state();
+  let requestedAt = -1;
+  $effect(() => {
+    // A new observer per page: one still in view asks for the next.
+    const page = start;
+    const element = earlier;
+    if (!element || !container || !loadEarlier) return;
+    const request = loadEarlier;
+    const seen = new IntersectionObserver(
+      ([sighting]) => {
+        if (!sighting?.isIntersecting || requestedAt === page) return;
+        requestedAt = page;
+        request();
+      },
+      { root: container, rootMargin: '400px 0px 0px 0px' }
+    );
+    seen.observe(element);
+    return () => seen.disconnect();
+  });
+  let before: { height: number; top: number } | undefined;
+  $effect.pre(() => {
+    void start;
+    if (container) before = { height: container.scrollHeight, top: container.scrollTop };
+  });
+  $effect(() => {
+    void start;
+    if (container && before && !pinned) container.scrollTop = before.top + container.scrollHeight - before.height;
+    before = undefined;
   });
 
   // Back to the bottom when the user sends something (also from elsewhere, e.g.

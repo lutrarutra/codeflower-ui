@@ -116,7 +116,8 @@ function toolDetails(content: ToolCallContent[] | null | undefined): string[] {
   });
 }
 
-export function buildItems(entries: TranscriptEntry[]): ChatItem[] {
+/** `start` is the index of `entries[0]` in the transcript: ids stay the same as earlier entries load. */
+export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   const items: ChatItem[] = [];
   const tools = new Map<string, Extract<ChatItem, { kind: 'tool' }>>();
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
@@ -124,7 +125,7 @@ export function buildItems(entries: TranscriptEntry[]): ChatItem[] {
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
 
   entries.forEach((entry, index) => {
-    const id = `${index}`;
+    const id = `${start + index}`;
     const last = items.at(-1);
     switch (entry.kind) {
       case 'prompt':
