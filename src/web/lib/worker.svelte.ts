@@ -16,9 +16,12 @@ import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
   isAuthRequired,
   isConnectionClosed,
+  EMPTY_TRANSCRIPT,
+  pageUpTo,
   RpcError,
   TAKEN_OVER,
   WorkerConnection,
+  type ChatTerminal,
   type SessionRecord,
   type ShowRequest,
   type UrlElicitation,
@@ -64,10 +67,16 @@ export class WebWorker {
   private availableActions: ChatAction[] | undefined;
   /** Open chats, by key. */
   chats = $state<Record<string, ChatSession>>({});
+  /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
+  terminals = $state<Record<string, ChatTerminal>>({});
+  /** The terminal notice each chat shows, so it is posted once and cleared when the terminal goes. */
+  private readonly terminalNotices = new Map<string, string>();
   connection: WorkerConnection | undefined;
 
   private readonly events: WorkerEvents;
   private connecting: Promise<void> | undefined;
+  /** Chats being attached, by key. */
+  private readonly attaching = new Map<string, Promise<void>>();
   /** Counts connections, so a late close of an old one changes nothing. */
   private generation = 0;
   private retry: ReturnType<typeof setInterval> | undefined;
@@ -131,14 +140,16 @@ export class WebWorker {
       this.stopRetrying();
       await this.refresh();
       // Chats opened while connecting learn which agent they talk to; a notice about the lost connection goes.
+      this.terminalNotices.clear();
       for (const chat of Object.values(this.chats)) {
         chat.setState({ ...this.presentation(), actions });
         chat.post({ type: 'clearNotice' });
       }
       const usage = await connection.usage().catch(() => undefined);
       if (usage && this.connection === connection) this.setUsage(usage);
-      // Open chats attach again and show what happened meanwhile.
-      await Promise.all(Object.values(this.chats).map((chat) => this.attach(chat).catch((error) => this.report(chat, error))));
+      // Open chats attach again and show what happened meanwhile. Not awaited: after the agent
+      // restarted each is a full resume, and a new chat or a prompt should not wait for them all.
+      void Promise.all(Object.values(this.chats).map((chat) => this.attach(chat).catch((error) => this.report(chat, error))));
     } catch (error) {
       connection?.close();
       if (this.connection === connection) this.connection = undefined;
@@ -294,29 +305,71 @@ export class WebWorker {
    * Shows the chat's history and attaches it on the connection. The agent may
    * be mid-turn (a turn this or another window started).
    */
-  private async attach(chat: ChatSession): Promise<void> {
+  /** Attaches a chat, once at a time: a reconnect and opening the chat may both ask. */
+  private attach(chat: ChatSession): Promise<void> {
+    let pending = this.attaching.get(chat.key);
+    if (!pending) {
+      pending = this.attachNow(chat).finally(() => this.attaching.delete(chat.key));
+      this.attaching.set(chat.key, pending);
+    }
+    return pending;
+  }
+
+  private async attachNow(chat: ChatSession): Promise<void> {
     const connection = this.connection!;
     const session = this.sessions.find((candidate) => candidate.key === chat.key);
     if (!session) {
-      chat.loaded(await connection.transcript(chat.key).catch(() => []));
+      chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       return;
     }
     chat.hold();
     try {
       const attached = await connection.resumeSession(session.nativeSessionId, session.cwd);
-      const entries = await connection.transcript(chat.key);
       // Updates after the attach came live; the transcript has them too.
-      chat.loaded(attached.transcriptEntries === undefined ? entries : entries.slice(0, attached.transcriptEntries));
+      chat.loaded(pageUpTo(await connection.transcriptPage(chat.key), attached.transcriptEntries));
       chat.post({ type: 'config', options: connection.config(chat.key) });
       const activity = connection.activity(chat.key);
       chat.post({ type: 'permission', request: activity.permission });
       chat.post({ type: 'question', request: activity.question });
       chat.setState({ live: true, busy: activity.busy, steer: connection.canSteer });
       this.noticeMcp(chat, connection.mcpNotice(chat.key));
+      this.noticeTerminal(chat);
     } catch (error) {
-      chat.loaded(await connection.transcript(chat.key).catch(() => []));
+      chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
     }
+  }
+
+  /**
+   * A chat open in the agent's terminal UI says so, and how to get there:
+   * Claude Code's has the chat (what is sent here is typed there), the others
+   * share it.
+   */
+  private noticeTerminal(chat: ChatSession): void {
+    const terminal = this.terminals[chat.key];
+    const shown = this.terminalNotices.get(chat.key);
+    if (!terminal) {
+      if (shown !== undefined) chat.post({ type: 'clearNotice' });
+      this.terminalNotices.delete(chat.key);
+      return;
+    }
+    const id = `${terminal.terminalId}:${terminal.mode}`;
+    if (shown === id) return;
+    this.terminalNotices.set(chat.key, id);
+    const agent = this.connection?.workerStatus?.agentLabel ?? 'the agent';
+    // Through the tunnel the page's id for the sandbox is not one the computer's `codeflower attach` knows.
+    const command = this.id.includes('@') ? '' : ` In a terminal on its computer: codeflower attach ${this.id} ${chat.key}`;
+    chat.notify(
+      'info',
+      terminal.mode === 'handoff'
+        ? `This chat is open in ${agent}'s own terminal UI. What you send here is typed there (text only), and permissions are answered there; quit it there (~q) to go on here.${command}`
+        : `This chat is also open in ${agent}'s own terminal UI; both follow it as it goes.${command}`
+    );
+  }
+
+  private setTerminals(terminals: ChatTerminal[]): void {
+    this.terminals = Object.fromEntries(terminals.map((terminal) => [terminal.sessionKey, terminal]));
+    for (const chat of Object.values(this.chats)) this.noticeTerminal(chat);
   }
 
   /** MCP servers from the app's config the chat is without, e.g. one that did not start. */
@@ -532,6 +585,7 @@ export class WebWorker {
       terminalExit: (terminalId: string, exitCode: number) => this.events.terminalExit(terminalId, exitCode),
       usage: (usage: WorkerUsage) => this.setUsage(usage),
       wrapUp: (notice: WrapUpNotice) => this.events.wrapUp(this, notice),
+      terminals: (terminals: ChatTerminal[]) => this.setTerminals(terminals),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };
   }

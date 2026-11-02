@@ -53,7 +53,23 @@ export interface WorkerStatus {
   /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
   mounts?: Mount[];
   /** What the worker offers beyond chats; missing from older workers. */
-  capabilities?: { plugins?: boolean };
+  capabilities?: {
+    plugins?: boolean;
+    /** Chats open in the agent's own terminal UI (`codeflower attach`). */
+    chatTerminals?: boolean;
+  };
+}
+
+/** A chat open in the agent's own terminal UI (`codeflower attach`), running in the sandbox. */
+export interface ChatTerminal {
+  terminalId: string;
+  sessionKey: string;
+  sessionId: string;
+  /** shared: the chat goes on here too (OpenCode, Codex); handoff: the terminal has it (Claude Code). */
+  mode: 'shared' | 'handoff';
+  /** Terminals that watch it now. */
+  viewers: number;
+  startedAt: string;
 }
 
 /** What a plugin adds, when known before it is fetched. */
@@ -268,6 +284,8 @@ export interface CodeflowerHandlers {
   terminalExit(terminalId: string, exitCode: number): void;
   /** The plugins changed (added, fetched, switched, or the agent restarted): list them again. */
   pluginsChanged?(): void;
+  /** A chat's terminal UI started, ended, or a terminal attached to it or left. */
+  terminals?(terminals: ChatTerminal[]): void;
 }
 
 export class CodeflowerExtensions {
@@ -298,6 +316,19 @@ export class CodeflowerExtensions {
       handlers.terminalExit(terminalId, exitCode);
     });
     rpc.on('_codeflower/plugins/changed', () => handlers.pluginsChanged?.());
+    rpc.on('_codeflower/terminal/changed', (params) => {
+      const { terminals } = params as { terminals?: ChatTerminal[] };
+      if (Array.isArray(terminals)) handlers.terminals?.(terminals);
+    });
+  }
+
+  /** The chats open in the agent's terminal UI; none from workers without them. */
+  async chatTerminals(): Promise<ChatTerminal[]> {
+    try {
+      return (await this.rpc.request<{ terminals: ChatTerminal[] }>('_codeflower/terminal/list', {})).terminals ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** Undefined when no bridge answers: the agent was reached directly. */

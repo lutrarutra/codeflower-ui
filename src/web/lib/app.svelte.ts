@@ -5,6 +5,7 @@ import type { WrapUpNotice } from '../../client/workerConnection.ts';
 import { pairedComputers } from '../../tunnel/computers.ts';
 import { tunnelConnectorId } from '../../tunnel/connect.ts';
 import type { QuitPlan, SystemInfo, Worker } from './api.ts';
+import { fileLink } from './fileLink.ts';
 import { chooseHead, fromLink, gone, splitId } from './machineIds.ts';
 import { Machine, type RequestOptions } from './machines.svelte.ts';
 import { Previews } from './previews.svelte.ts';
@@ -34,6 +35,9 @@ const HIDDEN_MS = 10_000;
 const DISCOVER_MS = 30_000;
 /** The page moved to the newest computer's page once in this tab. */
 const HEAD_MOVED = 'cf_head_moved';
+/** How long a file link waits for the page to list its sandbox, and how often it looks. */
+const LINK_WAIT_MS = 15_000;
+const LINK_POLL_MS = 250;
 /** The user keeps the page of the computer in the address. */
 export const KEEP_PAGE = 'codeflower.keepPage';
 
@@ -189,8 +193,13 @@ class AppState {
     if (this.route.view === 'focus' && this.route.worker && this.route.session) this.focus.selected = { workerId: this.route.worker, key: this.route.session };
     else if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
     this.offer();
+    void this.openLink();
     window.addEventListener('hashchange', () => {
       if (this.offer()) return;
+      if (fileLink(location.hash)) {
+        void this.openLink();
+        return;
+      }
       const route = parseHash(location.hash);
       if (route) this.go(route);
     });
@@ -307,6 +316,24 @@ class AppState {
     if (route.session) this.workbench.openChat(route.worker, route.session);
     // Choosing the sandbox it lists already: its overview.
     else if (again) this.workbench.openOverview(route.worker);
+  }
+
+  /**
+   * Opens the file a link in the address names (`#/file/…`, see fileLink) in a
+   * tab, with its chat beside it, once the page knows the sandbox; the
+   * address then names the chat.
+   */
+  async openLink(): Promise<void> {
+    const link = fileLink(location.hash);
+    if (!link) return;
+    const workerId = fromLink(link.worker, head);
+    for (let waited = 0; !this.worker(workerId) && waited < LINK_WAIT_MS; waited += LINK_POLL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, LINK_POLL_MS));
+    }
+    this.go({ view: 'chat', worker: workerId, ...(link.chat ? { session: link.chat } : {}) });
+    const agent = this.agent(workerId);
+    await agent.connect().catch(() => undefined);
+    await this.previews.openPath(agent, link.path, link.chat);
   }
 
   /** The sidebar lists the sandbox's chats (null: the sandboxes again). */

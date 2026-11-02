@@ -29,6 +29,7 @@ import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type U
 import {
   CodeflowerExtensions,
   WORKSPACE,
+  type ChatTerminal,
   type DirectoryListing,
   type DownloadChunk,
   type DownloadStarted,
@@ -71,12 +72,14 @@ export {
   type Mount,
   type SessionRecord,
   type ShowRequest,
+  type TranscriptPage,
   type UploadTarget,
   type UploadedFile,
   type WorkerActivity,
   type WorkerStatus,
   type WrapUpNotice,
   type CatalogPlugin,
+  type ChatTerminal,
   type NativePlugin,
   type PluginCatalog,
   type PluginContents,
@@ -106,13 +109,15 @@ export interface WorkerHandlers {
   /** Resolves when the user accepted or declined. */
   elicitUrl(request: UrlElicitation): Promise<'accept' | 'decline'>;
   elicitationComplete(elicitationId: string): void;
-  /** The agent ran `codeflower-show`: the user should see these files. */
+  /** The agent ran `codeflower-show`, or asks to approve a plan: the user should see these files. */
   show(request: ShowRequest): void;
   terminalOutput(terminalId: string, data: string): void;
   terminalExit(terminalId: string, exitCode: number): void;
   /** Token counts, cost, or the login's quota changed. */
   usage(usage: WorkerUsage): void;
   wrapUp(notice: WrapUpNotice): void;
+  /** The chats open in the agent's own terminal UI (`codeflower attach`): on connect, and when that changes. */
+  terminals?(terminals: ChatTerminal[]): void;
   closed(reason: string, code: number): void;
 }
 
@@ -180,7 +185,8 @@ export class WorkerConnection {
       terminalExit: (terminalId, exitCode) => handlers.terminalExit(terminalId, exitCode),
       pluginsChanged: () => {
         for (const listener of this.pluginListeners) listener();
-      }
+      },
+      terminals: (terminals) => handlers.terminals?.(terminals)
     });
     // After the ACP layer's own close handling, which hides open requests.
     this.rpc.onClose((reason, code) => handlers.closed(reason, code));
@@ -194,6 +200,9 @@ export class WorkerConnection {
       connection.agent = connection.workerStatus?.agent;
       const initialized = await connection.acp.initialize(client);
       connection.agent ??= initialized.agentInfo?.name;
+      if (connection.workerStatus?.capabilities?.chatTerminals && handlers.terminals) {
+        handlers.terminals(await connection.bridge.chatTerminals());
+      }
       return connection;
     } catch (error) {
       connection.rpc.close();

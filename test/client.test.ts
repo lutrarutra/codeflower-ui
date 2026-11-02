@@ -317,3 +317,34 @@ test("keeps the MCP servers from the app's config a session is without, for the 
   assert.equal(connection.mcpNotice(resumed.key), undefined);
   assert.equal(mcpNotice([]), undefined);
 });
+
+test("hears which chats are open in the agent's terminal UI: on connect, and as that changes", async () => {
+  const terminal = {
+    terminalId: 'term-1',
+    sessionKey: 'claude-s1',
+    sessionId: 's1',
+    mode: 'handoff' as const,
+    viewers: 1,
+    startedAt: '2026-11-02T10:00:00.000Z'
+  };
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'claude', agentLabel: 'Claude Code', signedIn: true, capabilities: { chatTerminals: true } }),
+    '_codeflower/terminal/list': () => ({ terminals: [terminal] }),
+    initialize: () => ({ protocolVersion: 1, agentCapabilities: {} })
+  });
+  const heard: string[][] = [];
+  const { handlers } = recorder();
+  await WorkerConnection.connect(agent.transport, { ...handlers, terminals: (list) => heard.push(list.map((entry) => `${entry.sessionKey} ${entry.mode}`)) }, client);
+  assert.deepEqual(heard, [['claude-s1 handoff']]);
+  agent.notify('_codeflower/terminal/changed', { terminals: [] });
+  await tick();
+  assert.deepEqual(heard, [['claude-s1 handoff'], []]);
+
+  // A worker without terminal UIs is not asked; a window without the handler hears nothing.
+  const older = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'claude', agentLabel: 'Claude Code', signedIn: true }),
+    initialize: () => ({ protocolVersion: 1, agentCapabilities: {} })
+  });
+  await WorkerConnection.connect(older.transport, recorder().handlers, client);
+  assert.equal(older.received.some((message) => message.method === '_codeflower/terminal/list'), false);
+});
