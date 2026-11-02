@@ -35,7 +35,41 @@ export type ChatItem =
   | { kind: 'stop'; id: string; reason: string }
   | { kind: 'shell'; id: string; runId: string; command: string; output: string; exitCode: number | null; timedOut: boolean }
   | { kind: 'question'; id: string; message: string; fields: FormField[]; answers: QuestionAnswer[] | null; skipped: boolean }
-  | { kind: 'show'; id: string; files: string[]; message: string | null };
+  | { kind: 'show'; id: string; files: string[]; message: string | null }
+  /** One of the chat's subagents, where it started; its summary comes from the worker. */
+  | {
+      kind: 'subagent';
+      id: string;
+      sessionId: string;
+      title: string | null;
+      description: string | null;
+      prompt: string | null;
+      state: string;
+      stopReason: string | null;
+      /** Its reply to the chat, when it gave one. */
+      reply: string | null;
+      started: number | null;
+      ended: number | null;
+    }
+  /** In a subagent's chat: the task its parent gave it. */
+  | { kind: 'task'; id: string; text: string };
+
+// ACP's subagents RFD, which the stable schema does not have yet: the bridge
+// sends every agent's subagents in this form.
+interface SubagentUpdate {
+  sessionUpdate: 'subagent_update';
+  sessionId: string;
+  title?: string | null;
+  description?: string | null;
+  state?: { state?: string; stopReason?: string } | null;
+}
+
+interface SessionMessage {
+  sessionUpdate: 'session_message';
+  senderSessionId?: string;
+  recipientSessionId?: string;
+  content?: ContentBlock[];
+}
 
 /** One answered field: what was asked and what the user picked or wrote. */
 export interface QuestionAnswer {
@@ -132,6 +166,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
   let pendingQuestion: Extract<ChatItem, { kind: 'question' }> | undefined;
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
+  const subagents = new Map<string, Extract<ChatItem, { kind: 'subagent' }>>();
 
   entries.forEach((entry, index) => {
     const id = `${start + index}`;
@@ -220,6 +255,50 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
         break;
       case 'update': {
         const update = entry.update;
+        const kind: string = update.sessionUpdate;
+        if (kind === 'subagent_update') {
+          const changed = update as unknown as SubagentUpdate;
+          let subagent = subagents.get(changed.sessionId);
+          if (!subagent) {
+            subagent = {
+              kind: 'subagent',
+              id,
+              sessionId: changed.sessionId,
+              title: null,
+              description: null,
+              prompt: null,
+              state: 'running',
+              stopReason: null,
+              reply: null,
+              started: time(entry.t),
+              ended: null
+            };
+            subagents.set(changed.sessionId, subagent);
+            items.push(subagent);
+          }
+          if (changed.title) subagent.title = changed.title;
+          if (changed.description) subagent.description = changed.description;
+          const state = changed.state?.state;
+          if (state) {
+            subagent.state = state;
+            const ended = state === 'idle' || state === 'unknown';
+            subagent.ended = ended ? (subagent.ended ?? time(entry.t)) : null;
+            subagent.stopReason = ended ? (changed.state?.stopReason ?? null) : null;
+          }
+          break;
+        }
+        if (kind === 'session_message') {
+          const message = update as unknown as SessionMessage;
+          const text = (message.content ?? []).map(blockText).join('\n');
+          const to = message.recipientSessionId ? subagents.get(message.recipientSessionId) : undefined;
+          const from = message.senderSessionId ? subagents.get(message.senderSessionId) : undefined;
+          // The chat's task for a subagent, or its reply: both belong to its card.
+          if (to) to.prompt ??= text;
+          else if (from) from.reply = text;
+          // In the subagent's own chat, its parent's message is its task.
+          else if (text) items.push({ kind: 'task', id, text });
+          break;
+        }
         switch (update.sessionUpdate) {
           case 'agent_message_chunk': {
             const text = blockText(update.content);

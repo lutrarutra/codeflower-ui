@@ -106,6 +106,7 @@ class AppState {
   private readonly events: WorkerEvents = {
     show: (worker, request) => this.previews.show(worker, request),
     openFile: (worker, chat, path) => void this.previews.openPath(worker, path, chat.key),
+    openChat: (worker, key) => this.workbench.openChat(worker.id, key),
     signIn: (worker) => void this.signIn.start(worker),
     elicitUrl: (worker, request) => this.signIn.elicitUrl(worker, request),
     elicitationComplete: (worker, elicitationId) => this.signIn.elicitationComplete(worker, elicitationId),

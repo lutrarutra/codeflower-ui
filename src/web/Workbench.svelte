@@ -84,7 +84,8 @@
       if (!key || !worker) continue;
       const agent = app.agent(workerId);
       if (agent.chats[key] || !agent.sessionsKnown) continue;
-      if (!agent.sessions.some((session) => session.key === key)) untrack(() => workbench.remove(tab));
+      // A subagent's chat is not among the chats; it stays while its parent's chat knows it.
+      if (!agent.sessions.some((session) => session.key === key) && !agent.isSubagent(key)) untrack(() => workbench.remove(tab));
       else if (worker.status === 'ready' && !app.elsewhere(worker)) untrack(() => void agent.open(key));
     }
   });

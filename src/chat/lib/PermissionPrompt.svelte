@@ -44,6 +44,11 @@
   <div class="flex items-center gap-2">
     <span class="codicon codicon-shield text-orange"></span>
     <span class="eyebrow text-muted">May I?</span>
+    {#if request.subagent}
+      <button type="button" class="link text-[0.85em]" title="Open the subagent's chat" onclick={() => send({ type: 'openSubagent', key: request.subagent!.key })}>
+        <span class="codicon codicon-organization"></span> {request.subagent.title ?? 'A subagent'} asks
+      </button>
+    {/if}
   </div>
   {#if planFile}
     <!-- The plan opens beside the chat, where the user reads and edits it. -->

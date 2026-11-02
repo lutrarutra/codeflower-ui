@@ -56,7 +56,7 @@
 >
   <div class="flex items-center gap-2">
     <span class="codicon codicon-comment-unresolved text-orange"></span>
-    <span class="eyebrow text-muted">The agent asks</span>
+    <span class="eyebrow text-muted">{request.subagent ? `${request.subagent.title ?? 'A subagent'} asks` : 'The agent asks'}</span>
   </div>
   {#if request.message}
     <p class="m-0 font-display text-[1.05rem] leading-snug font-medium">{request.message}</p>

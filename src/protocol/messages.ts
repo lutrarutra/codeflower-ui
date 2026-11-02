@@ -10,6 +10,7 @@ import type {
   StopReason,
   ToolCallUpdate
 } from '@agentclientprotocol/sdk';
+import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from './subagents.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -75,6 +76,14 @@ export interface PendingQuestion {
   requestId: number;
   message: string;
   requestedSchema: FormSchema;
+  /** Asked by one of the chat's subagents, shown in the chat the user works in. */
+  subagent?: RequestingSubagent;
+}
+
+/** The subagent behind a request shown in its parent's chat. */
+export interface RequestingSubagent {
+  key: string;
+  title?: string;
 }
 
 export type QuestionAction = 'accept' | 'decline' | 'cancel';
@@ -162,6 +171,8 @@ export interface PendingPermission {
   requestId: number;
   toolCall: ToolCallUpdate | null;
   options: PermissionOption[];
+  /** Asked by one of the chat's subagents, shown in the chat the user works in. */
+  subagent?: RequestingSubagent;
 }
 
 export interface ChatState {
@@ -178,6 +189,8 @@ export interface ChatState {
   busy: boolean;
   /** The agent takes a message while it works (ACP steering); without, sending one now stops the turn first. */
   steer?: boolean;
+  /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
+  subagent?: SubagentSummary & { parentTitle?: string };
 }
 
 export interface ChatAction {
@@ -236,7 +249,11 @@ export type HostMessage =
   /** Text for the composer: a queued message to edit, or those a stop took off the queue. */
   | { type: 'draft'; text: string }
   /** A file from the sandbox the chat asked for, e.g. a figure the agent looked at; null if unavailable. */
-  | { type: 'fileData'; key: string; dataUrl: string | null };
+  | { type: 'fileData'; key: string; dataUrl: string | null }
+  /** The chat's subagents, running and ended. */
+  | { type: 'subagents'; subagents: SubagentSummary[] }
+  /** The defaults of the worker's subagents; null when its agent has none in code flower. */
+  | { type: 'subagentSettings'; state: SubagentSettingsState | null };
 
 export type WebviewMessage =
   | { type: 'ready' }
@@ -259,7 +276,14 @@ export type WebviewMessage =
   | { type: 'removeQueued'; id: string }
   /** Send a queued message now, as `prompt` with `now` does. */
   | { type: 'sendQueued'; id: string }
-  | { type: 'editQueued'; id: string };
+  | { type: 'editQueued'; id: string }
+  /** Show a subagent's chat, or a subagent's parent's. */
+  | { type: 'openSubagent'; key: string }
+  | { type: 'openParent' }
+  | { type: 'stopSubagent'; key: string }
+  | { type: 'subagentSettings'; settings: Partial<SubagentSettings> }
+  /** Restart the agent so settings it reads at start apply. */
+  | { type: 'restartAgent' };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

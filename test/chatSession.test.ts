@@ -42,7 +42,12 @@ function actions(
     fileData: async () => null,
     transcriptPage: async () => ({ entries: [], start: 0, context: [] }),
     openFile: () => {},
-    signIn: () => {}
+    signIn: () => {},
+    openSubagent: () => {},
+    openParent: () => {},
+    stopSubagent: async () => {},
+    setSubagentSettings: async () => {},
+    restartAgent: async () => {}
   };
 }
 

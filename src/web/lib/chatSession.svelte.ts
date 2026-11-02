@@ -16,6 +16,7 @@ import {
   type TranscriptEntry,
   type WebviewMessage
 } from '../../protocol/messages.ts';
+import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from '../../protocol/subagents.ts';
 import type { ChatUsage } from '../../protocol/usage.ts';
 import { PromptQueue } from '../../client/promptQueue.ts';
 import type { TranscriptPage } from '../../client/codeflower.ts';
@@ -38,6 +39,12 @@ export interface ChatActions {
   transcriptPage(chat: ChatSession, before: number): Promise<TranscriptPage>;
   openFile(chat: ChatSession, path: string): void;
   signIn(chat: ChatSession): void;
+  /** A subagent's chat, or a subagent chat's parent, in a tab of its own. */
+  openSubagent(chat: ChatSession, key: string): void;
+  openParent(chat: ChatSession): void;
+  stopSubagent(chat: ChatSession, key: string): Promise<void>;
+  setSubagentSettings(chat: ChatSession, settings: Partial<SubagentSettings>): Promise<void>;
+  restartAgent(chat: ChatSession): Promise<void>;
 }
 
 export class ChatSession {
@@ -62,6 +69,9 @@ export class ChatSession {
   private transcriptKnown = false;
   private config: SessionConfigOption[] = [];
   private usage: ChatUsage = { session: null, account: null };
+  /** The chat's subagents, as the worker reports them. */
+  subagents = $state<SubagentSummary[]>([]);
+  private subagentSettings: SubagentSettingsState | null = null;
   private notice: Extract<HostMessage, { type: 'notice' }> | null = null;
   private readonly listeners = new Set<(message: HostMessage) => void>();
   /** Messages sent from elsewhere (e.g. a preview's feedback) while the agent was busy. */
@@ -246,6 +256,12 @@ export class ChatSession {
       case 'clearNotice':
         this.notice = null;
         break;
+      case 'subagents':
+        this.subagents = message.subagents;
+        break;
+      case 'subagentSettings':
+        this.subagentSettings = message.state;
+        break;
     }
     for (const listener of this.listeners) listener(message);
   }
@@ -275,6 +291,8 @@ export class ChatSession {
     listener({ type: 'config', options: this.config });
     listener({ type: 'usage', usage: this.usage });
     listener({ type: 'queue', items: this.waiting.summaries() });
+    listener({ type: 'subagents', subagents: this.subagents });
+    listener({ type: 'subagentSettings', state: this.subagentSettings });
     if (this.notice) listener(this.notice);
   }
 
@@ -352,6 +370,29 @@ export class ChatSession {
         this.post({ type: 'draft', text: item.text });
         break;
       }
+      case 'openSubagent':
+        this.actions.openSubagent(this, message.key);
+        break;
+      case 'openParent':
+        this.actions.openParent(this);
+        break;
+      case 'stopSubagent':
+        await this.failing('Could not stop the subagent', this.actions.stopSubagent(this, message.key));
+        break;
+      case 'subagentSettings':
+        await this.failing('Could not change the subagent settings', this.actions.setSubagentSettings(this, message.settings));
+        break;
+      case 'restartAgent':
+        await this.failing('Could not restart the agent', this.actions.restartAgent(this));
+        break;
+    }
+  }
+
+  private async failing(what: string, work: Promise<void>): Promise<void> {
+    try {
+      await work;
+    } catch (error) {
+      this.notify('error', `${what}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

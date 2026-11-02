@@ -24,6 +24,7 @@ import {
   type SandboxFile,
   type TranscriptEntry
 } from '../protocol/messages.ts';
+import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
 import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
 import {
@@ -118,6 +119,10 @@ export interface WorkerHandlers {
   wrapUp(notice: WrapUpNotice): void;
   /** The chats open in the agent's own terminal UI (`codeflower attach`): on connect, and when that changes. */
   terminals?(terminals: ChatTerminal[]): void;
+  /** One of a chat's subagents changed: started, ended, or its summary. */
+  subagent?(parentKey: string, subagent: SubagentSummary): void;
+  /** The subagents' defaults changed, from any window. */
+  subagentSettings?(state: SubagentSettingsState): void;
   closed(reason: string, code: number): void;
 }
 
@@ -186,7 +191,9 @@ export class WorkerConnection {
       pluginsChanged: () => {
         for (const listener of this.pluginListeners) listener();
       },
-      terminals: (terminals) => handlers.terminals?.(terminals)
+      terminals: (terminals) => handlers.terminals?.(terminals),
+      subagentChanged: (parentKey, subagent) => handlers.subagent?.(parentKey, subagent),
+      subagentSettingsChanged: (state) => handlers.subagentSettings?.(state)
     });
     // After the ACP layer's own close handling, which hides open requests.
     this.rpc.onClose((reason, code) => handlers.closed(reason, code));
@@ -493,6 +500,43 @@ export class WorkerConnection {
 
   restartAgent(): Promise<void> {
     return this.bridge.restartAgent();
+  }
+
+  // ---- subagents ----
+
+  /** What the agent reports of its subagents; undefined when it has none in code flower. */
+  get subagentFeatures(): SubagentFeatures | undefined {
+    return this.workerStatus?.capabilities?.subagents;
+  }
+
+  /** A chat's subagents, running and recorded; none from workers or agents without them. */
+  async subagents(key: string): Promise<SubagentSummary[]> {
+    if (!this.subagentFeatures) return [];
+    return this.bridge.subagents(key);
+  }
+
+  /**
+   * Opens a subagent's chat here. Its updates reach the chat from now on, after
+   * `transcriptEntries` recorded ones; a subagent no longer running has only its record.
+   */
+  async openSubagent(key: string): Promise<OpenedSubagent> {
+    const opened = await this.bridge.openSubagent(key);
+    if (opened.live && opened.sessionId) this.acp.attachChild(opened.sessionId);
+    return opened;
+  }
+
+  async closeSubagent(key: string): Promise<void> {
+    this.acp.detachChild(key);
+    if (this.connected) await this.bridge.closeSubagent(key);
+  }
+
+  /** Stops a subagent, where the agent lets the client (its `cancel` capability). */
+  cancelSubagent(key: string): Promise<void> {
+    return this.bridge.cancelSubagent(key);
+  }
+
+  subagentSettings(settings?: Partial<SubagentSettings>): Promise<SubagentSettingsState> {
+    return this.bridge.subagentSettings(settings);
   }
 
   // ---- the agent's plugins ----

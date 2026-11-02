@@ -5,6 +5,9 @@
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
   import { buildItems } from './transcript.ts';
+  import type { SubagentFeatures, SubagentSummary } from '../../protocol/subagents.ts';
+  import SubagentCard from './SubagentCard.svelte';
+  import { duration } from './time.ts';
   import Skeleton from './Skeleton.svelte';
   import Thumbnail from './Thumbnail.svelte';
   import Tulip from './Tulip.svelte';
@@ -25,7 +28,9 @@
     loading = false,
     busy,
     live,
-    suggest
+    suggest,
+    subagents = [],
+    subagentFeatures
   }: {
     entries: TranscriptEntry[];
     /** The index of `entries[0]` in the chat's transcript; above 0, earlier entries load on scrolling up. */
@@ -35,7 +40,11 @@
     busy: boolean;
     live: boolean;
     suggest: (text: string) => void;
+    /** The chat's subagents as the worker reports them, for their cards. */
+    subagents?: SubagentSummary[];
+    subagentFeatures?: SubagentFeatures;
   } = $props();
+  const summaries = $derived(new Map(subagents.map((subagent) => [subagent.sessionId, subagent])));
   const items = $derived(buildItems(entries, start));
   let container: HTMLElement | undefined = $state();
 
@@ -146,13 +155,6 @@
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
   });
-  const duration = (ms: number) => {
-    const seconds = Math.max(0, Math.floor(ms / 1000));
-    if (seconds < 60) return `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ${`${seconds % 60}`.padStart(2, '0')}s`;
-    return `${Math.floor(minutes / 60)}h ${`${minutes % 60}`.padStart(2, '0')}m`;
-  };
   // Calls that took under a second say nothing; one left running when the turn ended has no end.
   const elapsed = (started: number | null, ended: number | null) => {
     if (started === null) return null;
@@ -382,6 +384,14 @@
             {/if}
           {/each}
         </div>
+      </div>
+    {:else if item.kind === 'subagent'}
+      <SubagentCard {item} summary={summaries.get(item.sessionId)} features={subagentFeatures} />
+    {:else if item.kind === 'task'}
+      <!-- A subagent's chat: what its parent asked of it. -->
+      <div class="max-w-[95%] self-start rounded-xl border-[1.5px] border-soft-line bg-violet-soft px-3.5 py-2">
+        <div class="eyebrow mb-1 text-violet">Task</div>
+        <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />
       </div>
     {:else if item.kind === 'stop'}
       <div class="flex items-center gap-1.5 self-start rounded-full bg-pink-soft px-2.5 py-0.5 text-[0.85em]">

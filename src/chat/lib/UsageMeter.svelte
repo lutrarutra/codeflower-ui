@@ -11,10 +11,12 @@
     totalsLines,
     type ChatUsage
   } from '../../protocol/usage.ts';
+  import type { SubagentSummary } from '../../protocol/subagents.ts';
+  import SubagentBadge from './SubagentBadge.svelte';
 
-  // Under the composer: how full the context is, what this chat used, and how
-  // much of the worker's subscription quota is left.
-  let { usage }: { usage: ChatUsage } = $props();
+  // Under the composer: the chat's subagents, how full the context is, what
+  // this chat used, and how much of the worker's subscription quota is left.
+  let { usage, subagents = [] }: { usage: ChatUsage; subagents?: SubagentSummary[] } = $props();
 
   // Resets count down; a minute is fine enough.
   let now = $state(Date.now());
@@ -34,8 +36,9 @@
   const tokens = $derived(session?.tokens);
 </script>
 
-{#if context || tokens?.totalTokens || limits.length}
+{#if subagents.length || context || tokens?.totalTokens || limits.length}
   <div class="mx-4 -mt-2.5 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[0.78em] text-muted">
+    <SubagentBadge {subagents} />
     {#if context}
       <span
         class="inline-flex items-center gap-1.5"

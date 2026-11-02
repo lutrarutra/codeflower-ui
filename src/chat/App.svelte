@@ -10,6 +10,7 @@
     type TranscriptEntry
   } from '../protocol/messages.ts';
   import type { ChatUsage } from '../protocol/usage.ts';
+  import { choiceLabel, subagentActive, subagentStatus, subagentTitle, type SubagentSettingsState, type SubagentSummary } from '../protocol/subagents.ts';
   import type { AvailableCommand, SessionConfigOption } from '@agentclientprotocol/sdk';
   import CommandMenu from './lib/CommandMenu.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
@@ -22,6 +23,8 @@
   import ChatTitle from './lib/ChatTitle.svelte';
   import Tulip from './lib/Tulip.svelte';
   import UsageMeter from './lib/UsageMeter.svelte';
+  import Elapsed from './lib/Elapsed.svelte';
+  import { epoch } from './lib/time.ts';
 
   let { host }: { host: ChatHost } = $props();
   // svelte-ignore state_referenced_locally
@@ -46,6 +49,9 @@
   let config = $state<SessionConfigOption[]>([]);
   let usage = $state<ChatUsage>({ session: null, account: null });
   let queued = $state<QueuedPromptSummary[]>([]);
+  /** The chat's subagents, and the worker's defaults for them. */
+  let subagents = $state<SubagentSummary[]>([]);
+  let subagentSettings = $state<SubagentSettingsState | null>(null);
   let settings: SettingsBar | undefined = $state();
 
   /** Shows the choice at once; the agent's reply confirms or corrects it. */
@@ -103,6 +109,12 @@
         break;
       case 'fileData':
         files.received(message.key, message.dataUrl);
+        break;
+      case 'subagents':
+        subagents = message.subagents;
+        break;
+      case 'subagentSettings':
+        subagentSettings = message.state;
         break;
     }
   }
@@ -209,7 +221,14 @@
     input?.focus();
   }
 
-  const status = $derived(sessionStatus(chat, permission !== null || question !== null));
+  // A subagent's chat works while the subagent runs; the user never types there.
+  const status = $derived(
+    chat.subagent
+      ? subagentActive(chat.subagent)
+        ? 'working'
+        : 'offline'
+      : sessionStatus(chat, permission !== null || question !== null)
+  );
   // Dot, label color, tooltip, label; the tab icon uses the same colors.
   const statusLook: Record<SessionStatus, [string, string, string, string]> = {
     ready: ['bg-[#3fbf57]', 'text-green', 'The agent is ready for your next message', 'ready'],
@@ -217,6 +236,10 @@
     working: ['bg-[#1ec8f0]', 'text-cyan', 'The agent is working', 'working'],
     offline: ['bg-muted', 'text-muted', 'Read-only: the worker is not connected or runs elsewhere', 'read-only']
   };
+
+  // A subagent's chat only shows its work: no composer, its state instead.
+  const subagent = $derived(chat.subagent);
+  const subagentRunning = $derived(subagent ? subagentActive(subagent) : false);
 
   // "Claude Code · 127.0.0.1:7710": the agent, then where it runs.
   const [agentLabel, location] = $derived(chat.subtitle.split(' · '));
@@ -229,6 +252,17 @@
     <h1 class="m-0 flex min-w-0 flex-1 font-display text-[1rem] leading-tight font-medium" title={chat.title || 'New session'}>
       <ChatTitle title={chat.title} fallback="New session" />
     </h1>
+    {#if subagent}
+      <button
+        type="button"
+        class="inline-flex min-w-0 shrink items-center gap-1 rounded-full border-[1.5px] border-line bg-violet-soft px-2 py-px text-[0.8em] font-semibold"
+        title="Show the chat that started this subagent"
+        onclick={() => send({ type: 'openParent' })}
+      >
+        <span class="codicon codicon-organization text-[12px]!"></span>
+        <span class="truncate">Subagent{subagent.parentTitle ? ` of ${subagent.parentTitle}` : ''}</span>
+      </button>
+    {/if}
     {#if agentLabel}
       <span
         class="inline-flex shrink-0 items-center gap-1.5 rounded-full border-[1.5px] border-line bg-card px-2 py-px text-[0.8em] font-semibold"
@@ -276,7 +310,17 @@
     </div>
   {/if}
 
-  <Transcript {entries} {start} loadEarlier={() => send({ type: 'loadEarlier' })} loading={!transcriptLoaded} busy={chat.busy} live={chat.live} {suggest} />
+  <Transcript
+    {entries}
+    {start}
+    loadEarlier={() => send({ type: 'loadEarlier' })}
+    loading={!transcriptLoaded}
+    busy={chat.busy || subagentRunning}
+    live={chat.live}
+    {suggest}
+    {subagents}
+    subagentFeatures={subagentSettings?.features}
+  />
 
   {#if permission}
     <PermissionPrompt request={permission} />
@@ -330,6 +374,31 @@
     </section>
   {/if}
 
+  {#if subagent}
+    <!-- A subagent works for its parent: the user watches here, and answers it in its parent's chat. -->
+    <div class="card mx-4 mb-4 flex items-center gap-2 px-3 py-2 max-[640px]:mx-2 max-[640px]:mb-2">
+      <span class="codicon codicon-organization text-violet"></span>
+      <span class="min-w-0 flex-1">
+        <span class="block truncate font-semibold">{subagentTitle(subagent)}</span>
+        <span class="block text-[0.8em] text-muted">
+          {[
+            subagentStatus(subagent),
+            subagent.model && choiceLabel(subagent.model),
+            subagent.effort && choiceLabel(subagent.effort),
+            "its parent's chat takes your messages and answers its questions"
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+      </span>
+      <Elapsed started={epoch(subagent.startedAt)} ended={subagentRunning ? null : epoch(subagent.endedAt)} running={subagentRunning} />
+      {#if subagentRunning && subagent.capabilities?.cancel}
+        <button type="button" class="pill pill-pink pill-small" onclick={() => send({ type: 'stopSubagent', key: subagent.key })}>
+          <span class="codicon codicon-debug-stop"></span> Stop
+        </button>
+      {/if}
+    </div>
+  {:else}
   <form
     class="card relative mx-4 mb-4 flex max-[640px]:mx-2 max-[640px]:mb-2 flex-col gap-1 px-3 pt-2 pb-2 {shellMode ? 'border-teal!' : 'focus-within:border-indigo'}"
     onsubmit={(event) => {
@@ -405,6 +474,9 @@
             set={setConfig}
             autoApprove={chat.agent?.id === 'dsh' ? (chat.autoApprove ?? true) : undefined}
             setAutoApprove={(enabled) => send({ type: 'setAutoApprove', enabled })}
+            subagents={subagentSettings}
+            setSubagents={(changed) => send({ type: 'subagentSettings', settings: changed })}
+            restartAgent={() => send({ type: 'restartAgent' })}
           />
         {/if}
       </div>
@@ -439,6 +511,7 @@
       </button>
     </div>
   </form>
+  {/if}
 
-  <UsageMeter {usage} />
+  <UsageMeter {usage} {subagents} />
 </main>

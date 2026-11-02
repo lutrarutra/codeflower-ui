@@ -13,6 +13,11 @@
 // another window answered (`_codeflower/requestResolved`, matched by the
 // request's `codeflower/requestKey`).
 //
+// Subagents (ACP's subagents RFD): the client takes them as sessions of their
+// own, which it attaches only when a chat of theirs opens (`attachChild`);
+// their permission requests and questions show in their parent's chat, which
+// the bridge names in `codeflower/parentSessionIds`.
+//
 // Agents that take a message while they work (ACP steering, `_session/steering`:
 // Claude Code, Codex) say so with `steering.supported` in their `initialize`
 // answer's `_meta`. The bridge echoes such a message like a prompt and marks its
@@ -40,6 +45,7 @@ import type {
   PendingPermission,
   PendingQuestion,
   QuestionAction,
+  RequestingSubagent,
   TranscriptEntry
 } from '../protocol/messages.ts';
 import { isMethodNotFound, RpcError, type RpcConnection } from './rpc.ts';
@@ -53,6 +59,7 @@ const REQUEST_KEY_META = 'codeflower/requestKey';
 const MULTI_CLIENT_META = 'codeflower/multiClient';
 const FILES_META = 'codeflower/files';
 const PROMPTED_META = 'codeflower/prompted';
+const PARENTS_META = 'codeflower/parentSessionIds';
 const STEER_METHOD = '_session/steering';
 
 /** What session/new, session/resume, and session/load may report about settings. */
@@ -153,6 +160,8 @@ export class AcpClient {
   private readonly keyOf: (sessionId: string) => string;
   /** Native session ids of the sessions attached on this connection, by key. */
   private readonly sessions = new Map<string, string>();
+  /** Subagents whose chats are open here, which only show what they do. */
+  private readonly children = new Map<string, string>();
   private readonly replaying = new Set<string>();
   /** Each session's settings; `modesOnly` marks agents that predate config options. */
   private readonly configs = new Map<string, { options: SessionConfigOption[]; modesOnly: boolean }>();
@@ -209,6 +218,8 @@ export class AcpClient {
         auth: { terminal: true },
         // Forms carry the agent's questions; Claude Code offers AskUserQuestion only with them.
         elicitation: { url: {}, form: {} },
+        // Subagents as sessions of their own, shown in chats of their own.
+        subagents: {},
         _meta: { 'terminal-auth': true }
       },
       clientInfo: client
@@ -286,6 +297,17 @@ export class AcpClient {
     if (meta?.['codeflower/busy']) this.setRemoteBusy(key, true);
     const transcriptEntries = meta?.['codeflower/transcriptEntries'];
     return { key, ...(typeof transcriptEntries === 'number' ? { transcriptEntries } : {}) };
+  }
+
+  /** A subagent's chat opened here: its updates reach the chat from now on. */
+  attachChild(sessionId: string): string {
+    const key = this.keyOf(sessionId);
+    this.children.set(key, sessionId);
+    return key;
+  }
+
+  detachChild(key: string): void {
+    this.children.delete(key);
   }
 
   /** What a session is doing now, for a chat that opens mid-turn. */
@@ -443,7 +465,20 @@ export class AcpClient {
 
   private keyFor(sessionId: string): string | undefined {
     const key = this.keyOf(sessionId);
-    return this.sessions.has(key) ? key : undefined;
+    return this.sessions.has(key) || this.children.has(key) ? key : undefined;
+  }
+
+  /**
+   * The chat a request goes to: a subagent's to its nearest parent open here,
+   * marked with the subagent, else its own chat if open.
+   */
+  private requestChat(sessionId: string, meta: Record<string, unknown> | null | undefined): { key?: string; subagent?: RequestingSubagent } {
+    const parents = meta?.[PARENTS_META];
+    if (Array.isArray(parents)) {
+      const parentKey = parents.map((parent) => (typeof parent === 'string' ? this.keyFor(parent) : undefined)).find(Boolean);
+      if (parentKey) return { key: parentKey, subagent: { key: this.keyOf(sessionId) } };
+    }
+    return { key: this.keyFor(sessionId) };
   }
 
   private setLeftOut(key: string, meta: SessionSettings['_meta']): void {
@@ -515,13 +550,14 @@ export class AcpClient {
   }
 
   private requestPermission(request: RequestPermissionRequest): Promise<RequestPermissionResponse> {
-    const key = this.keyFor(request.sessionId) ?? this.keyOf(request.sessionId);
+    const chat = this.requestChat(request.sessionId, request._meta);
+    const key = chat.key ?? this.keyOf(request.sessionId);
     const requestId = this.nextRequestId++;
     if (!request._meta?.[REPLAYED_META]) {
       this.handlers.entry(key, { t: now(), kind: 'permission', toolCall: request.toolCall ?? null, options: request.options });
     }
     return new Promise<RequestPermissionResponse>((resolve) => {
-      const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options };
+      const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options, ...(chat.subagent ? { subagent: chat.subagent } : {}) };
       this.permissions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
       if (this.autoApprovedSessions.has(key) && this.autoApprovePermission(requestId, pending)) return;
       this.handlers.permission(key, pending);
@@ -537,10 +573,15 @@ export class AcpClient {
 
   private async elicit(request: ElicitationRequest): Promise<unknown> {
     if (request.mode === 'form' || (request.mode === undefined && request.requestedSchema)) {
-      const key = request.sessionId ? this.keyFor(request.sessionId) : undefined;
+      const chat = request.sessionId ? this.requestChat(request.sessionId, request._meta) : {};
+      const key = chat.key;
       // Forms belong in a chat; one for no open session cannot be shown.
       if (!key) return { action: 'decline' };
-      const question = { message: request.message ?? '', requestedSchema: request.requestedSchema ?? {} };
+      const question = {
+        message: request.message ?? '',
+        requestedSchema: request.requestedSchema ?? {},
+        ...(chat.subagent ? { subagent: chat.subagent } : {})
+      };
       const requestId = this.nextRequestId++;
       if (!request._meta?.[REPLAYED_META]) {
         this.handlers.entry(key, {
@@ -577,6 +618,7 @@ export class AcpClient {
       this.handlers.question(key, null);
     }
     this.sessions.clear();
+    this.children.clear();
     this.remoteBusy.clear();
   }
 }

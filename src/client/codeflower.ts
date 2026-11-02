@@ -1,9 +1,10 @@
 // What the code flower bridge adds to ACP: `_codeflower/*` methods and
 // notifications for the worker's status, recorded sessions, files, the
-// user's shell commands, sign-in terminals and usage. An agent reached without
+// user's shell commands, sign-in terminals, usage and subagents. An agent reached without
 // the bridge answers none of them, and the chat works without them.
 import type { AgentName, AgentPresentation, ChatAction, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
+import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import { RpcError, isMethodNotFound, type RpcConnection } from './rpc.ts';
 
 export const WORKSPACE = '/codeflower-state/workspace';
@@ -57,6 +58,8 @@ export interface WorkerStatus {
     plugins?: boolean;
     /** Chats open in the agent's own terminal UI (`codeflower attach`). */
     chatTerminals?: boolean;
+    /** What the agent tells of its subagents; missing for agents without them in code flower. */
+    subagents?: SubagentFeatures;
   };
 }
 
@@ -286,6 +289,10 @@ export interface CodeflowerHandlers {
   pluginsChanged?(): void;
   /** A chat's terminal UI started, ended, or a terminal attached to it or left. */
   terminals?(terminals: ChatTerminal[]): void;
+  /** One of a chat's subagents changed (`parentKey`: the chat). */
+  subagentChanged?(parentKey: string, subagent: SubagentSummary): void;
+  /** The subagents' defaults changed, from any window. */
+  subagentSettingsChanged?(state: SubagentSettingsState): void;
 }
 
 export class CodeflowerExtensions {
@@ -316,6 +323,11 @@ export class CodeflowerExtensions {
       handlers.terminalExit(terminalId, exitCode);
     });
     rpc.on('_codeflower/plugins/changed', () => handlers.pluginsChanged?.());
+    rpc.on('_codeflower/subagents/changed', (params) => {
+      const { parentKey, subagent } = params as { parentKey: string; subagent: SubagentSummary };
+      handlers.subagentChanged?.(parentKey, subagent);
+    });
+    rpc.on('_codeflower/subagents/settingsChanged', (params) => handlers.subagentSettingsChanged?.(params as SubagentSettingsState));
     rpc.on('_codeflower/terminal/changed', (params) => {
       const { terminals } = params as { terminals?: ChatTerminal[] };
       if (Array.isArray(terminals)) handlers.terminals?.(terminals);
@@ -556,6 +568,31 @@ export class CodeflowerExtensions {
   /** Ends the worker's agent (refused while chats are working); the next connection starts a fresh one. */
   async restartAgent(): Promise<void> {
     await this.rpc.request('_codeflower/agent/restart', {});
+  }
+
+  // ---- subagents ----
+
+  /** A chat's subagents, running and recorded. */
+  async subagents(key: string): Promise<SubagentSummary[]> {
+    return (await this.rpc.request<{ subagents: SubagentSummary[] }>('_codeflower/subagents/list', { key })).subagents ?? [];
+  }
+
+  /** Opens a subagent's chat here: its updates and requests come from now on. */
+  openSubagent(key: string): Promise<OpenedSubagent> {
+    return this.rpc.request<OpenedSubagent>('_codeflower/subagents/open', { key });
+  }
+
+  async closeSubagent(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/subagents/close', { key });
+  }
+
+  async cancelSubagent(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/subagents/cancel', { key });
+  }
+
+  /** The subagents' defaults; `settings` changes them first. */
+  subagentSettings(settings?: Partial<SubagentSettings>): Promise<SubagentSettingsState> {
+    return this.rpc.request<SubagentSettingsState>('_codeflower/subagents/settings', settings ? { settings } : {});
   }
 }
 

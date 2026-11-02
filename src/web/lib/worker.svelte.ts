@@ -12,6 +12,7 @@ import {
   type PendingQuestion,
   type TranscriptEntry
 } from '../../protocol/messages.ts';
+import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
   isAuthRequired,
@@ -45,6 +46,8 @@ export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecte
 export interface WorkerEvents {
   show(worker: WebWorker, request: ShowRequest): void;
   openFile(worker: WebWorker, chat: ChatSession, path: string): void;
+  /** A chat of the sandbox in front, e.g. a subagent's from its parent. */
+  openChat(worker: WebWorker, key: string): void;
   signIn(worker: WebWorker): void;
   elicitUrl(worker: WebWorker, request: UrlElicitation): Promise<'accept' | 'decline'>;
   elicitationComplete(worker: WebWorker, elicitationId: string): void;
@@ -69,6 +72,10 @@ export class WebWorker {
   chats = $state<Record<string, ChatSession>>({});
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
+  /** The subagents of the chats open here, by their chats' keys: what their tabs show. */
+  subagents = $state<Record<string, SubagentSummary>>({});
+  /** The defaults of the agent's subagents; null when it has none in code flower. */
+  private subagentSettings: SubagentSettingsState | null = null;
   /** The terminal notice each chat shows, so it is posted once and cleared when the terminal goes. */
   private readonly terminalNotices = new Map<string, string>();
   connection: WorkerConnection | undefined;
@@ -147,6 +154,10 @@ export class WebWorker {
       }
       const usage = await connection.usage().catch(() => undefined);
       if (usage && this.connection === connection) this.setUsage(usage);
+      if (connection.subagentFeatures) {
+        const settings = await connection.subagentSettings().catch(() => null);
+        if (this.connection === connection) this.setSubagentSettings(settings);
+      }
       // Open chats attach again and show what happened meanwhile. Not awaited: after the agent
       // restarted each is a full resume, and a new chat or a prompt should not wait for them all.
       void Promise.all(Object.values(this.chats).map((chat) => this.attach(chat).catch((error) => this.report(chat, error))));
@@ -235,7 +246,12 @@ export class WebWorker {
     return key;
   }
 
-  /** The chat for a session, attached once connected. */
+  /** Whether a key is one of the subagents of the chats open here, whose chats open lazily. */
+  isSubagent(key: string): boolean {
+    return key in this.subagents;
+  }
+
+  /** The chat for a session (or a subagent), attached once connected. */
   async open(key: string): Promise<ChatSession> {
     const existing = this.chats[key];
     if (existing) {
@@ -244,7 +260,9 @@ export class WebWorker {
       return existing;
     }
     const session = this.sessions.find((candidate) => candidate.key === key);
-    const chat = this.create(key, session?.title ?? 'Chat');
+    const subagent = session ? undefined : this.subagents[key];
+    const chat = this.create(key, session?.title ?? (subagent ? subagentTitle(subagent) : 'Chat'));
+    if (subagent) chat.setState({ subagent: this.subagentState(subagent) });
     try {
       await this.connect();
       await this.attach(chat);
@@ -256,6 +274,8 @@ export class WebWorker {
   }
 
   forget(key: string): void {
+    // A subagent's updates stop coming once no chat of it is open.
+    if (this.chats[key]?.state.subagent) void this.connection?.closeSubagent(key).catch(() => undefined);
     delete this.chats[key];
   }
 
@@ -298,6 +318,7 @@ export class WebWorker {
     this.chats[key] = chat;
     this.showUsage(chat);
     this.refreshUsage();
+    chat.post({ type: 'subagentSettings', state: this.subagentSettings });
     return chat;
   }
 
@@ -317,6 +338,7 @@ export class WebWorker {
 
   private async attachNow(chat: ChatSession): Promise<void> {
     const connection = this.connection!;
+    if (chat.state.subagent) return this.attachSubagent(chat);
     const session = this.sessions.find((candidate) => candidate.key === chat.key);
     if (!session) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
@@ -334,10 +356,55 @@ export class WebWorker {
       chat.setState({ live: true, busy: activity.busy, steer: connection.canSteer });
       this.noticeMcp(chat, connection.mcpNotice(chat.key));
       this.noticeTerminal(chat);
+      void this.loadSubagents(chat);
     } catch (error) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
     }
+  }
+
+  // ---- subagents ----
+
+  /** A subagent's chat: what it recorded so far, then its updates live while it runs. */
+  private async attachSubagent(chat: ChatSession): Promise<void> {
+    const connection = this.connection!;
+    chat.hold();
+    try {
+      const opened = await connection.openSubagent(chat.key);
+      chat.loaded(pageUpTo(await connection.transcriptPage(chat.key), opened.transcriptEntries));
+      if (opened.subagent) this.subagentChanged(opened.subagent);
+      void this.loadSubagents(chat);
+    } catch (error) {
+      chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
+      this.report(chat, error);
+    }
+  }
+
+  /** A chat's subagents, for its cards and its badge. */
+  private async loadSubagents(chat: ChatSession): Promise<void> {
+    const connection = this.connection;
+    if (!connection?.subagentFeatures) return;
+    const subagents = await connection.subagents(chat.key).catch(() => undefined);
+    if (!subagents || this.connection !== connection) return;
+    for (const subagent of subagents) this.subagents[subagent.key] = subagent;
+    chat.post({ type: 'subagents', subagents });
+  }
+
+  private subagentState(subagent: SubagentSummary): ChatState['subagent'] {
+    const parent = this.chats[subagent.parentKey]?.state.title ?? this.sessions.find((session) => session.key === subagent.parentKey)?.title;
+    return { ...subagent, ...(parent ? { parentTitle: parent } : {}) };
+  }
+
+  private subagentChanged(subagent: SubagentSummary): void {
+    this.subagents[subagent.key] = subagent;
+    const parent = this.chats[subagent.parentKey];
+    parent?.post({ type: 'subagents', subagents: withSubagent(parent.subagents, subagent) });
+    this.chats[subagent.key]?.setState({ subagent: this.subagentState(subagent) });
+  }
+
+  private setSubagentSettings(state: SubagentSettingsState | null): void {
+    this.subagentSettings = state;
+    for (const chat of Object.values(this.chats)) chat.post({ type: 'subagentSettings', state });
   }
 
   /**
@@ -441,7 +508,14 @@ export class WebWorker {
       }
     },
     openFile: (chat, path) => this.events.openFile(this, chat, path),
-    signIn: () => this.events.signIn(this)
+    signIn: () => this.events.signIn(this),
+    openSubagent: (_chat, key) => this.events.openChat(this, key),
+    openParent: (chat) => {
+      if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
+    },
+    stopSubagent: (_chat, key) => this.require().cancelSubagent(key),
+    setSubagentSettings: async (_chat, settings) => this.setSubagentSettings(await this.require().subagentSettings(settings)),
+    restartAgent: () => this.require().restartAgent()
   };
 
   // ---- remembered settings ----
@@ -586,6 +660,8 @@ export class WebWorker {
       usage: (usage: WorkerUsage) => this.setUsage(usage),
       wrapUp: (notice: WrapUpNotice) => this.events.wrapUp(this, notice),
       terminals: (terminals: ChatTerminal[]) => this.setTerminals(terminals),
+      subagent: (_parentKey: string, subagent: SubagentSummary) => this.subagentChanged(subagent),
+      subagentSettings: (state: SubagentSettingsState) => this.setSubagentSettings(state),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };
   }
