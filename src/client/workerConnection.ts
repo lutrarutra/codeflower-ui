@@ -159,7 +159,8 @@ export class WorkerConnection {
         this.shells.delete(runId);
         handlers.entry(run.sessionKey, { t: now(), kind: 'shell_end', runId, exitCode, timedOut: timedOut === true });
       },
-      show: (request) => handlers.show(request),
+      show: (request) =>
+        handlers.show(request.sessionId ? { ...request, sessionKey: sessionKey(this.requireAgent(), request.sessionId) } : request),
       activity: (activity) => {
         const working = new Set(activity.chats.map((chat) => chat.key));
         for (const key of this.acp.keys()) this.acp.setRemoteBusy(key, working.has(key));

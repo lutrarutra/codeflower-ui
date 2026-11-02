@@ -308,9 +308,9 @@ export class Previews {
     this.page.open(workerId, tab);
   }
 
-  /** The agent ran `codeflower-show`. */
+  /** The agent ran `codeflower-show`, or asks to approve a plan in a chat. */
   show(worker: WebWorker, request: ShowRequest): void {
-    const chat = worker.chatFor();
+    const chat = (request.sessionKey ? worker.chats[request.sessionKey] : undefined) ?? worker.chatFor();
     if (chat)
       void worker.connection
         ?.recordShow(

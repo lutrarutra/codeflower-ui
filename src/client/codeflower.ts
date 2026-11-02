@@ -241,6 +241,10 @@ export interface ShowRequest {
   files: SandboxFile[];
   title?: string;
   message?: string;
+  /** The chat the files belong to, e.g. the one asking to approve a plan; else the window picks one. */
+  sessionId?: string;
+  /** Its key, which `WorkerConnection` adds. */
+  sessionKey?: string;
 }
 
 export interface DshCredentials {

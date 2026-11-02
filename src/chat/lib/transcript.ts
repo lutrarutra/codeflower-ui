@@ -1,5 +1,5 @@
 // Folds recorded or live ACP traffic into chat items for rendering.
-import type { ContentBlock, PlanEntry, ToolCallContent, ToolCallLocation } from '@agentclientprotocol/sdk';
+import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCallLocation } from '@agentclientprotocol/sdk';
 import { looksLikeFile } from './files.ts';
 import {
   ACTION_PROMPT_META,
@@ -158,7 +158,8 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           kind: 'permission',
           id,
           title: entry.toolCall?.title ?? 'a tool call',
-          outcome: null
+          outcome: null,
+          options: entry.options
         };
         items.push(pendingPermission);
         break;

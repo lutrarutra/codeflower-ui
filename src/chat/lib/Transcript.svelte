@@ -173,11 +173,21 @@
     'Make a figure that summarizes the data'
   ];
 
-  const allowed = (outcome: string | null) => !!outcome && /allow|yes|approve/i.test(outcome);
+  // By the chosen option's kind: ids such as Claude Code's `exit-plan-default` say nothing.
+  const allowed = (outcome: string | null, options: PermissionOption[] = []) => {
+    const kind = options.find((option) => option.optionId === outcome)?.kind;
+    return kind ? kind.startsWith('allow') : !!outcome && /allow|yes|approve/i.test(outcome);
+  };
 </script>
 
 <!-- Items keep their size and the list scrolls; shrinking would squash cards that clip their content. -->
 <div bind:this={container} class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4 max-[640px]:px-2.5 *:shrink-0">
+  {#if start > 0 && items.length}
+    <div bind:this={earlier} class="flex items-center justify-center gap-2 py-1 text-[0.85em] text-muted" role="status">
+      <span class="codicon codicon-loading codicon-modifier-spin"></span>
+      Loading earlier messages…
+    </div>
+  {/if}
   {#each items as item, index (item.id)}
     {#if item.kind === 'user'}
       <div
@@ -291,7 +301,7 @@
       {@const previous = items[index - 1]}
       <!-- An unanswered request is the prompt card; answered ones read as a note. -->
       <div class="-mt-1.5 flex items-center gap-1.5 self-start pl-1 text-[0.8em] text-muted">
-        {#if allowed(item.outcome)}
+        {#if allowed(item.outcome, item.options)}
           <span class="codicon codicon-check text-green"></span> Allowed
         {:else}
           <span class="codicon codicon-circle-slash text-pink"></span> Not allowed
