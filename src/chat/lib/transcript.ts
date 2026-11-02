@@ -26,9 +26,12 @@ export type ChatItem =
       toolKind: string;
       details: string[];
       files: string[];
+      /** When the call started and ended, in ms since the epoch; null when unknown or still running. */
+      started: number | null;
+      ended: number | null;
     }
   | { kind: 'plan'; id: string; entries: PlanEntry[] }
-  | { kind: 'permission'; id: string; title: string; outcome: string | null }
+  | { kind: 'permission'; id: string; title: string; outcome: string | null; options?: PermissionOption[] }
   | { kind: 'stop'; id: string; reason: string }
   | { kind: 'shell'; id: string; runId: string; command: string; output: string; exitCode: number | null; timedOut: boolean }
   | { kind: 'question'; id: string; message: string; fields: FormField[]; answers: QuestionAnswer[] | null; skipped: boolean }
@@ -107,6 +110,12 @@ function toolDescription(rawInput: unknown): string | null {
   return typeof description === 'string' && description.trim() ? description.trim() : null;
 }
 
+const time = (t: string) => {
+  const ms = Date.parse(t);
+  return Number.isNaN(ms) ? null : ms;
+};
+const finished = (status: string | null | undefined) => status === 'completed' || status === 'failed';
+
 function toolDetails(content: ToolCallContent[] | null | undefined): string[] {
   if (!content) return [];
   return content.map((item) => {
@@ -138,6 +147,8 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
         }
         break;
       case 'turn_end':
+        // A call the agent never finished, e.g. one the user stopped, ran until the turn ended.
+        for (const tool of tools.values()) tool.ended ??= time(entry.t);
         if (entry.stopReason && entry.stopReason !== 'end_turn') {
           items.push({ kind: 'stop', id, reason: entry.stopReason.replace(/_/g, ' ') });
         }
@@ -236,7 +247,9 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
               status: update.status ?? 'pending',
               toolKind: update.kind ?? 'other',
               details: toolDetails(update.content),
-              files: toolFiles(update.locations)
+              files: toolFiles(update.locations),
+              started: time(entry.t),
+              ended: finished(update.status) ? time(entry.t) : null
             };
             tools.set(update.toolCallId, tool);
             items.push(tool);
@@ -248,6 +261,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
             if (update.title) tool.title = update.title;
             tool.description = toolDescription(update.rawInput) ?? tool.description;
             if (update.status) tool.status = update.status;
+            if (finished(update.status) && tool.ended === null) tool.ended = time(entry.t);
             if (update.content) tool.details = toolDetails(update.content);
             if (update.locations) tool.files = toolFiles(update.locations);
             const compacted = compactTitle(update.rawOutput);

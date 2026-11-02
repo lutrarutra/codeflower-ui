@@ -137,6 +137,29 @@
     switch_mode: ['settings-gear', 'bg-yellow-soft']
   };
 
+  // A running tool call shows how long it has been going, so one that hangs stands out.
+  let now = $state(Date.now());
+  const running = $derived(busy && items.some((item) => item.kind === 'tool' && item.started !== null && item.ended === null));
+  $effect(() => {
+    if (!running) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  const duration = (ms: number) => {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ${`${seconds % 60}`.padStart(2, '0')}s`;
+    return `${Math.floor(minutes / 60)}h ${`${minutes % 60}`.padStart(2, '0')}m`;
+  };
+  // Calls that took under a second say nothing; one left running when the turn ended has no end.
+  const elapsed = (started: number | null, ended: number | null) => {
+    if (started === null) return null;
+    if (ended !== null) return ended - started >= 1000 ? duration(ended - started) : null;
+    return busy ? duration(now - started) : null;
+  };
+
   const statusIcon: Record<string, string> = {
     completed: 'codicon-pass-filled text-green',
     failed: 'codicon-error text-red',
@@ -187,6 +210,7 @@
       </details>
     {:else if item.kind === 'tool'}
       {@const [icon, tile] = toolIcon[item.toolKind] ?? ['tools', 'bg-yellow-soft']}
+      {@const took = elapsed(item.started, item.ended)}
       <details class="group rounded-xl border-[1.5px] border-soft-line bg-card">
         <summary class="flex cursor-pointer list-none items-center gap-2.5 px-2.5 py-1.5 select-none">
           <span class="grid size-6 shrink-0 place-items-center rounded-lg border-[1.5px] border-line {tile}">
@@ -212,6 +236,9 @@
               <span class="codicon codicon-eye"></span>
             </button>
           {/each}
+          {#if took}
+            <span class="shrink-0 font-mono text-[0.78em] text-muted tabular-nums" title={item.ended === null ? 'Running for' : 'Took'}>{took}</span>
+          {/if}
           <span class="codicon {statusIcon[item.status] ?? statusIcon.pending}"></span>
           {#if item.details.length || item.description}
             <span class="codicon codicon-chevron-right text-muted transition-transform group-open:rotate-90"></span>

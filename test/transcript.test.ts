@@ -55,3 +55,17 @@ test('renders action prompts compactly and falls back when metadata is missing',
   assert.deepEqual(action, [{ kind: 'action', id: '0', title: 'Checkpoint', text: 'Make a checkpoint.' }]);
   assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.' }]);
 });
+
+test('times tool calls, until the turn ends for those left running', () => {
+  const at = (seconds: number) => new Date(seconds * 1000).toISOString();
+  const items = buildItems([
+    { t: at(0), kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'a', title: 'sleep 5', status: 'in_progress' } },
+    { t: at(5), kind: 'update', update: { sessionUpdate: 'tool_call_update', toolCallId: 'a', status: 'completed' } },
+    { t: at(6), kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'b', title: 'sleep 99', status: 'in_progress' } },
+    { t: at(9), kind: 'turn_end', stopReason: 'cancelled' }
+  ]);
+  assert.deepEqual(
+    items.flatMap((item) => (item.kind === 'tool' ? [[item.started, item.ended]] : [])),
+    [[0, 5000], [6000, 9000]]
+  );
+});
