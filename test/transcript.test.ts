@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
+import type { SessionUpdate, ToolCallUpdate } from '@agentclientprotocol/sdk';
 import type { TranscriptEntry } from '../src/protocol/messages.ts';
-import { activity, buildItems, foldTurns, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
+import { activity, buildItems, foldTurns, withKnownToolCall, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
 const chunk = (text: string, messageId?: string) =>
@@ -172,4 +172,29 @@ test('says what the agent does now, from its latest step', () => {
     ),
     'Cluster'
   );
+});
+
+// dsh's permission requests name only the tool call (recorded); the card shows what the chat knows of it.
+test('a permission request takes what it leaves out from the tool call it names', () => {
+  const entries: TranscriptEntry[] = [
+    { t: 't1', kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'write-1', title: 'Write /codeflower-state/x.txt', kind: 'edit', status: 'in_progress', rawInput: { file_path: '/codeflower-state/x.txt' }, locations: [{ path: '/codeflower-state/x.txt' }] } },
+    { t: 't2', kind: 'update', update: { sessionUpdate: 'tool_call', toolCallId: 'bash-1', title: 'bash', kind: 'other', status: 'in_progress', rawInput: { command: 'touch /codeflower-state/y' } } },
+    { t: 't3', kind: 'update', update: { sessionUpdate: 'tool_call_update', toolCallId: 'bash-1', title: 'Touch y' } }
+  ];
+  const request = (toolCall: ToolCallUpdate) => ({ requestId: 1, toolCall, options: [] });
+  assert.deepEqual(withKnownToolCall(request({ toolCallId: 'write-1' }), entries).toolCall, {
+    toolCallId: 'write-1',
+    title: 'Write /codeflower-state/x.txt',
+    kind: 'edit',
+    rawInput: { file_path: '/codeflower-state/x.txt' },
+    locations: [{ path: '/codeflower-state/x.txt' }]
+  });
+  // Later updates count, and what the request says itself comes first.
+  assert.equal(withKnownToolCall(request({ toolCallId: 'bash-1' }), entries).toolCall?.title, 'Touch y');
+  assert.equal(withKnownToolCall(request({ toolCallId: 'bash-1', title: 'Run touch' }), entries).toolCall?.title, 'Run touch');
+  assert.deepEqual((withKnownToolCall(request({ toolCallId: 'bash-1' }), entries).toolCall?.rawInput as { command: string }).command, 'touch /codeflower-state/y');
+  // An unknown call, or none, as it came.
+  assert.deepEqual(withKnownToolCall(request({ toolCallId: 'other' }), entries).toolCall, { toolCallId: 'other' });
+  const none = { requestId: 2, toolCall: null, options: [] };
+  assert.equal(withKnownToolCall(none, entries), none);
 });

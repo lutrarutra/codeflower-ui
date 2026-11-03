@@ -17,6 +17,7 @@
   import { provideChatHost, type ChatHost } from './lib/host.ts';
   import { provideSandboxFiles, SandboxFiles } from './lib/sandboxFiles.svelte.ts';
   import PermissionPrompt from './lib/PermissionPrompt.svelte';
+  import { withKnownToolCall } from './lib/transcript.ts';
   import QuestionCard from './lib/QuestionCard.svelte';
   import SettingsBar from './lib/SettingsBar.svelte';
   import Transcript from './lib/Transcript.svelte';
@@ -349,7 +350,7 @@
   />
 
   {#if permission}
-    <PermissionPrompt request={permission} />
+    <PermissionPrompt request={withKnownToolCall(permission, [...context, ...entries])} />
   {/if}
 
   {#if question}

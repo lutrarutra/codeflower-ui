@@ -1,5 +1,5 @@
 // Folds recorded or live ACP traffic into chat items for rendering.
-import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCallLocation } from '@agentclientprotocol/sdk';
+import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCallLocation, ToolCallUpdate } from '@agentclientprotocol/sdk';
 import { looksLikeFile } from './files.ts';
 import {
   ACTION_PROMPT_META,
@@ -166,6 +166,27 @@ function toolDetails(content: ToolCallContent[] | null | undefined): string[] {
 }
 
 /** `start` is the index of `entries[0]` in the transcript: ids stay the same as earlier entries load. */
+/**
+ * What the chat knows of a tool call: its `tool_call` and the updates after it.
+ * A permission request may name only the call's id (dsh's do, as ACP allows),
+ * so its card takes the title, kind, input and files from here.
+ */
+export function withKnownToolCall<T extends { toolCall: ToolCallUpdate | null }>(request: T, entries: TranscriptEntry[]): T {
+  const id = request.toolCall?.toolCallId;
+  if (!id) return request;
+  const known: Partial<ToolCallUpdate> = {};
+  for (const entry of entries) {
+    if (entry.kind !== 'update') continue;
+    const update = entry.update;
+    if ((update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') || update.toolCallId !== id) continue;
+    for (const key of ['title', 'kind', 'rawInput', 'content', 'locations'] as const) {
+      if (update[key] !== undefined && update[key] !== null) Object.assign(known, { [key]: update[key] });
+    }
+  }
+  const own = Object.fromEntries(Object.entries(request.toolCall!).filter(([, value]) => value !== undefined && value !== null));
+  return { ...request, toolCall: { ...known, ...own, toolCallId: id } };
+}
+
 export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   const items: ChatItem[] = [];
   const tools = new Map<string, Extract<ChatItem, { kind: 'tool' }>>();

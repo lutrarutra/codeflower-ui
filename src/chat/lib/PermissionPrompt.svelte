@@ -18,17 +18,25 @@
     allow_always: 'pill-teal'
   };
 
-  // A plan to approve (Claude Code's ExitPlanMode is kind switch_mode): its
-  // text, and the file the agent wrote it to, which the bridge shows like a
-  // file from codeflower-show; the user may edit it before answering.
-  const plan = $derived(
-    request.toolCall?.kind === 'switch_mode'
-      ? (request.toolCall.content ?? [])
-          .map((item) => (item.type === 'content' && item.content.type === 'text' ? item.content.text : ''))
-          .join('\n\n')
-          .trim()
-      : ''
-  );
+  // A plan to approve (Claude Code's ExitPlanMode and Codex's plan review are
+  // kind switch_mode): its text, in the content or (Codex) the input, and the
+  // file the agent wrote it to, which the bridge shows like a file from
+  // codeflower-show; the user may edit it before answering.
+  const plan = $derived.by(() => {
+    if (request.toolCall?.kind !== 'switch_mode') return '';
+    const text = (request.toolCall.content ?? [])
+      .map((item) => (item.type === 'content' && item.content.type === 'text' ? item.content.text : ''))
+      .join('\n\n')
+      .trim();
+    const input = request.toolCall.rawInput as { plan?: unknown } | undefined;
+    return text || (typeof input?.plan === 'string' ? input.plan.trim() : '');
+  });
+  // A command to run, which Codex titles only "Run command".
+  const command = $derived.by(() => {
+    const input = request.toolCall?.rawInput as { command?: unknown } | undefined;
+    if (typeof input?.command === 'string') return input.command;
+    return Array.isArray(input?.command) && input.command.every((part) => typeof part === 'string') ? input.command.join(' ') : undefined;
+  });
   const planFile = $derived.by(() => {
     if (request.toolCall?.kind !== 'switch_mode') return undefined;
     const input = request.toolCall.rawInput as { planFilePath?: unknown } | undefined;
@@ -70,8 +78,9 @@
     </div>
   {:else}
     <p class="m-0">The agent wants to run</p>
-    <pre class="m-0 overflow-x-auto rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2 font-mono text-[0.88em] whitespace-pre-wrap">{request
-        .toolCall?.title ?? 'a tool'}</pre>
+    <pre class="m-0 overflow-x-auto rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2 font-mono text-[0.88em] whitespace-pre-wrap">{command ??
+        request.toolCall?.title ??
+        'a tool'}</pre>
   {/if}
   <div class="flex flex-wrap items-center gap-2 pt-1">
     {#each request.options as option (option.optionId)}
