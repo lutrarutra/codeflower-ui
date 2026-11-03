@@ -297,8 +297,8 @@
     <button
       type="button"
       class="link shrink-0"
-      title={folded ? 'Show every step' : 'Show only the answers'}
-      aria-label={folded ? 'Show every step' : 'Show only the answers'}
+      title={folded ? 'Show every step' : 'Show only the messages'}
+      aria-label={folded ? 'Show every step' : 'Show only the messages'}
       aria-pressed={!folded}
       onclick={toggleFold}
     >

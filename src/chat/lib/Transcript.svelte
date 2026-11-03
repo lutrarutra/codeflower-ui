@@ -46,7 +46,7 @@
     /** The chat's subagents as the worker reports them, for their cards. */
     subagents?: SubagentSummary[];
     subagentFeatures?: SubagentFeatures;
-    /** Each turn shows only its prompt, a line while it runs, and its final message; the steps fold. */
+    /** Each turn shows its prompt, the agent's messages and a line while it runs; the steps between the messages fold. */
     fold?: boolean;
     /** A permission or question waits for the user. */
     waiting?: boolean;
@@ -442,26 +442,29 @@
       <!-- The turn runs: what it found is not known yet. -->
       {@const running = busy && last && (turn.prompt?.ended ?? null) === null}
       {@const took = turn.prompt?.started != null && turn.prompt.ended != null ? turn.prompt.ended - turn.prompt.started : null}
+      <!-- The time the turn took only labels its steps when they fold into one row. -->
+      {@const single = turn.parts.filter((part) => part.kind === 'steps').length === 1}
       {#if turn.prompt}{@render row(turn.prompt, undefined)}{/if}
-      {#if !running && turn.steps.length}
-        <!-- Full width, so the steps inside lay out as in the chat. -->
-        <details class="group min-w-0 text-muted">
-          <summary
-            class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
-          >
-            <span class="codicon codicon-checklist"></span>
-            {took !== null && took >= 1000 ? `Worked ${duration(took)} · ` : ''}{turn.steps.length} {turn.steps.length === 1 ? 'step' : 'steps'}
-            <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
-          </summary>
-          <div class="mt-3 flex flex-col gap-3 text-ink *:shrink-0">
-            {#each turn.steps as item, step (item.id)}{@render row(item, turn.steps[step - 1])}{/each}
-          </div>
-        </details>
-      {/if}
-      {#each turn.shown as item (item.id)}{@render row(item, undefined)}{/each}
-      {#if !running}
-        {#each turn.answer as item (item.id)}{@render row(item, undefined)}{/each}
-      {/if}
+      {#each turn.parts as part (part.kind === 'item' ? part.item.id : `steps-${part.id}`)}
+        {#if part.kind === 'item'}
+          {@render row(part.item, undefined)}
+        {:else}
+          <!-- Full width, so the steps inside lay out as in the chat. -->
+          <details class="group min-w-0 text-muted">
+            <summary
+              class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
+            >
+              <span class="codicon codicon-checklist"></span>
+              {single && took !== null && took >= 1000 ? `Worked ${duration(took)} · ` : ''}{part.steps.length}
+              {part.steps.length === 1 ? 'step' : 'steps'}
+              <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
+            </summary>
+            <div class="mt-3 flex flex-col gap-3 text-ink *:shrink-0">
+              {#each part.steps as item, step (item.id)}{@render row(item, part.steps[step - 1])}{/each}
+            </div>
+          </details>
+        {/if}
+      {/each}
       {#if busy && last}
         {@const doing = running ? activity(turn.work) : 'Subagents at work'}
         <div class="flex min-w-0 flex-col gap-0.5 py-1" role="status" aria-label={waiting ? 'The agent waits for you' : 'The agent is working'}>

@@ -374,28 +374,36 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   });
 }
 
+/**
+ * A part of a folded turn: an item that always shows, or the steps between two
+ * of them, folded into one row (its id is its first step's).
+ */
+export type TurnPart = { kind: 'item'; item: ChatItem } | { kind: 'steps'; id: string; steps: ChatItem[] };
+
 /** One prompt and what the agent did for it, as the chat shows it with its steps folded. */
 export interface Turn {
   /** The prompt's id, or `start` for the first page's entries from before its first prompt. */
   id: string;
   prompt: Extract<ChatItem, { kind: 'user' | 'action' }> | null;
-  /** What folds: thinking, tool calls, commentary, plans, subagents, answered requests. */
-  steps: ChatItem[];
-  /** What always shows, in order: files shown to the user, their own commands, a turn that stopped. */
-  shown: ChatItem[];
-  /** The agent's final message: its last, with those right before it. */
-  answer: ChatItem[];
-  /** Everything after the prompt, in order: while the turn runs, its answer is not known yet. */
+  /**
+   * Everything after the prompt, in order. The agent's messages, files shown to
+   * the user, their own commands and a turn that stopped show; what lies between
+   * them (thinking, tool calls, plans, subagents, answered requests) folds.
+   */
+  parts: TurnPart[];
+  /** How many steps folded, over all of the turn's parts. */
+  steps: number;
+  /** Everything after the prompt, in order. */
   work: ChatItem[];
 }
 
-const SHOWN = new Set<ChatItem['kind']>(['show', 'shell', 'stop', 'task']);
+const SHOWN = new Set<ChatItem['kind']>(['assistant', 'show', 'shell', 'stop', 'task']);
 
 /**
- * Splits the chat at each prompt. No agent marks its final answer, so it is the
- * last message of the turn, also when tool calls follow it (e.g. showing a
- * file). Output after a turn ended, with no new prompt (e.g. Claude Code's
- * after its background subagents), belongs to that turn.
+ * Splits the chat at each prompt, and each turn at what shows, so the agent's
+ * messages keep their place between its steps. Output after a turn ended, with
+ * no new prompt (e.g. Claude Code's after its background subagents), belongs
+ * to that turn.
  */
 export function foldTurns(items: ChatItem[]): Turn[] {
   const turns: Turn[] = [];
@@ -403,18 +411,14 @@ export function foldTurns(items: ChatItem[]): Turn[] {
   let prompt: Turn['prompt'] = null;
   const close = () => {
     if (!prompt && !work.length) return;
-    const last = work.findLastIndex((item) => item.kind === 'assistant');
-    let first = last;
-    while (first > 0 && work[first - 1]!.kind === 'assistant') first--;
-    const answer = last === -1 ? [] : work.slice(first, last + 1);
-    turns.push({
-      id: prompt?.id ?? 'start',
-      prompt,
-      steps: work.filter((item) => !SHOWN.has(item.kind) && !answer.includes(item)),
-      shown: work.filter((item) => SHOWN.has(item.kind)),
-      answer,
-      work
-    });
+    const parts: TurnPart[] = [];
+    for (const item of work) {
+      const last = parts.at(-1);
+      if (SHOWN.has(item.kind)) parts.push({ kind: 'item', item });
+      else if (last?.kind === 'steps') last.steps.push(item);
+      else parts.push({ kind: 'steps', id: item.id, steps: [item] });
+    }
+    turns.push({ id: prompt?.id ?? 'start', prompt, parts, steps: work.filter((item) => !SHOWN.has(item.kind)).length, work });
   };
   for (const item of items) {
     if (item.kind === 'user' || item.kind === 'action') {
@@ -429,15 +433,15 @@ export function foldTurns(items: ChatItem[]): Turn[] {
 
 /** A line on what the agent does now, from its latest step; null when there is none yet. */
 export function activity(work: ChatItem[]): string | null {
-  const step = work.findLast((item) => !SHOWN.has(item.kind));
+  const step = work.findLast((item) => item.kind === 'assistant' || !SHOWN.has(item.kind));
   switch (step?.kind) {
     case 'tool':
       return step.description ?? step.title;
     case 'thought':
       return 'Thinking…';
     case 'assistant':
-      // Its newest line, as it streams.
-      return step.text.trim().split('\n').at(-1)!.trim() || null;
+      // The message itself shows as it streams.
+      return 'Writing…';
     case 'plan': {
       const now = step.entries.find((entry) => entry.status === 'in_progress');
       return now ? now.content : 'Planning';

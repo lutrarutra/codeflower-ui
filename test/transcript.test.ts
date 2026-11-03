@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import type { TranscriptEntry } from '../src/protocol/messages.ts';
-import { activity, buildItems, foldTurns, type ChatItem } from '../src/chat/lib/transcript.ts';
+import { activity, buildItems, foldTurns, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
 const chunk = (text: string, messageId?: string) =>
@@ -77,7 +77,10 @@ const tool = (toolCallId: string, title: string, rawInput?: unknown) =>
 const thought = (text: string) => update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } });
 const describe = (items: ChatItem[]) => items.map((item) => (item.kind === 'assistant' ? item.text : item.kind));
 
-test('folds a turn to its prompt, its steps and its final message', () => {
+// Each message shows as one string; the steps between messages fold, as one array.
+const parts = (turn: Turn) => turn.parts.map((part) => (part.kind === 'item' ? describe([part.item])[0] : describe(part.steps)));
+
+test('folds the steps between the agent\'s messages, which keep their place', () => {
   const [turn, ...rest] = foldTurns(
     buildItems([
       prompt('Cluster the data', 10),
@@ -93,25 +96,26 @@ test('folds a turn to its prompt, its steps and its final message', () => {
   assert.equal(turn!.prompt?.kind, 'user');
   assert.equal(turn!.prompt?.started, 10_000);
   assert.equal(turn!.prompt?.ended, 250_000);
-  assert.deepEqual(describe(turn!.steps), ['thought', 'tool', 'Let me check the files.', 'tool']);
-  assert.deepEqual(describe(turn!.answer), ['I found 8 clusters.']);
-  assert.deepEqual(turn!.shown, []);
+  assert.deepEqual(parts(turn!), [['thought', 'tool'], 'Let me check the files.', ['tool'], 'I found 8 clusters.']);
+  assert.equal(turn!.steps, 3);
 });
 
-test('the final message stays the answer when tool calls follow it', () => {
+test('messages in a row show in a row, and steps after the last message fold too', () => {
   const [turn] = foldTurns(
     buildItems([
       prompt('Plot it'),
+      chunk('First.', 'm1'),
+      chunk('Then.', 'm2'),
       tool('a', 'python plot.py'),
-      chunk('Here is the figure.', 'm1'),
+      chunk('Here is the figure.', 'm3'),
       tool('b', 'codeflower-show umap.png'),
       { t: '', kind: 'show', files: ['umap.png'] },
       { t: '', kind: 'turn_end', stopReason: 'end_turn' }
     ])
   );
-  assert.deepEqual(describe(turn!.answer), ['Here is the figure.']);
-  assert.deepEqual(describe(turn!.steps), ['tool', 'tool']);
-  assert.deepEqual(describe(turn!.shown), ['show']);
+  assert.deepEqual(parts(turn!), ['First.', 'Then.', ['tool'], 'Here is the figure.', ['tool'], 'show']);
+  // A folded row keeps the id of its first step, so it stays open while more steps join it.
+  assert.equal((turn!.parts[2] as Extract<TurnPart, { kind: 'steps' }>).id, turn!.work[2]!.id);
 });
 
 test('keeps what the user did and a stopped turn in sight, and pages that start mid-turn', () => {
@@ -127,15 +131,15 @@ test('keeps what the user did and a stopped turn in sight, and pages that start 
     ])
   );
   assert.deepEqual(
-    turns.map((turn) => [turn.id, turn.prompt?.kind ?? null, describe(turn.steps), describe(turn.shown), describe(turn.answer)]),
+    turns.map((turn) => [turn.id, turn.prompt?.kind ?? null, parts(turn)]),
     [
-      ['start', null, ['tool'], [], ['Done before.']],
-      ['2', 'user', ['tool'], ['shell', 'stop'], []]
+      ['start', null, [['tool'], 'Done before.']],
+      ['2', 'user', ['shell', ['tool'], 'stop']]
     ]
   );
 });
 
-test('output after a turn ended, with no new prompt, is that turn\'s answer', () => {
+test('output after a turn ended, with no new prompt, belongs to that turn', () => {
   const [turn] = foldTurns(
     buildItems([
       prompt('Run the subagents'),
@@ -145,8 +149,7 @@ test('output after a turn ended, with no new prompt, is that turn\'s answer', ()
       chunk('Both finished: all good.', 'm2')
     ])
   );
-  assert.deepEqual(describe(turn!.answer), ['Both finished: all good.']);
-  assert.deepEqual(describe(turn!.steps), ['They run in the background.', 'tool']);
+  assert.deepEqual(parts(turn!), ['They run in the background.', ['tool'], 'Both finished: all good.']);
 });
 
 test('says what the agent does now, from its latest step', () => {
@@ -155,7 +158,7 @@ test('says what the agent does now, from its latest step', () => {
   assert.equal(now(tool('a', 'pytest -q')), 'pytest -q');
   assert.equal(now(tool('a', 'pytest -q', { description: 'Run the tests' })), 'Run the tests');
   assert.equal(now(thought('Hm')), 'Thinking…');
-  assert.equal(now(chunk('\nLooking at the data.\nThen more.\n')), 'Then more.');
+  assert.equal(now(chunk('Looking at the data.')), 'Writing…');
   assert.equal(now(tool('a', 'ls'), { t: '', kind: 'show', files: ['a.png'] }), 'ls');
   assert.equal(
     now(
