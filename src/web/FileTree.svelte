@@ -6,6 +6,7 @@
   // saved from the menu (see lib/transfers.svelte.ts).
   import { untrack } from 'svelte';
   import { fileKind, formatSize, kindIcon } from '../chat/lib/files.ts';
+  import OfflineState from '../chat/lib/OfflineState.svelte';
   import { WORKSPACE, type DirectoryEntry, type Mount } from '../client/workerConnection.ts';
   import Transfers from './Transfers.svelte';
   import { app } from './lib/app.svelte.ts';
@@ -340,16 +341,19 @@
       </ul>
     {:else if agent.state === 'connecting'}
       <p class="m-0 px-2 font-sans text-muted"><span class="spinner"></span> Connecting to the sandbox…</p>
-    {:else}
+    {:else if agent.state === 'taken-over' || elsewhere}
       <div class="flex flex-col items-start gap-2 px-2 font-sans">
         <p class="m-0 text-muted">
-          {agent.state === 'taken-over' || elsewhere
-            ? 'This sandbox is open in another window, e.g. VS Code. Browsing its files here moves it to this page; the other window can take it back.'
-            : `Could not reach the sandbox${agent.error ? `: ${agent.error}` : ''}.`}
+          This sandbox is open in another window, e.g. VS Code. Browsing its files here moves it to this page; the other window can take
+          it back.
         </p>
-        <button class="pill pill-small pill-primary" onclick={() => void agent.takeBack().catch(() => undefined)}>
-          {agent.state === 'taken-over' || elsewhere ? 'Open here' : 'Try again'}
-        </button>
+        <button class="pill pill-small pill-primary" onclick={() => void agent.takeBack().catch(() => undefined)}>Open here</button>
+      </div>
+    {:else}
+      <div class="px-2 font-sans text-[1.15em]">
+        <OfflineState detail={agent.error || undefined} size={56}>
+          <button class="pill pill-small pill-primary" onclick={() => void agent.takeBack().catch(() => undefined)}>Try again</button>
+        </OfflineState>
       </div>
     {/if}
   </div>

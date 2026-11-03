@@ -11,6 +11,7 @@ import { appPath, connectorStream, tunnelConnectorId } from '../tunnel/connect.t
 import { PAGE_CACHE } from '../tunnel/keys.ts';
 import { tunnelFetch } from '../tunnel/http.ts';
 import { RefusedError } from '../tunnel/stream.ts';
+import { SAD_FLOWER_TILE_URL } from '../chat/lib/sadFlower.ts';
 
 const worker = self as unknown as ServiceWorkerGlobalScope;
 
@@ -27,7 +28,7 @@ async function errorPage(connectorId: string, title: string, message: string, st
     .join('');
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title><link rel="stylesheet" href="/style.css"><link rel="icon" href="/icon.svg"></head>
-<body><main><header><img src="/icon.svg" alt=""><h1>${escape(title)}</h1></header>
+<body><main><header><img src="${SAD_FLOWER_TILE_URL}" alt=""><h1>${escape(title)}</h1></header>
 <section><p>${escape(message)}</p>${others.length ? '<p>Your other computers show the same sandboxes:</p>' : ''}<div class="row">${links}<a class="button" href="">Try again</a><a class="button" href="/">Your tunnel account</a></div></section></main></body></html>`;
   return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }

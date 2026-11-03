@@ -2,6 +2,7 @@
   import DOMPurify from 'dompurify';
   import type { FeedbackAnnotation, FeedbackFigure, PreviewHostMessage, PreviewState } from '../protocol/messages.ts';
   import Annotator, { type Note } from './lib/Annotator.svelte';
+  import ErrorState from './lib/ErrorState.svelte';
   import { decodeText, fileKind, formatSize, isLocalHref, kindIcon, parseDelimited } from './lib/files.ts';
   import HtmlReport, { type ReportFigure } from './lib/HtmlReport.svelte';
   import Markdown from './lib/Markdown.svelte';
@@ -349,10 +350,7 @@
         : 'overflow-auto px-4 py-3'}"
     >
       {#if preview.error}
-        <div class="m-auto flex max-w-sm flex-col items-center gap-2 py-10 text-center text-muted">
-          <span class="codicon codicon-warning text-2xl! text-pink"></span>
-          <p class="m-0">{preview.error}</p>
-        </div>
+        <ErrorState title="Cannot show this file" detail={preview.error} />
       {:else if !preview.data}
         <div class="flex items-center gap-2 py-10 text-muted">
           <span class="codicon codicon-loading codicon-modifier-spin"></span> Loading…

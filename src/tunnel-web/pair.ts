@@ -3,6 +3,7 @@
 
 import { browserKey, fingerprint, fromBase64url, rememberConnector } from '../tunnel/keys.ts';
 import { openStream } from '../tunnel/stream.ts';
+import { wilt } from './wilt.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -13,6 +14,7 @@ function show(id: 'sign-in' | 'confirm' | 'done'): void {
 function showError(message: string): void {
   $('error').textContent = message;
   $('error').hidden = !message;
+  wilt(!!message);
 }
 
 /** A name for this browser, e.g. "Firefox on Android". */

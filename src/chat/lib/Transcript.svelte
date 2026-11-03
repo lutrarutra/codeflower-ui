@@ -11,6 +11,7 @@
   import { duration } from './time.ts';
   import Skeleton from './Skeleton.svelte';
   import Thumbnail from './Thumbnail.svelte';
+  import OfflineState from './OfflineState.svelte';
   import Tulip from './Tulip.svelte';
 
   /** Tool output that is a unified diff, e.g. from `git diff`. */
@@ -408,6 +409,8 @@
       <div class="skeleton h-8 w-full rounded-xl!"></div>
       <Skeleton lines={['88%', '45%']} />
     </div>
+  {:else if !live}
+    <OfflineState title="Not connected" detail="This chat opens when its sandbox is connected to this window again." />
   {:else}
     <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-8 text-center">
       <Tulip size={72} sway />
@@ -415,13 +418,11 @@
       <p class="m-0 text-muted">
         Ask the agent about your data. It analyses it in its own sandbox, shows you figures and writes up what it finds.
       </p>
-      {#if live}
-        <div class="flex flex-wrap justify-center gap-2 pt-2">
-          {#each suggestions as suggestion (suggestion)}
-            <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
-          {/each}
-        </div>
-      {/if}
+      <div class="flex flex-wrap justify-center gap-2 pt-2">
+        {#each suggestions as suggestion (suggestion)}
+          <button class="pill pill-small" onclick={() => suggest(suggestion)}>{suggestion}</button>
+        {/each}
+      </div>
     </div>
   {/if}
 {/snippet}

@@ -1,6 +1,7 @@
 <script lang="ts">
   // Starting sandboxes on a computer, and the ones that run there. Through the
   // tunnel the page may show several computers: one at a time, chosen on top.
+  import OfflineState from '../../chat/lib/OfflineState.svelte';
   import Skeleton from '../../chat/lib/Skeleton.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { REACH_TEXT } from '../lib/format.ts';
@@ -55,8 +56,16 @@
     </p>
   </header>
 
-  {#if reach !== 'reachable' && reach !== 'loading'}
-    <Status kind={reach === 'unreachable' ? 'warn' : 'bad'} title={REACH_TEXT[reach]} detail={machine.error || undefined} />
+  {#if reach === 'unreachable' || reach === 'offline'}
+    <OfflineState
+      title={reach === 'offline' ? 'This computer is offline' : 'This computer is not answering'}
+      detail={reach === 'offline' ? 'It is off, asleep or not running code flower.' : 'Its sandboxes show as last seen.'}
+      retrying={reach === 'unreachable'}
+    >
+      {#if machine.error}<code class="text-[0.85em] text-muted [overflow-wrap:anywhere]">{machine.error}</code>{/if}
+    </OfflineState>
+  {:else if reach !== 'reachable' && reach !== 'loading'}
+    <Status kind="bad" title={REACH_TEXT[reach]} detail={machine.error || undefined} />
   {/if}
 
   {#key machine}

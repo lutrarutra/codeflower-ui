@@ -2,6 +2,8 @@
   import { tunnelConnectorId } from '../tunnel/connect.ts';
   // A sandbox at a glance: its chats, the agent's sign-in, and how to reach it from VS Code.
   // A tab of its own, and what an empty grid shows.
+  import ErrorState from '../chat/lib/ErrorState.svelte';
+  import OfflineState from '../chat/lib/OfflineState.svelte';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import AgentSetup from './lib/AgentSetup.svelte';
@@ -60,8 +62,10 @@
     {#if !elsewhere}
       <AgentSetup {worker} {agent} boxed />
     {/if}
+  {:else if worker.status === 'unreachable'}
+    <OfflineState title="This sandbox is not answering" detail={worker.error} />
   {:else if worker.error}
-    <p class="m-0 text-red">{worker.error}</p>
+    <ErrorState title={worker.status === 'failed' ? 'This sandbox failed' : 'Something went wrong'} detail={worker.error} />
   {/if}
   {#if worker.url && tunnelConnectorId() === undefined}
     <details class="card p-4">

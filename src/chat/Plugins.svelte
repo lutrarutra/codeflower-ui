@@ -7,6 +7,7 @@
   import { onMount } from 'svelte';
   import type { CatalogPlugin, PluginContents, PluginEntry, PluginsOverview } from '../client/codeflower.ts';
   import type { PluginsHostMessage, PluginsMethod, PluginsWebviewMessage } from '../protocol/plugins.ts';
+  import ErrorState from './lib/ErrorState.svelte';
   import type { Host } from './lib/host.ts';
   import Skeleton from './lib/Skeleton.svelte';
 
@@ -197,7 +198,7 @@
 
   {#if !overview}
     {#if error}
-      <p class="m-0 text-red">{error}</p>
+      <ErrorState title="Cannot load the plugins" detail={error} />
     {:else}
       <Skeleton lines={['70%', '55%', '62%']} class="py-1" />
     {/if}

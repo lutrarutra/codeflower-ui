@@ -3,6 +3,7 @@
 
 import { tunnelConnectorId } from '../tunnel/connect.ts';
 import { pairedConnector } from '../tunnel/keys.ts';
+import { wilt } from './wilt.ts';
 
 function show(message: string, actions: Array<{ label: string; href: string }> = []): void {
   const status = document.getElementById('status')!;
@@ -18,6 +19,7 @@ function show(message: string, actions: Array<{ label: string; href: string }> =
     row.append(link);
   }
   status.replaceChildren(paragraph, row);
+  wilt(true);
 }
 
 async function start(): Promise<void> {
