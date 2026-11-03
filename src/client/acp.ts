@@ -253,12 +253,15 @@ export class AcpClient {
     return [...this.sessions.keys()];
   }
 
-  async newSession(cwd: string): Promise<string> {
+  async newSession(cwd: string): Promise<AttachedSession> {
     const response = await this.rpc.request<NewSessionResponse>('session/new', { cwd, mcpServers: [] });
     const key = this.attach(response.sessionId);
     this.setConfig(key, response);
-    this.setLeftOut(key, (response as SessionSettings)._meta);
-    return key;
+    const meta = (response as SessionSettings)._meta;
+    this.setLeftOut(key, meta);
+    // What the agent sent before the window attached (OpenCode's slash commands) is only in the transcript.
+    const transcriptEntries = meta?.['codeflower/transcriptEntries'];
+    return { key, ...(typeof transcriptEntries === 'number' ? { transcriptEntries } : {}) };
   }
 
   /**

@@ -366,7 +366,12 @@ export class WorkerConnection {
     return this.acp.isAttached(key);
   }
 
-  newSession(): Promise<string> {
+  async newSession(): Promise<string> {
+    return (await this.startSession()).key;
+  }
+
+  /** A new chat, with how many transcript entries came before its live updates. */
+  startSession(): Promise<AttachedSession> {
     return this.acp.newSession(WORKSPACE);
   }
 

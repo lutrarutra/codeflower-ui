@@ -348,3 +348,19 @@ test("hears which chats are open in the agent's terminal UI: on connect, and as 
   await WorkerConnection.connect(older.transport, recorder().handlers, client);
   assert.equal(older.received.some((message) => message.method === '_codeflower/terminal/list'), false);
 });
+
+// OpenCode lists its slash commands while it creates the chat, before the
+// window attached: the window reads them from the transcript, up to here.
+test('a new chat says how many transcript entries came before its live updates', async () => {
+  let entries: number | undefined = 1;
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1.0' }, agentCapabilities: {} }),
+    'session/new': () => ({ sessionId: `s${entries}`, _meta: entries === undefined ? {} : { 'codeflower/transcriptEntries': entries } })
+  });
+  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
+  const started = await connection.startSession();
+  assert.equal(started.transcriptEntries, 1);
+  assert.equal(connection.isAttached(started.key), true);
+  entries = undefined;
+  assert.equal((await connection.startSession()).transcriptEntries, undefined);
+});

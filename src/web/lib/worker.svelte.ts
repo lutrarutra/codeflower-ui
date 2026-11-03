@@ -22,6 +22,7 @@ import {
   RpcError,
   TAKEN_OVER,
   WorkerConnection,
+  type AttachedSession,
   type ChatTerminal,
   type SessionRecord,
   type ShowRequest,
@@ -226,9 +227,9 @@ export class WebWorker {
   async newChat(): Promise<string | undefined> {
     await this.connect();
     const connection = this.connection!;
-    let key: string;
+    let started: AttachedSession;
     try {
-      key = await connection.newSession();
+      started = await connection.startSession();
     } catch (error) {
       if (isAuthRequired(error)) {
         this.events.signIn(this);
@@ -236,9 +237,16 @@ export class WebWorker {
       }
       throw error;
     }
-    await this.applyRememberedMode(key);
+    const { key, transcriptEntries } = started;
+    // Created before anything else is awaited, so no live update finds it missing.
     const chat = this.create(key, 'New chat');
-    chat.post({ type: 'transcript', entries: [] });
+    if (transcriptEntries) {
+      chat.hold();
+      chat.loaded(pageUpTo(await connection.transcriptPage(key).catch(() => EMPTY_TRANSCRIPT), transcriptEntries));
+    } else {
+      chat.post({ type: 'transcript', entries: [] });
+    }
+    await this.applyRememberedMode(key);
     chat.post({ type: 'config', options: connection.config(key) });
     chat.setState({ live: true, steer: connection.canSteer });
     this.noticeMcp(chat, connection.mcpNotice(key));
