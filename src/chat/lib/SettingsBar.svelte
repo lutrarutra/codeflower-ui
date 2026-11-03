@@ -13,7 +13,9 @@
     setAutoApprove,
     subagents = null,
     setSubagents,
-    restartAgent
+    restartAgent,
+    favoriteModels = [],
+    setFavoriteModel
   }: {
     options: SessionConfigOption[];
     set: (configId: string, value: string | boolean) => void;
@@ -22,6 +24,9 @@
     subagents?: SubagentSettingsState | null;
     setSubagents?: (settings: Partial<SubagentSettings>) => void;
     restartAgent?: () => void;
+    /** The models the user pinned for this agent, and pinning one. */
+    favoriteModels?: readonly string[];
+    setFavoriteModel?: (value: string, pinned: boolean) => void;
   } = $props();
 
   const isSelect = (option: SessionConfigOption | undefined): option is SelectOption => option?.type === 'select';
@@ -122,7 +127,7 @@
 {/if}
 
 {#if isSelect(model)}
-  <Picker option={model} choose={(value) => set(model.id, value)}>
+  <Picker option={model} choose={(value) => set(model.id, value)} favorites={favoriteModels} favorite={setFavoriteModel}>
     {#snippet trigger(current)}
       <span class="codicon codicon-hubot"></span>
       <!-- "Default (recommended)" names its model in the description, e.g. "Opus 5.5". -->

@@ -11,6 +11,7 @@
   import GridNode from './GridNode.svelte';
   import { app } from './lib/app.svelte.ts';
   import { foldSteps, setFoldSteps } from './lib/foldSteps.svelte.ts';
+  import { favoriteModels, setFavoriteModel } from './lib/favoriteModels.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
   import { INTERACTIVE } from './lib/previews.svelte.ts';
@@ -252,7 +253,13 @@
     {@const chat = agent.chats[key]}
     {#if chat}
       {#key chat}
-        <App host={chat.host} fold={foldSteps.chat} onFold={(fold) => setFoldSteps('chat', fold)} />
+        <App
+          host={chat.host}
+          fold={foldSteps.chat}
+          onFold={(fold) => setFoldSteps('chat', fold)}
+          favoriteModels={favoriteModels[chat.state.agent?.id ?? ''] ?? []}
+          onFavoriteModel={(value, pinned) => setFavoriteModel(chat.state.agent?.id, value, pinned)}
+        />
       {/key}
     {:else}
       <div class="mx-auto w-full max-w-3xl p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>

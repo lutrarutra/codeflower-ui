@@ -193,6 +193,8 @@ export interface ChatState {
   subagent?: SubagentSummary & { parentTitle?: string };
   /** The chat shows only each turn's prompt and final message, its steps folded (VS Code keeps the choice). */
   foldSteps?: boolean;
+  /** The models the user pinned for this chat's agent, listed first in the model picker (VS Code keeps them). */
+  favoriteModels?: string[];
 }
 
 export interface ChatAction {
@@ -276,6 +278,8 @@ export type WebviewMessage =
   | { type: 'setAutoApprove'; enabled: boolean }
   /** The eye button in the chat's header: fold the turns' steps, or show them. */
   | { type: 'foldSteps'; fold: boolean }
+  /** A model pinned in the model picker, or unpinned, for every chat of this agent. */
+  | { type: 'favoriteModel'; value: string; favorite: boolean }
   | { type: 'action'; id: string }
   | { type: 'removeQueued'; id: string }
   /** Send a queued message now, as `prompt` with `now` does. */

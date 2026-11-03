@@ -7,6 +7,7 @@
   import Skeleton from '../../chat/lib/Skeleton.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { foldSteps, setFoldSteps } from '../lib/foldSteps.svelte.ts';
+  import { favoriteModels, setFavoriteModel } from '../lib/favoriteModels.svelte.ts';
   import { WAITING_FOR, workerTitle } from '../lib/format.ts';
   import ShowPane from './ShowPane.svelte';
 
@@ -156,7 +157,13 @@
       {#if !narrow || front === 'chat'}
         <div class="min-w-0 {narrow || !pane ? 'flex-1' : ''}" style={!narrow && pane ? `width: ${split * 100}%` : undefined}>
           {#if chat}
-            {#key chat}<App host={chat.host} fold={foldSteps.focus} onFold={(fold) => setFoldSteps('focus', fold)} />{/key}
+            {#key chat}<App
+          host={chat.host}
+          fold={foldSteps.focus}
+          onFold={(fold) => setFoldSteps('focus', fold)}
+          favoriteModels={favoriteModels[chat.state.agent?.id ?? ''] ?? []}
+          onFavoriteModel={(value, pinned) => setFavoriteModel(chat.state.agent?.id, value, pinned)}
+        />{/key}
           {:else}
             <div class="mx-auto w-full max-w-3xl p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>
           {/if}

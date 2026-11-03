@@ -30,12 +30,17 @@
   let {
     host,
     fold,
-    onFold
+    onFold,
+    favoriteModels,
+    onFavoriteModel
   }: {
     host: ChatHost;
     /** Whether the turns' steps fold, when the view keeps the choice itself; else the host keeps it (`chat.foldSteps`). */
     fold?: boolean;
     onFold?: (fold: boolean) => void;
+    /** The models pinned for this chat's agent, when the view keeps them itself; else the host keeps them (`chat.favoriteModels`). */
+    favoriteModels?: readonly string[];
+    onFavoriteModel?: (value: string, pinned: boolean) => void;
   } = $props();
   // svelte-ignore state_referenced_locally
   provideChatHost(host);
@@ -49,6 +54,11 @@
   function toggleFold(): void {
     if (onFold) onFold(!folded);
     else send({ type: 'foldSteps', fold: !folded });
+  }
+  const pinnedModels = $derived(favoriteModels ?? chat.favoriteModels ?? []);
+  function pinModel(value: string, pinned: boolean): void {
+    if (onFavoriteModel) onFavoriteModel(value, pinned);
+    else send({ type: 'favoriteModel', value, favorite: pinned });
   }
   let entries = $state<TranscriptEntry[]>([]);
   /** The index of `entries[0]` in the chat's transcript; earlier entries load on request. */
@@ -504,6 +514,8 @@
             subagents={subagentSettings}
             setSubagents={(changed) => send({ type: 'subagentSettings', settings: changed })}
             restartAgent={() => send({ type: 'restartAgent' })}
+            favoriteModels={pinnedModels}
+            setFavoriteModel={pinModel}
           />
         {/if}
       </div>
