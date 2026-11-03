@@ -31,6 +31,7 @@
     host,
     fold,
     onFold,
+    onFocus,
     favoriteModels,
     onFavoriteModel
   }: {
@@ -38,6 +39,8 @@
     /** Whether the turns' steps fold, when the view keeps the choice itself; else the host keeps it (`chat.foldSteps`). */
     fold?: boolean;
     onFold?: (fold: boolean) => void;
+    /** Opens the chat in the page's Focus view; without it, no such button. */
+    onFocus?: () => void;
     /** The models pinned for this chat's agent, when the view keeps them itself; else the host keeps them (`chat.favoriteModels`). */
     favoriteModels?: readonly string[];
     onFavoriteModel?: (value: string, pinned: boolean) => void;
@@ -315,6 +318,11 @@
     >
       <span class="codicon {folded ? 'codicon-eye-closed' : 'codicon-eye'}"></span>
     </button>
+    {#if onFocus}
+      <button type="button" class="link shrink-0" title="Open in Focus" aria-label="Open in Focus" onclick={onFocus}>
+        <span class="codicon codicon-pulse"></span>
+      </button>
+    {/if}
     <span
       class="inline-flex shrink-0 items-center gap-1.5 text-[0.8em] font-semibold {statusLook[status][1]}"
       title={statusLook[status][2]}

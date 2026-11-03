@@ -49,6 +49,9 @@ export function groupOf(chat: FocusChat): FocusGroupId {
   return chat.unseen ? 'done' : 'idle';
 }
 
+const same = (chat: FocusChat, other: { workerId: string; key: string } | null | undefined) =>
+  !!other && chat.workerId === other.workerId && chat.key === other.key;
+
 /** Whether the chat belongs in the list: active, unseen, pinned, or changed recently. */
 export function listed(chat: FocusChat, now: number): boolean {
   if (chat.phase !== 'idle' || chat.unseen || chat.pinned) return true;
@@ -56,10 +59,13 @@ export function listed(chat: FocusChat, now: number): boolean {
   return now - last < RECENT_MS;
 }
 
-/** The listed chats in their groups, each in the order to get to them; empty groups left out. */
-export function arrange(chats: FocusChat[], now: number): FocusGroup[] {
+/**
+ * The listed chats in their groups, each in the order to get to them; empty groups left out.
+ * The chat shown is listed too, e.g. an old one opened from its tab or from the older chats.
+ */
+export function arrange(chats: FocusChat[], now: number, shown?: { workerId: string; key: string } | null): FocusGroup[] {
   const groups: Record<FocusGroupId, FocusChat[]> = { waiting: [], working: [], done: [], idle: [] };
-  for (const chat of chats) if (listed(chat, now)) groups[groupOf(chat)].push(chat);
+  for (const chat of chats) if (listed(chat, now) || same(chat, shown)) groups[groupOf(chat)].push(chat);
   const oldest = (a: FocusChat, b: FocusChat) => a.since - b.since;
   groups.waiting.sort(oldest);
   groups.working.sort(oldest);
@@ -71,8 +77,11 @@ export function arrange(chats: FocusChat[], now: number): FocusGroup[] {
   return (Object.keys(groups) as FocusGroupId[]).filter((id) => groups[id].length).map((id) => ({ id, label: LABELS[id], chats: groups[id] }));
 }
 
-const same = (chat: FocusChat, other: { workerId: string; key: string } | null | undefined) =>
-  !!other && chat.workerId === other.workerId && chat.key === other.key;
+/** The chats the list leaves out, the latest first: what *Older chats* offers. */
+export function older(chats: FocusChat[], now: number, shown?: { workerId: string; key: string } | null): FocusChat[] {
+  const last = (chat: FocusChat) => Math.max(chat.updatedAt ?? 0, chat.since);
+  return chats.filter((chat) => !listed(chat, now) && !same(chat, shown)).sort((a, b) => last(b) - last(a));
+}
 
 /**
  * The chat to go to next: the one waiting longest, else the one that finished

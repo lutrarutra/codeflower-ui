@@ -36,6 +36,22 @@
     }
   }
 
+  // The chats the list leaves out, found by their title or sandbox.
+  const OLDER_SHOWN = 50;
+  let browsing = $state(false);
+  let query = $state('');
+  let search: HTMLInputElement | undefined = $state();
+  const found = $derived.by(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return app.focus.older.filter((chat) => words.every((word) => `${chat.title} ${chat.sandbox}`.toLowerCase().includes(word)));
+  });
+
+  function toggleOlder(): void {
+    browsing = !browsing;
+    query = '';
+    if (browsing) queueMicrotask(() => search?.focus());
+  }
+
   const HINT: Record<string, string> = {
     waiting: 'Agents waiting for an answer, longest first',
     working: 'Agents working on a turn',
@@ -127,5 +143,56 @@
         {ready.length ? 'No agent at work. Start a chat, and it shows here while it works or waits for you.' : 'No sandbox is ready. Start one with + in the rail.'}
       </p>
     {/each}
+
+    {#if app.focus.older.length}
+      <button
+        class="eyebrow mt-2 flex w-full items-center gap-1.5 rounded-md px-2 pt-2 pb-1 text-left text-muted hover:text-ink"
+        title="Chats idle for a while and not pinned, from every sandbox"
+        aria-expanded={browsing}
+        onclick={toggleOlder}
+      >
+        <span class="codicon {browsing ? 'codicon-chevron-down' : 'codicon-chevron-right'} text-[12px]!"></span>
+        Older chats<span class="font-normal">· {app.focus.older.length}</span>
+      </button>
+      {#if browsing}
+        <input
+          class="field my-1 w-full text-[0.9em]"
+          type="search"
+          placeholder="Find by title or sandbox"
+          aria-label="Find an older chat"
+          bind:this={search}
+          bind:value={query}
+          onkeydown={(event) => {
+            if (event.key === 'Escape') browsing = false;
+          }}
+        />
+        <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
+          {#each found.slice(0, OLDER_SHOWN) as chat (chat.workerId + '/' + chat.key)}
+            {@const last = Math.max(chat.updatedAt ?? 0, chat.since)}
+            <li>
+              <button
+                class="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-[0.9em] hover:bg-card pointer-coarse:py-2.5"
+                onclick={() => {
+                  browsing = false;
+                  app.focus.select(chat);
+                  onNavigate();
+                }}
+              >
+                <span class="flex w-full min-w-0 items-center gap-2">
+                  <span class="flex min-w-0 flex-1"><ChatTitle title={chat.title} /></span>
+                  <span class="shrink-0 text-[0.8em] text-muted tabular-nums" title="Changed {age(now - last)} ago">{age(now - last)}</span>
+                </span>
+                <span class="truncate text-[0.85em] text-muted">{chat.sandbox}</span>
+              </button>
+            </li>
+          {:else}
+            <li class="px-2 py-1.5 text-[0.9em] text-muted">No chat matches.</li>
+          {/each}
+          {#if found.length > OLDER_SHOWN}
+            <li class="px-2 py-1 text-[0.85em] text-muted">{found.length - OLDER_SHOWN} more: narrow the search.</li>
+          {/if}
+        </ul>
+      {/if}
+    {/if}
   </div>
 </div>

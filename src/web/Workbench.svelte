@@ -257,6 +257,7 @@
           host={chat.host}
           fold={foldSteps.chat}
           onFold={(fold) => setFoldSteps('chat', fold)}
+          onFocus={() => app.go({ view: 'focus', worker: workerId, session: key })}
           favoriteModels={favoriteModels[chat.state.agent?.id ?? ''] ?? []}
           onFavoriteModel={(value, pinned) => setFavoriteModel(chat.state.agent?.id, value, pinned)}
         />

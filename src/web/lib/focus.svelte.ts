@@ -6,7 +6,7 @@ import { untrack } from 'svelte';
 import type { Worker } from './api.ts';
 import type { Need } from './attention.svelte.ts';
 import { workerTitle } from './format.ts';
-import { arrange, chatPhase, nextUp, step, type ChatPhase, type FocusChat, type FocusGroup } from './focusList.ts';
+import { arrange, chatPhase, nextUp, older, step, type ChatPhase, type FocusChat, type FocusGroup } from './focusList.ts';
 import { chatTab, tabOf } from './workbench.svelte.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -51,6 +51,8 @@ export const chatty = (worker: Worker) => !!worker.url && worker.kind !== 'task'
 
 export class Focus {
   groups = $state<FocusGroup[]>([]);
+  /** The chats the list leaves out, the latest first. */
+  older = $state<FocusChat[]>([]);
   selected = $state<ChatRef | null>(null);
   /** The file the pane beside the chat shows, by the chat's tab. */
   showing = $state<Record<string, string>>({});
@@ -180,6 +182,8 @@ export class Focus {
       }
     }
     for (const tab of this.phases.keys()) if (!present.has(tab)) this.phases.delete(tab);
-    this.groups = arrange(chats, now);
+    const shown = this.selected;
+    this.groups = arrange(chats, now, shown);
+    this.older = older(chats, now, shown);
   }
 }

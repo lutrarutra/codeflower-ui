@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { arrange, chatPhase, listed, nextUp, RECENT_MS, step, type FocusChat } from '../src/web/lib/focusList.ts';
+import { arrange, chatPhase, listed, nextUp, older, RECENT_MS, step, type FocusChat } from '../src/web/lib/focusList.ts';
 
 Reflect.set(globalThis, '$state', Object.assign(<T>(value: T) => value, { snapshot: <T>(value: T): T => structuredClone(value) }));
 const { shownFiles } = await import('../src/web/lib/chatSession.svelte.ts');
@@ -51,6 +51,23 @@ test('idle chats stay listed while recent, pinned or unseen', () => {
 test('pinned idle chats come before the other idle ones', () => {
   const groups = arrange([chat('recent', { updatedAt: NOW }), chat('pinned', { since: 0, pinned: true })], NOW);
   assert.deepEqual(keys(groups[0]?.chats), ['pinned', 'recent']);
+});
+
+test('the chat shown stays listed, however old', () => {
+  const old = chat('old', { since: 0 });
+  assert.deepEqual(keys(arrange([old], NOW)[0]?.chats), []);
+  assert.deepEqual(keys(arrange([old], NOW, { workerId: 'w', key: 'old' })[0]?.chats), ['old']);
+});
+
+test('the older chats are those left out, the latest first, never the one shown', () => {
+  const chats = [
+    chat('recent', { updatedAt: NOW }),
+    chat('oldest', { since: 0 }),
+    chat('old', { since: 0, updatedAt: RECENT_MS }),
+    chat('shown', { since: 0 }),
+    chat('pinned', { since: 0, pinned: true })
+  ];
+  assert.deepEqual(keys(older(chats, NOW, { workerId: 'w', key: 'shown' })), ['old', 'oldest']);
 });
 
 test('next is the chat waiting longest, else the first done one, never the current one', () => {
