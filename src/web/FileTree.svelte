@@ -7,8 +7,10 @@
   import { untrack } from 'svelte';
   import { fileKind, formatSize, kindIcon } from '../chat/lib/files.ts';
   import OfflineState from '../chat/lib/OfflineState.svelte';
+  import { hostPath } from '../client/hostPaths.ts';
   import { WORKSPACE, type DirectoryEntry, type Mount } from '../client/workerConnection.ts';
   import Transfers from './Transfers.svelte';
+  import { copyText } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import { ago, plural, short } from './lib/format.ts';
   import { chooseSink, droppedEntries, filesOfEntries, filesOfInput, transfers, type PickedFile } from './lib/transfers.svelte.ts';
@@ -168,6 +170,8 @@
 
   type Target = { path: string; type: 'file' | 'directory'; writable: boolean };
   let menu = $state<(Target & { x: number; y: number }) | null>(null);
+  // Where the menu's file is on the machine that runs the sandbox, if it is from there.
+  const menuHost = $derived(menu && hostPath(agent.status, menu.path));
 
   function openMenu(event: MouseEvent, target: Target): void {
     event.preventDefault();
@@ -202,7 +206,7 @@
     };
   }
 
-  function choose(action: 'files' | 'folder' | 'download' | 'copy'): void {
+  function choose(action: 'files' | 'folder' | 'download' | 'copy-sandbox' | 'copy-host'): void {
     const target = menu!;
     menu = null;
     if (action === 'files' || action === 'folder') {
@@ -219,7 +223,8 @@
         (error: unknown) => (problem = error instanceof Error ? error.message : String(error))
       );
     } else {
-      void navigator.clipboard?.writeText(target.path).catch(() => undefined);
+      const path = action === 'copy-host' ? hostPath(agent.status, target.path) : target.path;
+      if (path) void copyText(path).catch(() => undefined);
     }
   }
 
@@ -382,7 +387,7 @@
     role="menu"
     aria-label={menu.type === 'directory' ? 'Folder' : 'File'}
     class="card fixed z-50 flex w-52 flex-col p-1 font-sans text-[0.9em]"
-    style="left: {Math.min(menu.x, innerWidth - 216)}px; top: {Math.min(menu.y, innerHeight - 160)}px"
+    style="left: {Math.min(menu.x, innerWidth - 216)}px; top: {Math.min(menu.y, innerHeight - 200)}px"
   >
     {#if menu.type === 'directory'}
       {#if canTransfer}
@@ -405,8 +410,18 @@
         <span class="codicon codicon-cloud-download"></span>Download…
       </button>
     {/if}
-    <button role="menuitem" class={MENU_ITEM} onclick={() => choose('copy')}>
-      <span class="codicon codicon-copy"></span>Copy path
+    <button role="menuitem" class={MENU_ITEM} title={menu.path} onclick={() => choose('copy-sandbox')}>
+      <span class="codicon codicon-copy"></span>Copy path (sandbox)
+    </button>
+    <button
+      role="menuitem"
+      class={MENU_ITEM}
+      disabled={!menuHost}
+      title={menuHost ? `${menuHost}\non the machine that runs the sandbox` : 'Not in a folder from the machine that runs the sandbox'}
+      onclick={() => choose('copy-host')}
+    >
+      <span class="codicon codicon-copy"></span>Copy path (host)
+      {#if !menuHost}<span class="ml-auto text-[0.85em] text-muted">not mounted</span>{/if}
     </button>
   </div>
 {/if}
