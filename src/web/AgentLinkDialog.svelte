@@ -8,7 +8,7 @@
 
   let dialog: HTMLDialogElement | undefined = $state();
   const link = $derived(app.signIn.links[0]);
-  const agent = $derived(link ? app.agent(link.workerId).status?.agentLabel : undefined);
+  const agent = $derived(link?.agent ? app.agent(link.workerId).agent(link.agent)?.name : undefined);
   const page = $derived(link ? externalUrl(link.request.url) : undefined);
 
   $effect(() => {

@@ -119,7 +119,8 @@ export interface WorkerHandlers {
   /** The session's settings the agent offers (mode, model, effort, …) changed. */
   config(sessionKey: string, options: SessionConfigOption[]): void;
   /** Resolves when the user accepted or declined. */
-  elicitUrl(request: UrlElicitation): Promise<'accept' | 'decline'>;
+  /** `agent` is the one asking. */
+  elicitUrl(request: UrlElicitation, agent?: AgentName): Promise<'accept' | 'decline'>;
   elicitationComplete(elicitationId: string): void;
   /** The agent ran `codeflower-show`, or asks to approve a plan: the user should see these files. */
   show(request: ShowRequest): void;
@@ -299,7 +300,9 @@ export class WorkerConnection {
     const rpc = new RpcConnection(await this.open(agent));
     const handlers = this.handlers;
     let link: AgentLink | undefined;
-    const acp = new AcpClient(rpc, handlers, (sessionId) => sessionKey(agent, sessionId));
+    const acp = new AcpClient(rpc, { ...handlers, elicitUrl: (request) => handlers.elicitUrl(request, agent) }, (sessionId) =>
+      sessionKey(agent, sessionId)
+    );
     const bridge = new CodeflowerExtensions(rpc, {
       ...this.sharedHandlers(() => link),
       activity: (activity) => {

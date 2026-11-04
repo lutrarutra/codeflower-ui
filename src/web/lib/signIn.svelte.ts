@@ -21,6 +21,8 @@ export type SignInStep =
 /** A link the agent asks the user to open, e.g. to sign in in the browser. */
 export interface AgentLink {
   workerId: string;
+  /** The agent asking, when known. */
+  agent?: AgentName;
   request: UrlElicitation;
   answer: (action: 'accept' | 'decline') => void;
 }
@@ -145,11 +147,12 @@ export class SignIn {
 
   // ---- routed from the sandboxes ----
 
-  elicitUrl(worker: WebWorker, request: UrlElicitation): Promise<'accept' | 'decline'> {
+  elicitUrl(worker: WebWorker, request: UrlElicitation, agent?: AgentName): Promise<'accept' | 'decline'> {
     if (!isWebLink(request.url)) return Promise.resolve('decline');
     return new Promise((resolve) => {
       const link: AgentLink = {
         workerId: worker.id,
+        agent,
         request,
         answer: (action) => {
           this.links = this.links.filter((candidate) => candidate.request !== request);

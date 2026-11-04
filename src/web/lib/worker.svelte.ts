@@ -55,7 +55,7 @@ export interface WorkerEvents {
   openChat(worker: WebWorker, key: string): void;
   /** The agent should sign in, e.g. a chat of it cannot start without. */
   signIn(worker: WebWorker, agent: AgentName): void;
-  elicitUrl(worker: WebWorker, request: UrlElicitation): Promise<'accept' | 'decline'>;
+  elicitUrl(worker: WebWorker, request: UrlElicitation, agent?: AgentName): Promise<'accept' | 'decline'>;
   elicitationComplete(worker: WebWorker, elicitationId: string): void;
   terminalOutput(terminalId: string, data: string, replayed: boolean): void;
   terminalExit(terminalId: string, exitCode: number): void;
@@ -728,7 +728,7 @@ export class WebWorker {
       question: (key: string, request: PendingQuestion | null) => this.chats[key]?.post({ type: 'question', request }),
       busy: (key: string, busy: boolean) => this.chats[key]?.setState({ busy }),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),
-      elicitUrl: (request: UrlElicitation) => this.events.elicitUrl(this, request),
+      elicitUrl: (request: UrlElicitation, agent?: AgentName) => this.events.elicitUrl(this, request, agent),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),
       show: (request: ShowRequest) => this.events.show(this, request),
       terminalOutput: (terminalId: string, data: string, replayed?: boolean) => this.events.terminalOutput(terminalId, data, replayed === true),

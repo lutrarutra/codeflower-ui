@@ -110,7 +110,7 @@ class AppState {
     openFile: (worker, chat, path) => void this.previews.openPath(worker, path, chat.key),
     openChat: (worker, key) => this.workbench.openChat(worker.id, key),
     signIn: (worker, agent) => void this.signIn.start(worker, agent),
-    elicitUrl: (worker, request) => this.signIn.elicitUrl(worker, request),
+    elicitUrl: (worker, request, agent) => this.signIn.elicitUrl(worker, request, agent),
     elicitationComplete: (worker, elicitationId) => this.signIn.elicitationComplete(worker, elicitationId),
     terminalOutput: (terminalId, data, replayed) => this.terminals.output(terminalId, data, replayed),
     terminalExit: (terminalId, exitCode) => this.terminals.exit(terminalId, exitCode),
