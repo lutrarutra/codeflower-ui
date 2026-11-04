@@ -1,7 +1,9 @@
 <script lang="ts">
-  // The models of an OpenAI-compatible endpoint that the agent's model picker offers: pinned from those the
+  // The models of an OpenAI-compatible endpoint that the agent's model picker offers: selected from those the
   // endpoint lists, which can be hundreds, or added by hand, each with its settings; at first those saved.
-  // Also tests that the endpoint answers and takes the key, the saved one when `keySaved` and none is typed.
+  // A pinned model is selected and also stands at the top of the chat's picker. The ones not selected stay
+  // listed here only. Also tests that the endpoint answers and takes the key, the saved one when `keySaved`
+  // and none is typed.
   import { untrack } from 'svelte';
   import type { EndpointCheck, EndpointModel, WorkerConnection } from '../client/workerConnection.ts';
   import type { AgentName } from '../protocol/messages.ts';
@@ -13,7 +15,9 @@
     apiKey,
     keySaved = false,
     saved = [],
-    models = $bindable([])
+    savedPins = [],
+    models = $bindable([]),
+    pins = $bindable([])
   }: {
     connection: WorkerConnection | undefined;
     /** The agent whose endpoint this is. */
@@ -22,7 +26,11 @@
     apiKey: string;
     keySaved?: boolean;
     saved?: EndpointModel[];
+    /** The ids of the models pinned at first. */
+    savedPins?: string[];
     models?: EndpointModel[];
+    /** The ids of the models to pin, all of them in `models`. */
+    pins?: string[];
   } = $props();
 
   /** A model the picker offers, with the settings to save: listed ones keep their id, added ones type it. */
@@ -38,8 +46,8 @@
   }
   let keys = 0;
 
-  // An endpoint that lists at most this many has them all pinned at first, and none otherwise.
-  const PIN_ALL_UP_TO = 8;
+  // An endpoint that lists at most this many has them all selected at first, and none otherwise.
+  const SELECT_ALL_UP_TO = 8;
 
   const url = $derived(baseURL.trim());
   const urlReady = $derived(/^https?:\/\/\S+$/.test(url));
@@ -53,20 +61,26 @@
   let listedFrom = $state('');
   let listError = $state('');
   let filter = $state('');
-  let pinnedOnly = $state(false);
+  let selectedOnly = $state(false);
 
   let rows = $state<Row[]>([]);
+  let pinList = $state<string[]>([]);
   $effect.pre(() => {
     const from = saved;
-    untrack(() => (rows = from.map(toRow)));
+    const pinnedFrom = savedPins;
+    untrack(() => {
+      rows = from.map(toRow);
+      pinList = [...pinnedFrom];
+    });
   });
 
   const available = $derived(listedFrom === url ? listed : []);
-  const pinned = $derived(new Set(rows.filter((row) => row.listed).map((row) => row.id)));
+  const selected = $derived(new Set(rows.map((row) => row.id.trim()).filter(Boolean)));
+  const pinned = $derived(new Set(pinList.filter((id) => selected.has(id))));
   const shown = $derived(
     available.filter(
       (model) =>
-        (!pinnedOnly || pinned.has(model.id)) &&
+        (!selectedOnly || selected.has(model.id)) &&
         (!filter.trim() || `${model.id} ${model.name ?? ''}`.toLowerCase().includes(filter.trim().toLowerCase()))
     )
   );
@@ -81,6 +95,15 @@
         input: row.image ? ['text', 'image'] : ['text'],
         reasoning: row.thinks
       }));
+    pins = [...pinned];
+  });
+
+  // With the key saved, the list is fetched at once, so the models not selected show too.
+  let fetchedFirst = false;
+  $effect(() => {
+    if (fetchedFirst || !keySaved || !urlReady || !connection) return;
+    fetchedFirst = true;
+    untrack(() => void fetchModels());
   });
 
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -111,9 +134,9 @@
       listed = found;
       listedFrom = from;
       filter = '';
-      pinnedOnly = false;
+      selectedOnly = false;
       // The models already offered stay, listed or not.
-      if (found.length <= PIN_ALL_UP_TO) rows = [...rows, ...found.filter((model) => !rows.some((row) => row.id === model.id)).map(toRow)];
+      if (!rows.length && found.length <= SELECT_ALL_UP_TO) rows = found.map(toRow);
       if (!found.length) listError = 'The endpoint lists no models. Add them by hand below.';
     } catch (error) {
       listError = `${message(error)}. Add the models by hand below.`;
@@ -134,14 +157,33 @@
     };
   }
 
-  function pin(model: EndpointModel, on: boolean): void {
-    rows = on ? [...rows.filter((row) => row.id !== model.id), toRow(model)] : rows.filter((row) => !(row.listed && row.id === model.id));
+  /** Offers the model in the chat's picker, or leaves it out (and unpins it). */
+  function select(model: EndpointModel, on: boolean): void {
+    if (on) {
+      if (!selected.has(model.id)) rows = [...rows, toRow(model)];
+    } else {
+      rows = rows.filter((row) => row.id.trim() !== model.id);
+      pinList = pinList.filter((id) => id !== model.id);
+    }
   }
 
-  /** Hides every listed model, or pins those shown when none is pinned. */
+  /** Pins the model at the top of the chat's picker, which selects it, or unpins it. */
+  function pin(id: string, on: boolean, model?: EndpointModel): void {
+    if (on && model) select(model, true);
+    pinList = on ? [...pinList.filter((other) => other !== id), id] : pinList.filter((other) => other !== id);
+  }
+
+  const allShownSelected = $derived(shown.length > 0 && shown.every((model) => selected.has(model.id)));
+
+  /** Selects every model shown, or unselects them all when they all are. */
   function toggleAll(): void {
-    if (pinned.size) rows = rows.filter((row) => !row.listed);
-    else rows = [...rows, ...shown.filter((model) => !rows.some((row) => row.id === model.id)).map(toRow)];
+    if (allShownSelected) {
+      const ids = new Set(shown.map((model) => model.id));
+      rows = rows.filter((row) => !ids.has(row.id.trim()));
+      pinList = pinList.filter((id) => !ids.has(id));
+    } else {
+      rows = [...rows, ...shown.filter((model) => !selected.has(model.id)).map(toRow)];
+    }
   }
 
   function add(): void {
@@ -150,6 +192,20 @@
 
   const contextText = (tokens: number) => (tokens >= 1024 ? `${Math.round(tokens / 1024)}k` : String(tokens));
 </script>
+
+{#snippet pinButton(id: string, on: boolean, model?: EndpointModel)}
+  <button
+    type="button"
+    class="grid size-7 shrink-0 place-items-center rounded-lg disabled:opacity-30 {on ? 'bg-indigo/15 text-indigo' : 'text-muted hover:bg-soft-line hover:text-ink'}"
+    aria-pressed={on}
+    title={on ? 'Unpin it from the top of the chat’s model picker' : 'Pin it to the top of the chat’s model picker'}
+    aria-label="{on ? 'Unpin' : 'Pin'} {id || 'the model'}"
+    disabled={!id}
+    onclick={() => pin(id, !on, model)}
+  >
+    <span class="codicon {on ? 'codicon-pinned' : 'codicon-pin'}"></span>
+  </button>
+{/snippet}
 
 {#snippet line(ok: boolean | undefined, text: string)}
   <li class="flex items-start gap-1.5">
@@ -209,26 +265,26 @@
           aria-label="Filter the models"
           spellcheck="false"
         />
-        <label class="flex items-center gap-1.5 text-[0.85em] text-muted"><input type="checkbox" bind:checked={pinnedOnly} /> Pinned only</label>
-        <button type="button" class="pill pill-small" onclick={toggleAll} disabled={!pinned.size && !shown.length}
-          >{pinned.size ? `Hide all (${pinned.size} pinned)` : `Pin all ${shown.length} shown`}</button
+        <label class="flex items-center gap-1.5 text-[0.85em] text-muted"><input type="checkbox" bind:checked={selectedOnly} /> Selected only</label>
+        <button type="button" class="pill pill-small" onclick={toggleAll} disabled={!shown.length}
+          >{allShownSelected ? 'Unselect' : 'Select'} all {shown.length}{filter.trim() ? ' shown' : ''}</button
         >
       </div>
       <ul class="m-0 flex max-h-56 list-none flex-col overflow-auto p-0">
         {#each shown as model (model.id)}
-          {@const on = pinned.has(model.id)}
+          {@const on = selected.has(model.id)}
+          {@const top = pinned.has(model.id)}
           <li class="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-soft-line">
-            <button
-              type="button"
-              class="grid size-7 shrink-0 place-items-center rounded-lg {on ? 'text-indigo' : 'text-muted hover:text-ink'}"
-              aria-pressed={on}
-              title={on ? 'Hide it from the model picker' : 'Pin it to the model picker'}
-              aria-label="{on ? 'Hide' : 'Pin'} {model.id}"
-              onclick={() => pin(model, !on)}
-            >
-              <span class="codicon {on ? 'codicon-pinned' : 'codicon-pin'}"></span>
-            </button>
-            <span class="flex min-w-0 flex-1 flex-col leading-tight">
+            <input
+              type="checkbox"
+              class="shrink-0"
+              checked={on}
+              title={on ? 'Offered in the chat’s model picker: uncheck to leave it out' : 'Offer it in the chat’s model picker'}
+              aria-label="Select {model.id}"
+              onchange={(event) => select(model, event.currentTarget.checked)}
+            />
+            {@render pinButton(model.id, top, model)}
+            <span class="flex min-w-0 flex-1 flex-col leading-tight {on ? '' : 'text-muted'}">
               <span class="truncate font-mono text-[0.9em]" title={model.id}>{model.id}</span>
               {#if model.name}<span class="truncate text-[0.8em] text-muted">{model.name}</span>{/if}
             </span>
@@ -245,10 +301,13 @@
 
   <div class="flex flex-col gap-1">
     <span class="text-[0.9em] text-muted">
-      {rows.length ? `The model picker offers ${rows.length === 1 ? 'this model' : `these ${rows.length} models`}:` : 'Pin models above, or add them by hand.'}
+      {rows.length
+        ? `The chat’s model picker offers ${rows.length === 1 ? 'this model' : `these ${rows.length} models`}${pinned.size ? ', the pinned ones at the top' : ''}:`
+        : 'Select models above, or add them by hand.'}
     </span>
     {#each rows as row (row.key)}
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border-[1.5px] border-soft-line px-2 py-1.5">
+        {@render pinButton(row.id.trim(), pinned.has(row.id.trim()))}
         {#if row.listed}
           <span class="min-w-0 flex-1 truncate font-mono text-[0.9em]" title={row.name ?? row.id}>{row.id}</span>
         {:else}
@@ -273,7 +332,10 @@
           class="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-soft-line hover:text-ink"
           title="Leave it out of the model picker"
           aria-label="Remove {row.id || 'the model'}"
-          onclick={() => (rows = rows.filter((other) => other !== row))}
+          onclick={() => {
+            rows = rows.filter((other) => other !== row);
+            pinList = pinList.filter((id) => id !== row.id.trim());
+          }}
         >
           <span class="codicon codicon-close"></span>
         </button>

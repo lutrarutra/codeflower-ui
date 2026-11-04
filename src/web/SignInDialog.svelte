@@ -6,6 +6,7 @@
   import type { EndpointModel, SavedCredentials } from '../client/workerConnection.ts';
   import EndpointModels from './EndpointModels.svelte';
   import { app } from './lib/app.svelte.ts';
+  import { favoriteModels, setFavoriteModel } from './lib/favoriteModels.svelte.ts';
 
   const signIn = app.signIn;
   let dialog: HTMLDialogElement | undefined = $state();
@@ -16,8 +17,25 @@
   let reasoningEfforts = $state('low, medium, high');
   /** The sign-in terminal ended without signing in. */
   let failed = $state(false);
-  /** The endpoint's models the agent's picker offers, with their settings. */
+  /** The endpoint's models the agent's picker offers, with their settings, and those pinned at its top. */
   let models = $state<EndpointModel[]>([]);
+  let pins = $state<string[]>([]);
+
+  // The chat's picker pins by the agent's values, which for dsh's endpoint models are JSON
+  // [provider, model] (parseModel in its adapter).
+  const ENDPOINT_PROVIDER = 'codeflower-openai-compat';
+  const pickerValue = (id: string) => JSON.stringify([ENDPOINT_PROVIDER, id]);
+  function endpointModelOf(value: string): string | undefined {
+    try {
+      const [provider, model] = JSON.parse(value) as unknown[];
+      return provider === ENDPOINT_PROVIDER && typeof model === 'string' ? model : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  const savedPins = $derived(
+    (favoriteModels[signIn.agent] ?? []).map(endpointModelOf).filter((id): id is string => id !== undefined)
+  );
   /** What the agent has saved, to edit: the form starts from it. */
   let saved = $state<SavedCredentials | undefined>();
   /** A blank key keeps the saved one, for the URL it was saved with only. */
@@ -70,6 +88,10 @@
   function submitKeys(event: SubmitEvent): void {
     event.preventDefault();
     if (!keysReady) return;
+    if (provider === 'compatible') {
+      for (const id of savedPins) if (!pins.includes(id)) setFavoriteModel(signIn.agent, pickerValue(id), false);
+      for (const id of pins) if (!savedPins.includes(id)) setFavoriteModel(signIn.agent, pickerValue(id), true);
+    }
     void signIn.saveKeys(
       provider === 'deepseek'
         ? { deepseekApiKey: apiKey.trim() }
@@ -154,7 +176,9 @@
             {apiKey}
             keySaved={keepsKey}
             saved={saved?.openaiCompatible?.models ?? []}
+            {savedPins}
             bind:models
+            bind:pins
           />
           <label class="flex flex-col gap-1">
             <span class="text-[0.9em] text-muted">Reasoning effort values for the models that think (comma-separated; leave blank to hide the picker)</span>
