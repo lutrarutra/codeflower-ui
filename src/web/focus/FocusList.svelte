@@ -1,11 +1,10 @@
 <script lang="ts">
   // The Focus view's sidebar: the chats of every sandbox, those that need the user first.
-  import { untrack } from 'svelte';
   import AgentIcon from '../../chat/lib/AgentIcon.svelte';
   import ChatTitle from '../../chat/lib/ChatTitle.svelte';
-  import { agentPresentation, type AgentName } from '../../protocol/messages.ts';
+  import { agentPresentation } from '../../protocol/messages.ts';
   import { app } from '../lib/app.svelte.ts';
-  import { newChatAgent, rememberAgent } from '../lib/newChatAgent.ts';
+  import NewChatDialog from '../NewChatDialog.svelte';
   import { agentOfKey } from '../../client/workerConnection.ts';
   import { chatty } from '../lib/focus.svelte.ts';
   import { WAITING_FOR, workerTitle } from '../lib/format.ts';
@@ -23,14 +22,7 @@
 
   const ready = $derived(app.workers.filter((worker) => chatty(worker) && worker.status === 'ready'));
   let choosing = $state(false);
-  let creating = $state(false);
-  let error = $state('');
-
-  // The menu lists the sandboxes' agents, which connecting to them tells (it starts no agent).
-  $effect(() => {
-    if (!choosing) return;
-    for (const worker of untrack(() => ready)) void app.agent(worker.id).connect().catch(() => undefined);
-  });
+  let newChat: NewChatDialog | undefined = $state();
 
   /** A chat's agent, as its row shows it. */
   function chatAgent(workerId: string, key: string) {
@@ -38,32 +30,12 @@
     return agentPresentation(id, app.agent(workerId).agent(id));
   }
 
-  /** A new chat in the sandbox, with `name` or the agent remembered for its project. */
-  async function newChat(workerId: string, name?: AgentName): Promise<void> {
+  /** A new chat: in the one sandbox ready, else in the one chosen from the menu. */
+  function startChat(workerId?: string): void {
     choosing = false;
-    const sandbox = app.agent(workerId);
-    const project = app.workers.find((worker) => worker.id === workerId)?.project || workerId;
-    const agent = newChatAgent(sandbox.agents, project, name);
-    if (!agent) {
-      error = 'No agent of the sandbox can start a chat';
-      return;
-    }
-    rememberAgent(project, agent);
-    if (sandbox.agent(agent)?.signedIn === false) {
-      void app.signIn.start(sandbox, agent);
-      return;
-    }
-    creating = true;
-    error = '';
-    try {
-      const key = await sandbox.newChat(agent);
-      if (key) app.go({ view: 'focus', worker: workerId, session: key });
-      onNavigate();
-    } catch (failure) {
-      error = failure instanceof Error ? failure.message : String(failure);
-    } finally {
-      creating = false;
-    }
+    const id = workerId ?? (ready.length === 1 ? ready[0].id : undefined);
+    if (id) newChat?.open(id);
+    else choosing = true;
   }
 
   // The chats the list leaves out, found by their title or sandbox.
@@ -94,14 +66,14 @@
   <div class="relative px-2 pt-2 pb-1">
     <button
       class="pill pill-small pill-primary w-full justify-center"
-      disabled={creating || !ready.length}
-      title={ready.length ? 'Start a chat in a sandbox of your choice' : 'No sandbox is ready'}
-      aria-haspopup="menu"
-      aria-expanded={choosing}
-      onclick={() => (choosing = !choosing)}
+      disabled={!ready.length}
+      title={ready.length ? undefined : 'No sandbox is ready'}
+      aria-haspopup={ready.length > 1 ? 'menu' : 'dialog'}
+      aria-expanded={ready.length > 1 ? choosing : undefined}
+      onclick={() => (choosing ? (choosing = false) : startChat())}
     >
-      <span class="codicon codicon-add"></span>{creating ? 'Starting…' : 'New chat'}
-      <span class="codicon codicon-chevron-down text-[12px]!"></span>
+      <span class="codicon codicon-add"></span>New chat
+      {#if ready.length > 1}<span class="codicon codicon-chevron-down text-[12px]!"></span>{/if}
     </button>
     {#if choosing}
       <button class="fixed inset-0 z-40 cursor-default" aria-label="Close the menu" onclick={() => (choosing = false)}></button>
@@ -110,37 +82,17 @@
         {#each ready as worker (worker.id)}
           {@const [name, where] = workerTitle(worker)}
           {@const busy = (worker.activity?.working ?? 0) + (worker.activity?.waiting ?? 0)}
-          {@const agents = app.agent(worker.id).agents}
-          <div class="flex flex-col rounded-md hover:bg-soft-line">
-            <button role="menuitem" class="flex flex-col px-2 pt-1.5 text-left {agents.length > 1 ? 'pb-0.5' : 'pb-1.5'}" onclick={() => void newChat(worker.id)}>
-              <span class="flex items-center gap-2">
-                <StatusDot {worker} />
-                <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
-                {#if busy}<span class="shrink-0 text-[0.85em] text-muted">{busy} at work</span>{/if}
-              </span>
-              <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
-            </button>
-            {#if agents.length > 1}
-              <span class="flex gap-1 pb-1.5 pl-[1.6rem]">
-                {#each agents as agent (agent.id)}
-                  <button
-                    role="menuitem"
-                    class="grid size-7 place-items-center rounded-md hover:bg-card disabled:opacity-30"
-                    disabled={!!agent.unavailable}
-                    title={agent.unavailable ? `${agent.name}: ${agent.unavailable}` : `New chat with ${agent.name}${agent.signedIn ? '' : ' (sign it in first)'}`}
-                    aria-label="New chat with {agent.name}"
-                    onclick={() => void newChat(worker.id, agent.id)}
-                  >
-                    <AgentIcon agent={agentPresentation(agent.id, agent)} size="1.05em" />
-                  </button>
-                {/each}
-              </span>
-            {/if}
-          </div>
+          <button role="menuitem" class="flex flex-col rounded-md px-2 py-1.5 text-left hover:bg-soft-line" onclick={() => startChat(worker.id)}>
+            <span class="flex items-center gap-2">
+              <StatusDot {worker} />
+              <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
+              {#if busy}<span class="shrink-0 text-[0.85em] text-muted">{busy} at work</span>{/if}
+            </span>
+            <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
+          </button>
         {/each}
       </div>
     {/if}
-    {#if error}<p class="m-0 px-1 pt-1 text-[0.85em] text-red">{error}</p>{/if}
   </div>
 
   <div class="min-h-0 flex-1 overflow-auto px-2 pb-2">
@@ -247,3 +199,5 @@
     {/if}
   </div>
 </div>
+
+<NewChatDialog bind:this={newChat} onstarted={(workerId, key) => app.go({ view: 'focus', worker: workerId, session: key })} {onNavigate} />

@@ -9,20 +9,21 @@ Object.assign(globalThis, {
   localStorage: { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => store.set(key, value) }
 });
 
-test('a new chat starts with the chosen agent, then the remembered one, else the first signed in that can run', () => {
+test('a new chat starts with the chosen agent, then the remembered one, else the first that can run and is signed in', () => {
   const agents = [
     agentState('claude', { unavailable: 'Claude Code is not installed in this sandbox.' }),
     agentState('codex', { signedIn: false }),
     agentState('dsh')
   ];
   assert.equal(newChatAgent(agents, 'study'), 'dsh');
-  assert.equal(newChatAgent(agents, 'study', 'codex'), 'codex');
-  // One that cannot run here is never chosen.
+  assert.equal(newChatAgent(agents, 'study', 'opencode'), 'dsh');
+  // One that cannot run here, or is not signed in, is never chosen.
   assert.equal(newChatAgent(agents, 'study', 'claude'), 'dsh');
-  rememberAgent('study', 'codex');
-  assert.equal(newChatAgent(agents, 'study'), 'codex');
-  assert.equal(newChatAgent(agents, 'other'), 'dsh');
-  // None signed in: the first that can run.
-  assert.equal(newChatAgent([agentState('codex', { signedIn: false })], 'x'), 'codex');
+  assert.equal(newChatAgent(agents, 'study', 'codex'), 'dsh');
+  rememberAgent('study', 'opencode');
+  assert.equal(newChatAgent([...agents, agentState('opencode')], 'study'), 'opencode');
+  assert.equal(newChatAgent([...agents, agentState('opencode')], 'other'), 'dsh');
+  // None signed in: none.
+  assert.equal(newChatAgent([agentState('codex', { signedIn: false })], 'x'), undefined);
   assert.equal(newChatAgent([], 'x'), undefined);
 });

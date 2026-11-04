@@ -1,26 +1,20 @@
 <script lang="ts">
-  // The chosen sandbox's chats, the sidebar's view of it: the agent and a new chat, then the chats, latest first.
+  // The chosen sandbox's chats, the sidebar's view of it: a new chat, then the chats, latest first.
   import { untrack } from 'svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import AgentIcon from '../chat/lib/AgentIcon.svelte';
-  import AgentSwitch from './AgentSwitch.svelte';
+  import NewChatDialog from './NewChatDialog.svelte';
   import { ago } from './lib/format.ts';
-  import { newChatAgent, rememberAgent } from './lib/newChatAgent.ts';
   import { chatTab, endDrag, startDrag, tabOf } from './lib/workbench.svelte.ts';
   import { agentPresentation, type AgentName } from '../protocol/messages.ts';
 
   let { worker, onNavigate }: { worker: Worker; onNavigate: () => void } = $props();
   const agent = $derived(app.agent(worker.id));
-  let creating = $state(false);
   let error = $state('');
-  const project = $derived(worker.project || worker.id);
-  /** The agent the user chose here; else the one remembered for the project. */
-  let chosen = $state<AgentName | undefined>();
-  const choice = $derived(newChatAgent(agent.agents, project, chosen));
-  const chosenAgent = $derived(choice ? agent.agent(choice) : undefined);
+  let newChat: NewChatDialog | undefined = $state();
 
   // The list comes from the app without connecting; once connected, from the sandbox, which also
   // tells its agents. Connecting starts no agent.
@@ -35,11 +29,6 @@
       if (!listed && !current.connected) current.sessionsKnown = true;
     });
   });
-
-  function select(name: AgentName): void {
-    chosen = name;
-    rememberAgent(project, name);
-  }
 
   /** The chat's agent as its row shows it. */
   function presentation(harness: AgentName) {
@@ -73,47 +62,12 @@
       error = failure instanceof Error ? failure.message : String(failure);
     }
   }
-
-  async function newChat(): Promise<void> {
-    const name = choice;
-    if (!name) return;
-    // An agent not signed in yet signs in first.
-    if (chosenAgent && !chosenAgent.signedIn) {
-      void app.signIn.start(agent, name);
-      return;
-    }
-    creating = true;
-    error = '';
-    try {
-      const key = await agent.newChat(name);
-      if (key) app.go({ view: 'chat', worker: worker.id, session: key });
-      onNavigate();
-    } catch (failure) {
-      error = failure instanceof Error ? failure.message : String(failure);
-    } finally {
-      creating = false;
-    }
-  }
 </script>
 
 <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
-  {#if agent.agents.length > 1}
-    <li class="pb-1"><AgentSwitch agents={agent.agents} selected={choice} onselect={select} /></li>
-  {/if}
   <li class="pb-1.5">
-    <button
-      class="pill pill-small pill-primary w-full justify-center"
-      disabled={creating || (agent.connected && !choice)}
-      title={chosenAgent ? `A new chat with ${chosenAgent.name}${chosenAgent.signedIn ? '' : ': sign it in first'}` : undefined}
-      onclick={newChat}
-    >
-      <span class="codicon codicon-add"></span>{creating
-        ? 'Starting…'
-        : chosenAgent && !chosenAgent.signedIn
-          ? `Sign in to ${chosenAgent.name}…`
-          : chosenAgent
-            ? `New chat with ${chosenAgent.name}`
-            : 'New chat'}
+    <button class="pill pill-small pill-primary w-full justify-center" aria-haspopup="dialog" onclick={() => newChat?.open(worker.id)}>
+      <span class="codicon codicon-add"></span>New chat
     </button>
   </li>
   {#if error}<li class="px-2 py-1 text-[0.85em] text-red">{error}</li>{/if}
@@ -213,3 +167,5 @@
     </button>
   </div>
 {/if}
+
+<NewChatDialog bind:this={newChat} onstarted={(workerId, key) => app.go({ view: 'chat', worker: workerId, session: key })} {onNavigate} />
