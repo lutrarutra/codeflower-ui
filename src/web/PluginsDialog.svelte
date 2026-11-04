@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The Plugins view for one sandbox, in a dialog. The page is its own host:
-  // calls go to the sandbox's connection, and for a sandbox the app started
-  // without the network, to the app's fetch run.
+  // The Plugins view for one agent of a sandbox, in a dialog. The page is its
+  // own host: calls go to the sandbox's connection, and for a sandbox the app
+  // started without the network, to the app's fetch run.
   import { untrack } from 'svelte';
   import Plugins from '../chat/Plugins.svelte';
   import { servePlugins } from '../client/pluginsService.ts';
@@ -24,27 +24,25 @@
   let host = $state<DialogHost | undefined>();
 
   // A host per opened sandbox, made before the view mounts.
-  function makeHost({ worker, agent }: NonNullable<typeof app.plugins>): DialogHost {
+  function makeHost({ worker, agent, name }: NonNullable<typeof app.plugins>): DialogHost {
     const listeners = new Set<(message: PluginsHostMessage) => void>();
     let connecting: Promise<void> | undefined = agent.connect();
     const service = servePlugins({
       connection: () => agent.connection,
+      agent: name,
       send: (message) => {
         for (const listener of listeners) listener(message);
       },
-      agentLabel: agent.status?.agentLabel ?? worker.label,
-      restart: async () => {
-        await agent.connection?.restartAgent();
-        await agent.reconnect();
-      },
+      agentLabel: agent.agent(name)?.name ?? name,
+      restart: () => agent.restartAgent(name),
       // Only the sandboxes this app started; its own page (one sandbox) has no app.
       appFetch:
         worker.source === 'started' && !app.single
           ? async () => {
-              await app.workerApi(worker.id, '/plugins/fetch', { method: 'POST' });
+              await app.workerApi(worker.id, `/plugins/fetch?agent=${encodeURIComponent(name)}`, { method: 'POST' });
             }
           : undefined,
-      fetchHint: `Run \`codeflower plugins fetch --agent ${worker.agent} --project ${worker.project}\` where the sandbox was started and there is internet access, then restart the agent.`
+      fetchHint: `Run \`codeflower plugins fetch --agent ${name} --project ${worker.project}\` where the sandbox was started and there is internet access, then restart the agent.`
     });
     return {
       send: (message) => {

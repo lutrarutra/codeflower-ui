@@ -1,8 +1,9 @@
-// Signing a sandbox's agent in from the page. The agent's own flows run inside
-// the sandbox and store their login there; the page shows the methods the
-// agent advertises and relays what the user types: a key, a link to open, or
-// the keystrokes of a sign-in terminal.
+// Signing one of a sandbox's agents in from the page. The agent's own flows
+// run inside the sandbox and store their login there; the page shows the
+// methods the agent advertises and relays what the user types: a key, a link
+// to open, or the keystrokes of a sign-in terminal.
 import type { AuthMethod } from '@agentclientprotocol/sdk';
+import type { AgentName } from '../../protocol/messages.ts';
 import type { DshCredentials, UrlElicitation } from '../../client/workerConnection.ts';
 import { isApiKeyMethod, isTerminalMethod, isWebLink } from './authMethods.ts';
 import type { WebWorker } from './worker.svelte.ts';
@@ -24,11 +25,6 @@ export interface AgentLink {
   answer: (action: 'accept' | 'decline') => void;
 }
 
-interface TerminalView {
-  output(data: string): void;
-  exit(exitCode: number): void;
-}
-
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -36,20 +32,19 @@ function describe(error: unknown): string {
 export class SignIn {
   /** The sandbox signing in; the dialog shows while set. */
   worker = $state<WebWorker | null>(null);
+  /** The agent of the sandbox signing in. */
+  agent = $state<AgentName>('');
   step = $state<SignInStep>({ kind: 'pick', methods: [] });
   error = $state('');
   links = $state<AgentLink[]>([]);
 
-  private readonly terminals = new Map<string, TerminalView>();
-  /** Output that arrived before its terminal knew its id. */
-  private readonly early = new Map<string, string>();
-
   get label(): string {
-    return this.worker?.status?.agentLabel ?? 'the agent';
+    return this.worker?.agent(this.agent)?.name ?? 'the agent';
   }
 
-  async start(worker: WebWorker): Promise<void> {
+  async start(worker: WebWorker, agent: AgentName): Promise<void> {
     this.worker = worker;
+    this.agent = agent;
     this.error = '';
     this.step = { kind: 'working', text: 'Connecting to the sandbox…' };
     try {
@@ -59,14 +54,32 @@ export class SignIn {
       this.error = describe(error);
       return;
     }
-    if (this.worker !== worker) return;
-    if (worker.status?.credentials === 'keys') {
+    if (!this.current(worker, agent)) return;
+    const state = worker.agent(agent);
+    if (state?.unavailable) {
+      this.error = state.unavailable;
+      return;
+    }
+    if (state?.credentials === 'keys') {
       this.step = { kind: 'keys' };
       return;
     }
-    const methods = worker.connection?.authMethods ?? [];
+    this.step = { kind: 'working', text: `Starting ${this.label}…` };
+    let methods: AuthMethod[];
+    try {
+      methods = (await worker.connection?.authMethods(agent)) ?? [];
+    } catch (error) {
+      if (this.current(worker, agent)) this.error = describe(error);
+      return;
+    }
+    if (!this.current(worker, agent)) return;
     this.step = { kind: 'pick', methods };
     if (!methods.length) this.error = `${this.label} offers no sign-in methods to code flower.`;
+  }
+
+  /** Still signing this agent in: the user did not close the dialog or start another. */
+  private current(worker: WebWorker, agent: AgentName): boolean {
+    return this.worker === worker && this.agent === agent;
   }
 
   close(): void {
@@ -81,37 +94,40 @@ export class SignIn {
   }
 
   back(): void {
-    if (this.worker) void this.start(this.worker);
+    if (this.worker) void this.start(this.worker, this.agent);
   }
 
   async authenticate(method: AuthMethod, apiKey?: string): Promise<void> {
-    const worker = this.worker;
+    const { worker, agent } = this;
     if (!worker?.connection) return;
     this.error = '';
     this.step = { kind: 'working', text: `Signing in to ${this.label}…` };
     try {
-      await worker.connection.authenticate(method.id, apiKey ? { 'api-key': { apiKey } } : undefined);
-      await this.signedIn(worker);
+      await worker.connection.authenticate(agent, method.id, apiKey ? { 'api-key': { apiKey } } : undefined);
+      await this.signedIn(worker, agent);
     } catch (error) {
-      if (this.worker !== worker) return;
+      if (!this.current(worker, agent)) return;
       this.error = describe(error);
-      this.step = apiKey ? { kind: 'key', method } : { kind: 'pick', methods: worker.connection?.authMethods ?? [] };
+      this.step = apiKey ? { kind: 'key', method } : { kind: 'pick', methods: (await worker.connection?.authMethods(agent).catch(() => [])) ?? [] };
     }
   }
 
-  /** Saves keys code flower keeps for the agent; it reads them when it starts, so it restarts. */
+  /**
+   * Saves keys code flower keeps for the agent. It reads them when it starts: one that runs
+   * restarts, and its open chats attach to the fresh one.
+   */
   async saveKeys(credentials: DshCredentials): Promise<void> {
-    const worker = this.worker;
+    const { worker, agent } = this;
     if (!worker?.connection) return;
     this.error = '';
-    this.step = { kind: 'working', text: 'Saving the keys and restarting the agent…' };
+    this.step = { kind: 'working', text: 'Saving the keys…' };
     try {
-      await worker.connection.setCredentials(credentials);
-      await worker.connection.restartAgent();
-      await worker.reconnect();
-      if (this.worker === worker) this.step = { kind: 'done', text: `${this.label}'s keys are saved in the project.` };
+      await worker.connection.setCredentials(agent, credentials);
+      if (worker.agent(agent)?.running) await worker.restartAgent(agent);
+      await worker.refresh();
+      if (this.current(worker, agent)) this.step = { kind: 'done', text: `${this.label}'s keys are saved in the project.` };
     } catch (error) {
-      if (this.worker !== worker) return;
+      if (!this.current(worker, agent)) return;
       this.error = describe(error);
       this.step = { kind: 'keys' };
     }
@@ -119,36 +135,15 @@ export class SignIn {
 
   /** A sign-in terminal ended; 0 means the agent's command signed in. */
   async terminalDone(exitCode: number): Promise<void> {
-    if (exitCode === 0 && this.worker) await this.signedIn(this.worker);
+    if (exitCode === 0 && this.worker) await this.signedIn(this.worker, this.agent);
   }
 
-  private async signedIn(worker: WebWorker): Promise<void> {
-    await worker.afterSignIn(`Signed in to ${this.label}.`);
-    if (this.worker === worker) this.step = { kind: 'done', text: `Signed in to ${this.label}.` };
+  private async signedIn(worker: WebWorker, agent: AgentName): Promise<void> {
+    await worker.afterSignIn(agent, `Signed in to ${this.label}.`);
+    if (this.current(worker, agent)) this.step = { kind: 'done', text: `Signed in to ${this.label}.` };
   }
 
   // ---- routed from the sandboxes ----
-
-  /** Shows a terminal's output, including what came before it registered. */
-  attachTerminal(terminalId: string, view: TerminalView): () => void {
-    this.terminals.set(terminalId, view);
-    const early = this.early.get(terminalId);
-    this.early.delete(terminalId);
-    if (early) view.output(early);
-    return () => this.terminals.delete(terminalId);
-  }
-
-  terminalOutput(terminalId: string, data: string): void {
-    const view = this.terminals.get(terminalId);
-    if (view) view.output(data);
-    else this.early.set(terminalId, `${this.early.get(terminalId) ?? ''}${data}`.slice(-65536));
-  }
-
-  terminalExit(terminalId: string, exitCode: number): void {
-    this.terminals.get(terminalId)?.exit(exitCode);
-    this.terminals.delete(terminalId);
-    this.early.delete(terminalId);
-  }
 
   elicitUrl(worker: WebWorker, request: UrlElicitation): Promise<'accept' | 'decline'> {
     if (!isWebLink(request.url)) return Promise.resolve('decline');

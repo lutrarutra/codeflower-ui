@@ -7,6 +7,7 @@
   import Tulip from '../chat/lib/Tulip.svelte';
   import Workbench from './Workbench.svelte';
   import WorkerOverview from './WorkerOverview.svelte';
+  import { agentOfKey } from '../client/workerConnection.ts';
   import { app } from './lib/app.svelte.ts';
   import { plural } from './lib/format.ts';
   import { inRail } from './lib/rail.ts';
@@ -15,6 +16,9 @@
   // The sandbox of the tab in front, else the one the sidebar lists.
   const worker = $derived(app.worker(app.workbench.focusedWorker() ?? app.browsing ?? app.route.worker));
   const agent = $derived(worker ? app.agent(worker.id) : undefined);
+  // The agent of the chat in front, which may not be signed in.
+  const front = $derived(app.workbench.focusedChat()?.key ?? app.route.session);
+  const chatAgent = $derived(agent && front ? agent.agent(agentOfKey(front)) : undefined);
   const elsewhere = $derived(!!worker && app.elsewhere(worker));
   const wrapUp = $derived(worker ? app.wrapUps[worker.id] : undefined);
   const browsed = $derived(app.worker(app.browsing ?? undefined));
@@ -47,10 +51,10 @@
         </span>
         <button class="pill pill-small pill-primary" onclick={openHere}>Open here</button>
       </section>
-    {:else if agent.connected && agent.status?.signedIn === false}
+    {:else if agent.connected && chatAgent?.signedIn === false}
       <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-2.5" role="status">
-        <span class="min-w-0 flex-1">{agent.status.agentLabel} is not signed in for this project, so it cannot answer yet.</span>
-        <button class="pill pill-small pill-primary" onclick={() => void app.signIn.start(agent)}>Sign in</button>
+        <span class="min-w-0 flex-1">{chatAgent.name} is not signed in for this project, so it cannot answer yet.</span>
+        <button class="pill pill-small pill-primary" onclick={() => void app.signIn.start(agent, chatAgent.id)}>Sign in</button>
       </section>
     {:else if agent.state === 'connecting'}
       <p class="m-0 px-4 py-2.5 text-muted"><span class="spinner"></span> Connecting to the sandbox…</p>

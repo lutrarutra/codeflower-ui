@@ -1,11 +1,10 @@
 <script lang="ts">
-  // The agent's subscription quota, or the tokens and cost of a key, as the sandbox's bridge reports them.
-  import type { Worker } from './api.ts';
+  // An agent's subscription quota, or the tokens and cost of a key, as the sandbox's bridge reports them.
+  import type { AgentUsage } from './api.ts';
   import { cost, resets, tokens } from './format.ts';
 
-  let { worker }: { worker: Worker } = $props();
+  let { usage }: { usage: AgentUsage | undefined } = $props();
   const SHORT: Record<string, string> = { five_hour: '5h', seven_day: 'week' };
-  const usage = $derived(worker.status === 'ready' ? worker.activity?.usage : undefined);
   // A window that already reset says nothing about the current one.
   const limits = $derived(
     usage && usage.auth.kind !== 'api_key'

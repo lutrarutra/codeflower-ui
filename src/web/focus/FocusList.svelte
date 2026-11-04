@@ -1,7 +1,12 @@
 <script lang="ts">
   // The Focus view's sidebar: the chats of every sandbox, those that need the user first.
+  import { untrack } from 'svelte';
+  import AgentIcon from '../../chat/lib/AgentIcon.svelte';
   import ChatTitle from '../../chat/lib/ChatTitle.svelte';
+  import { agentPresentation, type AgentName } from '../../protocol/messages.ts';
   import { app } from '../lib/app.svelte.ts';
+  import { newChatAgent, rememberAgent } from '../lib/newChatAgent.ts';
+  import { agentOfKey } from '../../client/workerConnection.ts';
   import { chatty } from '../lib/focus.svelte.ts';
   import { WAITING_FOR, workerTitle } from '../lib/format.ts';
   import StatusDot from '../lib/StatusDot.svelte';
@@ -21,12 +26,37 @@
   let creating = $state(false);
   let error = $state('');
 
-  async function newChat(workerId: string): Promise<void> {
+  // The menu lists the sandboxes' agents, which connecting to them tells (it starts no agent).
+  $effect(() => {
+    if (!choosing) return;
+    for (const worker of untrack(() => ready)) void app.agent(worker.id).connect().catch(() => undefined);
+  });
+
+  /** A chat's agent, as its row shows it. */
+  function chatAgent(workerId: string, key: string) {
+    const id = agentOfKey(key);
+    return agentPresentation(id, app.agent(workerId).agent(id));
+  }
+
+  /** A new chat in the sandbox, with `name` or the agent remembered for its project. */
+  async function newChat(workerId: string, name?: AgentName): Promise<void> {
     choosing = false;
+    const sandbox = app.agent(workerId);
+    const project = app.workers.find((worker) => worker.id === workerId)?.project || workerId;
+    const agent = newChatAgent(sandbox.agents, project, name);
+    if (!agent) {
+      error = 'No agent of the sandbox can start a chat';
+      return;
+    }
+    rememberAgent(project, agent);
+    if (sandbox.agent(agent)?.signedIn === false) {
+      void app.signIn.start(sandbox, agent);
+      return;
+    }
     creating = true;
     error = '';
     try {
-      const key = await app.agent(workerId).newChat();
+      const key = await sandbox.newChat(agent);
       if (key) app.go({ view: 'focus', worker: workerId, session: key });
       onNavigate();
     } catch (failure) {
@@ -80,14 +110,33 @@
         {#each ready as worker (worker.id)}
           {@const [name, where] = workerTitle(worker)}
           {@const busy = (worker.activity?.working ?? 0) + (worker.activity?.waiting ?? 0)}
-          <button role="menuitem" class="flex flex-col rounded-md px-2 py-1.5 text-left hover:bg-soft-line" onclick={() => void newChat(worker.id)}>
-            <span class="flex items-center gap-2">
-              <StatusDot {worker} />
-              <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
-              {#if busy}<span class="shrink-0 text-[0.85em] text-muted">{busy} at work</span>{/if}
-            </span>
-            <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
-          </button>
+          {@const agents = app.agent(worker.id).agents}
+          <div class="flex flex-col rounded-md hover:bg-soft-line">
+            <button role="menuitem" class="flex flex-col px-2 pt-1.5 text-left {agents.length > 1 ? 'pb-0.5' : 'pb-1.5'}" onclick={() => void newChat(worker.id)}>
+              <span class="flex items-center gap-2">
+                <StatusDot {worker} />
+                <span class="min-w-0 flex-1 truncate font-semibold">{name}</span>
+                {#if busy}<span class="shrink-0 text-[0.85em] text-muted">{busy} at work</span>{/if}
+              </span>
+              <span class="truncate pl-[1.1rem] text-[0.85em] text-muted">{where}</span>
+            </button>
+            {#if agents.length > 1}
+              <span class="flex gap-1 pb-1.5 pl-[1.6rem]">
+                {#each agents as agent (agent.id)}
+                  <button
+                    role="menuitem"
+                    class="grid size-7 place-items-center rounded-md hover:bg-card disabled:opacity-30"
+                    disabled={!!agent.unavailable}
+                    title={agent.unavailable ? `${agent.name}: ${agent.unavailable}` : `New chat with ${agent.name}${agent.signedIn ? '' : ' (sign it in first)'}`}
+                    aria-label="New chat with {agent.name}"
+                    onclick={() => void newChat(worker.id, agent.id)}
+                  >
+                    <AgentIcon agent={agentPresentation(agent.id, agent)} size="1.05em" />
+                  </button>
+                {/each}
+              </span>
+            {/if}
+          </div>
         {/each}
       </div>
     {/if}
@@ -115,6 +164,7 @@
             >
               <span class="flex w-full min-w-0 items-center gap-2 pr-5">
                 <span class="size-2 shrink-0 rounded-full {PHASE_DOT[group.id === 'done' ? 'done' : chat.phase]}" class:animate-pulse={chat.phase === 'working'}></span>
+                <AgentIcon agent={chatAgent(chat.workerId, chat.key)} size="0.95em" title={chatAgent(chat.workerId, chat.key)?.name} />
                 <span class="flex min-w-0 flex-1" class:font-semibold={group.id === 'waiting' || group.id === 'done'}><ChatTitle title={chat.title} /></span>
                 {#if group.id !== 'idle'}
                   <span class="shrink-0 text-[0.8em] text-muted tabular-nums" title="For {age(now - chat.since)}">{age(now - chat.since)}</span>
@@ -179,6 +229,7 @@
                 }}
               >
                 <span class="flex w-full min-w-0 items-center gap-2">
+                  <AgentIcon agent={chatAgent(chat.workerId, chat.key)} size="0.95em" title={chatAgent(chat.workerId, chat.key)?.name} />
                   <span class="flex min-w-0 flex-1"><ChatTitle title={chat.title} /></span>
                   <span class="shrink-0 text-[0.8em] text-muted tabular-nums" title="Changed {age(now - last)} ago">{age(now - last)}</span>
                 </span>

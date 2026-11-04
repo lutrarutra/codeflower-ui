@@ -26,7 +26,6 @@ export interface AgentChoice {
 }
 
 export interface Settings {
-  agent?: string;
   inputs: string[];
   outputs: string[];
   code: string[];
@@ -83,9 +82,25 @@ export interface UsageLimit {
   status?: string;
 }
 
+/** One agent of a sandbox, as the app polls it: whether it runs, and its usage. */
+export interface AgentActivity {
+  id: string;
+  running: boolean;
+  usage?: AgentUsage;
+}
+
+/** An agent's login, its quota, and its tokens and cost since the sandbox started. */
+export interface AgentUsage {
+  auth: { kind: string; plan?: string; label?: string };
+  limits: UsageLimit[];
+  costEstimate: boolean;
+  totals: {
+    tokens: { inputTokens: number; outputTokens: number; cachedReadTokens: number; cachedWriteTokens: number; totalTokens: number };
+    cost?: { amount: number; currency: string };
+  };
+}
+
 export interface WorkerActivity {
-  agent: string;
-  agentLabel: string;
   connected: boolean;
   /** How many windows are connected; missing from older sandboxes. */
   clients?: number;
@@ -94,15 +109,7 @@ export interface WorkerActivity {
   working: number;
   waiting: number;
   chats: ChatActivity[];
-  usage?: {
-    auth: { kind: string; plan?: string; label?: string };
-    limits: UsageLimit[];
-    costEstimate: boolean;
-    totals: {
-      tokens: { inputTokens: number; outputTokens: number; cachedReadTokens: number; cachedWriteTokens: number; totalTokens: number };
-      cost?: { amount: number; currency: string };
-    };
-  };
+  agents?: AgentActivity[];
 }
 
 /** started: by this client; added: by its pasted line; local: on this computer, outside this client. */
@@ -126,7 +133,7 @@ export interface Worker {
   skills: string[];
   allowlist?: string;
   started: string;
-  agent: string;
+  /** The sandbox's label when it has no name: its project, where the app knows it. */
   label: string;
   status: string;
   url?: string;

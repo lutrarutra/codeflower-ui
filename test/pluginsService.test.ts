@@ -6,24 +6,29 @@ import type { WorkerConnection } from '../src/client/workerConnection.ts';
 
 // A connection that answers the plugin methods and lets the test say they changed.
 function fakeConnection(calls: string[]) {
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(agent: string) => void>();
   const connection = {
     connected: true,
-    onPluginsChanged(listener: () => void) {
+    onPluginsChanged(listener: (agent: string) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async plugins() {
+    async plugins(_agent: string) {
       calls.push('plugins');
       return { available: true, entries: [] };
     },
-    async addPlugin(source: string) {
+    async addPlugin(_agent: string, source: string) {
       calls.push(`add ${source}`);
       if (source === 'bad') throw new Error('not a source');
       return { id: `claude:${source}`, pendingFetch: true };
     }
   };
-  return { connection: connection as unknown as WorkerConnection, changed: () => listeners.forEach((listener) => listener()), listeners };
+  // `agent`: whose plugins changed; the service passes on only its own agent's.
+  return {
+    connection: connection as unknown as WorkerConnection,
+    changed: (agent = 'claude') => listeners.forEach((listener) => listener(agent)),
+    listeners
+  };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -35,6 +40,7 @@ test('answers the view from the connection and passes on that the plugins change
   const restarted = fakeConnection(calls);
   const service = servePlugins({
     connection: () => current.connection,
+    agent: 'claude',
     send: (message) => sent.push(message),
     agentLabel: 'Claude Code',
     restart: async () => {

@@ -3,7 +3,7 @@
   import type { Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
   import type { Machine } from '../lib/machines.svelte.ts';
-  import { accent, FOLDER_KINDS, short, targets, type FolderKind } from '../lib/format.ts';
+  import { FOLDER_KINDS, short, targets, type FolderKind } from '../lib/format.ts';
   import FolderBrowser from './FolderBrowser.svelte';
 
   let {
@@ -20,7 +20,6 @@
   // The choices start from the ones the app remembers from the last start.
   // The form starts from the computer's settings; the Server view makes a new one for another computer.
   const settings = untrack(() => machine.system!.settings);
-  let agent = $state(settings.agent || untrack(() => machine.system!.agents[0]?.id) || '');
   let folders = $state<Record<FolderKind, string[]>>({
     inputs: [...(settings.inputs ?? [])],
     outputs: [...(settings.outputs ?? [])],
@@ -65,7 +64,7 @@
     starting = true;
     try {
       const worker = await machine.api<Worker>('/api/workers', {
-        body: { agent, ...folders, isolateNetwork: isolate, project: project.trim(), engine, image: image.trim(), imageTag: imageTag.trim() }
+        body: { ...folders, isolateNetwork: isolate, project: project.trim(), engine, image: image.trim(), imageTag: imageTag.trim() }
       });
       await app.refreshWorkers();
       if (onStarted) onStarted(machine.qualify(worker.id));
@@ -79,33 +78,9 @@
 </script>
 
 <form class="card flex flex-col gap-5 p-5" onsubmit={start} autocomplete="off">
-  <section>
-    <h2 class="m-0 mb-3 flex items-center gap-2 font-display text-lg font-medium">
-      <span class="grid size-6 place-items-center rounded-full bg-indigo text-[0.8em] text-on-accent">2</span> Agent
-    </h2>
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(13rem,1fr))] gap-2.5" role="radiogroup" aria-label="Agent">
-      {#each system.agents as choice (choice.id)}
-        {@const checked = choice.id === agent}
-        <button
-          type="button"
-          role="radio"
-          aria-checked={checked}
-          class="flex flex-col gap-1 rounded-2xl border-[1.5px] p-3 text-left {checked ? 'border-line bg-indigo-soft' : 'border-soft-line bg-card hover:border-line'}"
-          onclick={() => (agent = choice.id)}
-        >
-          <strong class="flex items-center gap-2">
-            <span class="size-2.5 rounded-full bg-violet" style:background-color={accent(choice.color)}></span>{choice.label}
-            {#if checked}<span class="codicon codicon-check ml-auto"></span>{/if}
-          </strong>
-          {#if choice.description}<span class="text-[0.85em] text-muted">{choice.description}</span>{/if}
-        </button>
-      {/each}
-    </div>
-  </section>
-
   <section class="flex flex-col gap-4">
     <h2 class="m-0 flex items-center gap-2 font-display text-lg font-medium">
-      <span class="grid size-6 place-items-center rounded-full bg-indigo text-[0.8em] text-on-accent">3</span> Folders
+      <span class="grid size-6 place-items-center rounded-full bg-indigo text-[0.8em] text-on-accent">2</span> Folders
     </h2>
     {#each KINDS as { kind, title, tag, tone, help } (kind)}
       {@const where = targets(kind, folders[kind])}

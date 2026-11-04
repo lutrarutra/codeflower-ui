@@ -5,7 +5,6 @@
   import AgentSetup from '../lib/AgentSetup.svelte';
   import ConnectLine from '../lib/ConnectLine.svelte';
   import StatusDot from '../lib/StatusDot.svelte';
-  import UsageChips from '../lib/UsageChips.svelte';
   import type { Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
   import { canForget, canStop, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
@@ -89,7 +88,7 @@
         </p>
       {/if}
       {#if worker.source === 'added'}<p class="m-0 text-[0.85em] text-muted">Running elsewhere. Removing it from the list does not stop it.</p>{/if}
-      <div class="mt-1.5 flex flex-wrap gap-1.5"><ActivityChips {worker} /><UsageChips {worker} /></div>
+      <div class="mt-1.5 flex flex-wrap gap-1.5"><ActivityChips {worker} /></div>
     </div>
     {#if worker.url && worker.kind !== 'task'}
       <button class="pill pill-small pill-primary" onclick={() => app.go({ view: 'chat', worker: worker.id })}>Chat</button>

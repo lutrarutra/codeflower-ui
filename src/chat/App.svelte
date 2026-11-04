@@ -13,6 +13,7 @@
   import { choiceLabel, subagentActive, subagentStatus, subagentTitle, type SubagentSettingsState, type SubagentSummary } from '../protocol/subagents.ts';
   import type { AvailableCommand, SessionConfigOption } from '@agentclientprotocol/sdk';
   import CommandMenu from './lib/CommandMenu.svelte';
+  import AgentIcon from './lib/AgentIcon.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
   import { provideSandboxFiles, SandboxFiles } from './lib/sandboxFiles.svelte.ts';
@@ -296,7 +297,7 @@
         class="inline-flex shrink-0 items-center gap-1.5 rounded-full border-[1.5px] border-line bg-card px-2 py-px text-[0.8em] font-semibold"
         title={location ? `${agentLabel} on ${location}` : agentLabel}
       >
-        <span class="size-2 rounded-full bg-violet" style:background-color={chat.agent?.color}></span>
+        <AgentIcon agent={chat.agent} size="1.1em" />
         <span class="hidden @xs:inline">{agentLabel}</span>
       </span>
     {/if}

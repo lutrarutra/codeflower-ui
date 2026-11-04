@@ -12,9 +12,15 @@
   import { onMount } from 'svelte';
   import { app } from './lib/app.svelte.ts';
   import { isWebLink, signInPage } from './lib/authMethods.ts';
+  import type { AgentName } from '../protocol/messages.ts';
   import type { WebWorker } from './lib/worker.svelte.ts';
 
-  let { worker, method, onExit }: { worker: WebWorker; method: AuthMethod; onExit: (exitCode: number) => void } = $props();
+  let {
+    worker,
+    agent,
+    method,
+    onExit
+  }: { worker: WebWorker; agent: AgentName; method: AuthMethod; onExit: (exitCode: number) => void } = $props();
   let element: HTMLDivElement;
   /** The page the command asks the user to open, once it printed one. */
   let link = $state<string | null>(null);
@@ -78,14 +84,14 @@
     if (!connection) {
       terminal.write('\r\nThe sandbox is not connected.\r\n');
     } else {
-      connection.startTerminal(method.id, terminal.cols, terminal.rows).then(
+      connection.startTerminal(agent, method.id, terminal.cols, terminal.rows).then(
         (id) => {
           terminalId = id;
           if (unmounted) {
             void connection.closeTerminal(id).catch(() => undefined);
             return;
           }
-          detach = app.signIn.attachTerminal(id, {
+          detach = app.terminals.attach(id, {
             output: (data) => {
               terminal.write(data);
               printed = (printed + data).slice(-65536);

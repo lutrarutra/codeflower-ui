@@ -1,11 +1,10 @@
-// One sandbox's agent, reached through the app's relay, and the chats open on
-// it. The connection opens only when a chat or the files of the sandbox are
-// opened. A current bridge serves several windows at once (e.g. this page and
-// VS Code); an older one serves one at a time, and connecting takes the
-// sandbox over from another.
+// One sandbox, reached through the app's relay, with its agents and the chats
+// open on it. The connection opens only when a chat or the files of the
+// sandbox are opened; an agent's, when a chat of it opens or it signs in. The
+// bridge serves several windows at once (e.g. this page and VS Code).
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 import {
-  agentPresentation,
+  type AgentName,
   type ChatAction,
   type ChatState,
   type PendingPermission,
@@ -15,6 +14,7 @@ import {
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
+  agentOfKey,
   isAuthRequired,
   isConnectionClosed,
   EMPTY_TRANSCRIPT,
@@ -22,8 +22,10 @@ import {
   RpcError,
   TAKEN_OVER,
   WorkerConnection,
+  type AgentState,
   type AttachedSession,
   type ChatTerminal,
+  type ShellTerminal,
   type SessionRecord,
   type ShowRequest,
   type UrlElicitation,
@@ -34,6 +36,8 @@ import type { Machine } from './machines.svelte.ts';
 import { ChatSession, type ChatActions } from './chatSession.svelte.ts';
 
 const RECONNECT_MS = 10_000;
+// After an agent's restart, how long its chats wait before they attach to the fresh one.
+const AGENT_RESTART_MS = 500;
 const LEASE_CONFLICT = -32010;
 const CLIENT = { name: 'codeflower-app', title: 'code flower', version: '1' };
 
@@ -49,10 +53,11 @@ export interface WorkerEvents {
   openFile(worker: WebWorker, chat: ChatSession, path: string): void;
   /** A chat of the sandbox in front, e.g. a subagent's from its parent. */
   openChat(worker: WebWorker, key: string): void;
-  signIn(worker: WebWorker): void;
+  /** The agent should sign in, e.g. a chat of it cannot start without. */
+  signIn(worker: WebWorker, agent: AgentName): void;
   elicitUrl(worker: WebWorker, request: UrlElicitation): Promise<'accept' | 'decline'>;
   elicitationComplete(worker: WebWorker, elicitationId: string): void;
-  terminalOutput(terminalId: string, data: string): void;
+  terminalOutput(terminalId: string, data: string, replayed: boolean): void;
   terminalExit(terminalId: string, exitCode: number): void;
   wrapUp(worker: WebWorker, notice: WrapUpNotice): void;
 }
@@ -64,19 +69,26 @@ export class WebWorker {
   state = $state<ConnectionState>('idle');
   error = $state('');
   status = $state<WorkerStatus | undefined>();
+  /** The sandbox's agents: whether each can run, is signed in, runs. */
+  agents = $state<AgentState[]>([]);
   sessions = $state<SessionRecord[]>([]);
   /** The chats were listed (or cannot be): until then the page shows them loading. */
   sessionsKnown = $state(false);
-  usage = $state<WorkerUsage | undefined>();
+  /** Each agent's usage, by agent. */
+  usage = $state<Record<AgentName, WorkerUsage>>({});
   private availableActions: ChatAction[] | undefined;
   /** Open chats, by key. */
   chats = $state<Record<string, ChatSession>>({});
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
+  /** The user's shells running in the sandbox (the page's Terminal). */
+  shells = $state<ShellTerminal[]>([]);
+  /** The shells were listed on this connection: a terminal tab whose shell is not among them ended. */
+  shellsKnown = $state(false);
   /** The subagents of the chats open here, by their chats' keys: what their tabs show. */
   subagents = $state<Record<string, SubagentSummary>>({});
-  /** The defaults of the agent's subagents; null when it has none in code flower. */
-  private subagentSettings: SubagentSettingsState | null = null;
+  /** The defaults of each agent's subagents, by agent; missing for agents without them in code flower. */
+  private subagentSettings: Record<AgentName, SubagentSettingsState> = {};
   /** The terminal notice each chat shows, so it is posted once and cleared when the terminal goes. */
   private readonly terminalNotices = new Map<string, string>();
   connection: WorkerConnection | undefined;
@@ -128,6 +140,11 @@ export class WebWorker {
     }
   }
 
+  /** An agent of the sandbox. */
+  agent(agent: AgentName): AgentState | undefined {
+    return this.agents.find((candidate) => candidate.id === agent);
+  }
+
   /** Connects, unless connected or connecting already. */
   connect(): Promise<void> {
     if (this.connected) return Promise.resolve();
@@ -138,26 +155,38 @@ export class WebWorker {
   private async establish(): Promise<void> {
     this.state = 'connecting';
     this.error = '';
+    this.shellsKnown = false;
     let connection: WorkerConnection | undefined;
     try {
-      connection = await WorkerConnection.connect(await this.machine.openTransport(this.path('/acp')), this.handlers(++this.generation), CLIENT);
+      const open = async (agent?: AgentName) =>
+        this.machine.openTransport(this.path(agent ? `/acp?agent=${encodeURIComponent(agent)}` : '/acp'));
+      connection = await WorkerConnection.connect(open, this.handlers(++this.generation), CLIENT);
       const actions = await connection.actions();
       this.connection = connection;
       this.availableActions = actions;
+      this.agents = connection.agents;
       this.state = 'connected';
       this.stopRetrying();
       await this.refresh();
       // Chats opened while connecting learn which agent they talk to; a notice about the lost connection goes.
       this.terminalNotices.clear();
       for (const chat of Object.values(this.chats)) {
-        chat.setState({ ...this.presentation(), actions });
+        chat.setState({ ...this.presentation(chat.key), actions });
         chat.post({ type: 'clearNotice' });
       }
-      const usage = await connection.usage().catch(() => undefined);
-      if (usage && this.connection === connection) this.setUsage(usage);
-      if (connection.subagentFeatures) {
-        const settings = await connection.subagentSettings().catch(() => null);
-        if (this.connection === connection) this.setSubagentSettings(settings);
+      // Every agent's usage and subagent defaults; asking starts no agent.
+      for (const agent of connection.agents) {
+        void connection.usage(agent.id).then((usage) => {
+          if (usage && this.connection === connection) this.setUsage(agent.id, usage);
+        });
+        if (agent.capabilities.subagents) {
+          void connection.subagentSettings(agent.id).then(
+            (settings) => {
+              if (this.connection === connection) this.setSubagentSettings(agent.id, settings);
+            },
+            () => undefined
+          );
+        }
       }
       // Open chats attach again and show what happened meanwhile. Not awaited: after the agent
       // restarted each is a full resume, and a new chat or a prompt should not wait for them all.
@@ -184,11 +213,11 @@ export class WebWorker {
     await this.connect();
   }
 
-  /** The agent signed in: chats that could not attach try again, and say so. */
-  async afterSignIn(message: string): Promise<void> {
+  /** An agent signed in: its chats that could not attach try again, and say so. */
+  async afterSignIn(agent: AgentName, message: string): Promise<void> {
     await this.refresh();
     await Promise.all(
-      Object.values(this.chats).map(async (chat) => {
+      this.chatsOf(agent).map(async (chat) => {
         if (!chat.state.live && this.connected) await this.attach(chat).catch((error) => this.report(chat, error));
         // A chat that still cannot attach keeps its notice saying why.
         if (chat.state.live) chat.notify('info', message);
@@ -210,6 +239,7 @@ export class WebWorker {
     try {
       const [status, sessions] = await Promise.all([this.connection!.status(), this.connection!.listSessions()]);
       this.status = status;
+      this.agents = status.agents;
       this.sessions = sessions;
       this.sessionsKnown = true;
       // A chat opened before the list came (e.g. on a reload) learns its title.
@@ -224,15 +254,16 @@ export class WebWorker {
 
   // ---- chats ----
 
-  async newChat(): Promise<string | undefined> {
+  /** A new chat with the agent; undefined when the agent has to sign in first. */
+  async newChat(agent: AgentName): Promise<string | undefined> {
     await this.connect();
     const connection = this.connection!;
     let started: AttachedSession;
     try {
-      started = await connection.startSession();
+      started = await connection.startSession(agent);
     } catch (error) {
       if (isAuthRequired(error)) {
-        this.events.signIn(this);
+        this.events.signIn(this, agent);
         return undefined;
       }
       throw error;
@@ -248,7 +279,7 @@ export class WebWorker {
     }
     await this.applyRememberedMode(key);
     chat.post({ type: 'config', options: connection.config(key) });
-    chat.setState({ live: true, steer: connection.canSteer });
+    chat.setState({ live: true, steer: connection.canSteer(key) });
     this.noticeMcp(chat, connection.mcpNotice(key));
     void this.refresh();
     return key;
@@ -310,23 +341,29 @@ export class WebWorker {
     return candidates.sort((a, b) => b.lastUsed - a.lastUsed)[0];
   }
 
-  /** The agent as a chat's header shows it; known once connected. */
-  private presentation(): Pick<ChatState, 'subtitle' | 'agent'> {
-    const agent = agentPresentation(this.status?.agent, { name: this.status?.agentLabel, ...this.status?.agentInfo });
-    return { subtitle: `${agent?.name ?? 'Agent'} · ${this.place || this.id}`, agent };
+  /** The open chats of an agent. */
+  private chatsOf(agent: AgentName): ChatSession[] {
+    return Object.values(this.chats).filter((chat) => agentOfKey(chat.key) === agent);
+  }
+
+  /** A chat's agent as its header shows it; its name, color and logo known once connected. */
+  private presentation(key: string): Pick<ChatState, 'subtitle' | 'agent'> {
+    const id = agentOfKey(key);
+    const agent = this.connection?.presentation(id) ?? { id };
+    return { subtitle: `${agent.name ?? 'Agent'} · ${this.place || this.id}`, agent };
   }
 
   private create(key: string, title: string): ChatSession {
     const chat = new ChatSession(
       this.id,
       key,
-      { title, ...this.presentation(), actions: this.availableActions },
+      { title, ...this.presentation(key), actions: this.availableActions },
       this.actions
     );
     this.chats[key] = chat;
     this.showUsage(chat);
-    this.refreshUsage();
-    chat.post({ type: 'subagentSettings', state: this.subagentSettings });
+    this.refreshUsage(agentOfKey(key));
+    chat.post({ type: 'subagentSettings', state: this.subagentSettings[agentOfKey(key)] ?? null });
     return chat;
   }
 
@@ -354,14 +391,14 @@ export class WebWorker {
     }
     chat.hold();
     try {
-      const attached = await connection.resumeSession(session.nativeSessionId, session.cwd);
+      const attached = await connection.resumeSession(session.harness, session.nativeSessionId, session.cwd);
       // Updates after the attach came live; the transcript has them too.
       chat.loaded(pageUpTo(await connection.transcriptPage(chat.key), attached.transcriptEntries));
       chat.post({ type: 'config', options: connection.config(chat.key) });
       const activity = connection.activity(chat.key);
       chat.post({ type: 'permission', request: activity.permission });
       chat.post({ type: 'question', request: activity.question });
-      chat.setState({ live: true, busy: activity.busy, steer: connection.canSteer });
+      chat.setState({ ...this.presentation(chat.key), live: true, busy: activity.busy, steer: connection.canSteer(chat.key) });
       this.noticeMcp(chat, connection.mcpNotice(chat.key));
       this.noticeTerminal(chat);
       void this.loadSubagents(chat);
@@ -391,7 +428,7 @@ export class WebWorker {
   /** A chat's subagents, for its cards and its badge. */
   private async loadSubagents(chat: ChatSession): Promise<void> {
     const connection = this.connection;
-    if (!connection?.subagentFeatures) return;
+    if (!connection?.subagentFeatures(agentOfKey(chat.key))) return;
     const subagents = await connection.subagents(chat.key).catch(() => undefined);
     if (!subagents || this.connection !== connection) return;
     for (const subagent of subagents) this.subagents[subagent.key] = subagent;
@@ -410,9 +447,9 @@ export class WebWorker {
     this.chats[subagent.key]?.setState({ subagent: this.subagentState(subagent) });
   }
 
-  private setSubagentSettings(state: SubagentSettingsState | null): void {
-    this.subagentSettings = state;
-    for (const chat of Object.values(this.chats)) chat.post({ type: 'subagentSettings', state });
+  private setSubagentSettings(agent: AgentName, state: SubagentSettingsState): void {
+    this.subagentSettings[agent] = state;
+    for (const chat of this.chatsOf(agent)) chat.post({ type: 'subagentSettings', state });
   }
 
   /**
@@ -431,7 +468,7 @@ export class WebWorker {
     const id = `${terminal.terminalId}:${terminal.mode}`;
     if (shown === id) return;
     this.terminalNotices.set(chat.key, id);
-    const agent = this.connection?.workerStatus?.agentLabel ?? 'the agent';
+    const agent = this.agent(agentOfKey(chat.key))?.name ?? 'the agent';
     // Through the tunnel the page's id for the sandbox is not one the computer's `codeflower attach` knows.
     const command = this.id.includes('@') ? '' : ` In a terminal on its computer: codeflower attach ${this.id} ${chat.key}`;
     chat.notify(
@@ -453,7 +490,7 @@ export class WebWorker {
   }
 
   private report(chat: ChatSession, error: unknown): void {
-    if (isAuthRequired(error)) chat.notify('error', 'The agent is not signed in for this project.', true);
+    if (isAuthRequired(error)) chat.notify('error', `${this.agent(agentOfKey(chat.key))?.name ?? 'The agent'} is not signed in for this project.`, true);
     else if (error instanceof RpcError && error.code === LEASE_CONFLICT)
       chat.notify('info', 'This chat is open on another sandbox; it is read-only here.');
     else chat.notify('error', describe(error));
@@ -504,8 +541,8 @@ export class WebWorker {
       }
     },
     setAutoApprove: (chat, enabled) => this.connection?.setAutoApprove(chat.key, enabled),
-    answerPermission: (_chat, requestId, optionId) => this.connection?.answerPermission(requestId, optionId),
-    answerQuestion: (_chat, requestId, action, content) => this.connection?.answerQuestion(requestId, action, content),
+    answerPermission: (chat, requestId, optionId) => this.connection?.answerPermission(chat.key, requestId, optionId),
+    answerQuestion: (chat, requestId, action, content) => this.connection?.answerQuestion(chat.key, requestId, action, content),
     fileData: async (_chat, path, thumbnail) => {
       try {
         const connection = this.require();
@@ -516,15 +553,26 @@ export class WebWorker {
       }
     },
     openFile: (chat, path) => this.events.openFile(this, chat, path),
-    signIn: () => this.events.signIn(this),
+    signIn: (chat) => this.events.signIn(this, agentOfKey(chat.key)),
     openSubagent: (_chat, key) => this.events.openChat(this, key),
     openParent: (chat) => {
       if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
     },
     stopSubagent: (_chat, key) => this.require().cancelSubagent(key),
-    setSubagentSettings: async (_chat, settings) => this.setSubagentSettings(await this.require().subagentSettings(settings)),
-    restartAgent: () => this.require().restartAgent()
+    setSubagentSettings: async (chat, settings) => {
+      const agent = agentOfKey(chat.key);
+      this.setSubagentSettings(agent, await this.require().subagentSettings(agent, settings));
+    },
+    restartAgent: (chat) => this.restartAgent(agentOfKey(chat.key))
   };
+
+  /**
+   * Restarts an agent, e.g. so new keys or plugins apply (refused while its chats work). Its
+   * connection closes; its open chats attach again to the fresh agent.
+   */
+  async restartAgent(agent: AgentName): Promise<void> {
+    await this.require().restartAgent(agent);
+  }
 
   // ---- remembered settings ----
 
@@ -538,8 +586,8 @@ export class WebWorker {
 
   private rememberConfig(key: string, configId: string, value: string | boolean): void {
     const option = this.connection?.config(key).find((candidate) => candidate.id === configId);
-    const agent = this.status?.agent;
-    if (option?.category !== 'mode' || !agent || typeof value !== 'string') return;
+    const agent = agentOfKey(key);
+    if (option?.category !== 'mode' || typeof value !== 'string') return;
     try {
       localStorage.setItem(WebWorker.MODES, JSON.stringify({ ...this.modes(), [agent]: value }));
     } catch {
@@ -549,8 +597,7 @@ export class WebWorker {
 
   /** New chats start in the mode the user chose last for this agent, e.g. one that asks less. */
   private async applyRememberedMode(key: string): Promise<void> {
-    const agent = this.status?.agent;
-    const remembered = agent ? this.modes()[agent] : undefined;
+    const remembered = this.modes()[agentOfKey(key)];
     const connection = this.connection;
     const mode = connection?.config(key).find((option) => option.category === 'mode');
     if (!connection || !remembered || mode?.type !== 'select' || mode.currentValue === remembered) return;
@@ -562,27 +609,24 @@ export class WebWorker {
   // ---- what the agent sends ----
 
   /**
-   * Asks for the usage again, e.g. when a chat opens or comes to the front:
-   * the worker then reads the login's quota if its last read is old, and
-   * sends it when it has it.
+   * Asks for an agent's usage again, e.g. when a chat of it opens or comes to
+   * the front: the worker then reads the login's quota if its last read is
+   * old, and sends it when it has it.
    */
-  refreshUsage(): void {
+  refreshUsage(agent: AgentName): void {
     const connection = this.connection;
-    void connection
-      ?.usage()
-      .then((usage) => {
-        if (usage && this.connection === connection) this.setUsage(usage);
-      })
-      .catch(() => undefined);
+    void connection?.usage(agent).then((usage) => {
+      if (usage && this.connection === connection) this.setUsage(agent, usage);
+    });
   }
 
-  private setUsage(usage: WorkerUsage): void {
-    this.usage = usage;
-    for (const chat of Object.values(this.chats)) this.showUsage(chat);
+  private setUsage(agent: AgentName, usage: WorkerUsage): void {
+    this.usage[agent] = usage;
+    for (const chat of this.chatsOf(agent)) this.showUsage(chat);
   }
 
   private showUsage(chat: ChatSession): void {
-    const usage = this.usage;
+    const usage = this.usage[agentOfKey(chat.key)];
     const live = usage?.sessions.find((candidate) => candidate.key === chat.key);
     let session: ChatUsage['session'] = null;
     if (live) {
@@ -621,7 +665,7 @@ export class WebWorker {
   private closed(code: number, generation: number): void {
     if (generation !== this.generation || !this.connection) return;
     this.connection = undefined;
-    this.usage = undefined;
+    this.usage = {};
     // 1011: the agent itself ended, so its turns did too.
     const agentEnded = code === 1011;
     this.state = code === TAKEN_OVER ? 'taken-over' : 'disconnected';
@@ -638,6 +682,30 @@ export class WebWorker {
       );
     }
     if (code !== TAKEN_OVER) this.retryLater();
+  }
+
+  /**
+   * An agent's connection ended. After its restart (1011, the agent itself ended) its open chats
+   * attach again, which starts it; otherwise they say so, and attach when opened again.
+   */
+  private agentClosed(agent: AgentName, code: number, generation: number): void {
+    if (generation !== this.generation) return;
+    const chats = this.chatsOf(agent);
+    const restarted = code === 1011;
+    for (const chat of chats) {
+      chat.setState(restarted ? { live: false, busy: false } : { live: false });
+      chat.post({ type: 'config', options: [] });
+    }
+    delete this.usage[agent];
+    if (!restarted || !this.connected) {
+      for (const chat of chats) chat.notify('info', 'Disconnected from the agent; it keeps working. Choose the chat again to reconnect.');
+      return;
+    }
+    // The bridge starts the agent again once the old one is gone.
+    setTimeout(() => {
+      for (const chat of this.chatsOf(agent)) void this.attach(chat).catch((error) => this.report(chat, error));
+      this.refreshUsage(agent);
+    }, AGENT_RESTART_MS);
   }
 
   /** While chats are open, an unreachable sandbox is tried again every 10 s. */
@@ -663,13 +731,21 @@ export class WebWorker {
       elicitUrl: (request: UrlElicitation) => this.events.elicitUrl(this, request),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),
       show: (request: ShowRequest) => this.events.show(this, request),
-      terminalOutput: (terminalId: string, data: string) => this.events.terminalOutput(terminalId, data),
+      terminalOutput: (terminalId: string, data: string, replayed?: boolean) => this.events.terminalOutput(terminalId, data, replayed === true),
       terminalExit: (terminalId: string, exitCode: number) => this.events.terminalExit(terminalId, exitCode),
-      usage: (usage: WorkerUsage) => this.setUsage(usage),
+      usage: (agent: AgentName, usage: WorkerUsage) => this.setUsage(agent, usage),
+      agents: (agents: AgentState[]) => {
+        this.agents = agents;
+      },
       wrapUp: (notice: WrapUpNotice) => this.events.wrapUp(this, notice),
       terminals: (terminals: ChatTerminal[]) => this.setTerminals(terminals),
+      shells: (shells: ShellTerminal[]) => {
+        this.shells = shells;
+        this.shellsKnown = true;
+      },
       subagent: (_parentKey: string, subagent: SubagentSummary) => this.subagentChanged(subagent),
-      subagentSettings: (state: SubagentSettingsState) => this.setSubagentSettings(state),
+      subagentSettings: (agent: AgentName, state: SubagentSettingsState) => this.setSubagentSettings(agent, state),
+      agentClosed: (agent: AgentName, _reason: string, code: number) => this.agentClosed(agent, code, generation),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };
   }

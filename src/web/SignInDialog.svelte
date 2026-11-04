@@ -3,6 +3,8 @@
   // with a key, or with its sign-in command in a terminal. The login stays in
   // the sandbox's project.
   import { untrack } from 'svelte';
+  import type { EndpointModel, SavedCredentials } from '../client/workerConnection.ts';
+  import EndpointModels from './EndpointModels.svelte';
   import { app } from './lib/app.svelte.ts';
 
   const signIn = app.signIn;
@@ -11,16 +13,23 @@
   /** Which keys code flower keeps for the agent. */
   let provider = $state<'deepseek' | 'compatible'>('deepseek');
   let baseURL = $state('');
-  let models = $state('');
   let reasoningEfforts = $state('low, medium, high');
   /** The sign-in terminal ended without signing in. */
   let failed = $state(false);
+  /** The endpoint's models the agent's picker offers, with their settings. */
+  let models = $state<EndpointModel[]>([]);
+  /** What the agent has saved, to edit: the form starts from it. */
+  let saved = $state<SavedCredentials | undefined>();
+  /** A blank key keeps the saved one, for the URL it was saved with only. */
+  const keepsKey = $derived(
+    provider === 'compatible' ? !!saved?.openaiCompatible?.hasKey && saved.openaiCompatible.baseURL === baseURL.trim() : !!saved?.deepseekKey
+  );
 
   const step = $derived(signIn.step);
-  const modelList = $derived(models.split(',').map((model) => model.trim()).filter(Boolean));
+  const urlReady = $derived(/^https?:\/\/\S+$/.test(baseURL.trim()));
   const effortList = $derived(reasoningEfforts.split(',').map((effort) => effort.trim()).filter(Boolean));
   const keysReady = $derived(
-    !!apiKey.trim() && (provider === 'deepseek' || (/^https?:\/\/\S+$/.test(baseURL.trim()) && modelList.length > 0))
+    provider === 'deepseek' ? !!apiKey.trim() : (!!apiKey.trim() || keepsKey) && urlReady && models.length > 0
   );
 
   $effect(() => {
@@ -37,8 +46,21 @@
     untrack(() => {
       apiKey = '';
       failed = false;
+      if (step.kind === 'keys') void load();
     });
   });
+
+  async function load(): Promise<void> {
+    saved = undefined;
+    const found = await signIn.worker?.connection?.savedCredentials(signIn.agent).catch(() => undefined);
+    if (!found || step.kind !== 'keys') return;
+    saved = found;
+    if (found.openaiCompatible) {
+      provider = 'compatible';
+      baseURL = found.openaiCompatible.baseURL;
+      reasoningEfforts = found.openaiCompatible.reasoningEfforts.join(', ');
+    }
+  }
 
   function submitKey(event: SubmitEvent): void {
     event.preventDefault();
@@ -54,7 +76,7 @@
         : {
             openaiCompatible: {
               baseURL: baseURL.trim(),
-              models: modelList,
+              models,
               reasoningEfforts: effortList,
               apiKey: apiKey.trim()
             }
@@ -70,7 +92,9 @@
   aria-labelledby="sign-in-title"
 >
   <div class="card flex flex-col gap-3 p-5">
-    <h2 id="sign-in-title" class="m-0 font-display text-lg font-medium">Sign in to {signIn.label}</h2>
+    <h2 id="sign-in-title" class="m-0 font-display text-lg font-medium">
+      {step.kind === 'keys' && (saved?.openaiCompatible || saved?.deepseekKey) ? `${signIn.label}: keys and models` : `Sign in to ${signIn.label}`}
+    </h2>
 
     {#if step.kind === 'pick'}
       {#if step.methods.length}
@@ -98,7 +122,11 @@
       </form>
     {:else if step.kind === 'keys'}
       <form class="flex flex-col gap-3" onsubmit={submitKeys} autocomplete="off">
-        <p class="m-0 text-muted">code flower saves the keys in the sandbox's project and restarts the agent to use them.</p>
+        <p class="m-0 text-muted">
+          code flower saves the keys in the sandbox's project and restarts the agent to use them.{saved?.openaiCompatible || saved?.deepseekKey
+            ? ' The form shows what is saved; change what you need.'
+            : ''}
+        </p>
         <fieldset class="m-0 flex flex-col gap-1.5 border-0 p-0">
           <legend class="sr-only">Which service</legend>
           <label class="flex items-center gap-2"><input type="radio" bind:group={provider} value="deepseek" /> DeepSeek API key</label>
@@ -109,9 +137,27 @@
         </fieldset>
         {#if provider === 'compatible'}
           <input class="field font-mono" bind:value={baseURL} placeholder="https://openrouter.ai/api/v1" aria-label="Base URL of the API" spellcheck="false" />
-          <input class="field font-mono" bind:value={models} placeholder="Model ids, separated by commas" aria-label="Model ids" spellcheck="false" />
+        {/if}
+        <input
+          class="field font-mono"
+          type="password"
+          bind:value={apiKey}
+          placeholder={keepsKey ? (provider === 'deepseek' ? 'New API key (a key is saved)' : 'API key (leave blank to keep the saved one)') : 'API key'}
+          aria-label="API key"
+          spellcheck="false"
+        />
+        {#if provider === 'compatible'}
+          <EndpointModels
+            connection={signIn.worker?.connection}
+            agent={signIn.agent}
+            {baseURL}
+            {apiKey}
+            keySaved={keepsKey}
+            saved={saved?.openaiCompatible?.models ?? []}
+            bind:models
+          />
           <label class="flex flex-col gap-1">
-            <span class="text-[0.9em] text-muted">Reasoning effort values (comma-separated; leave blank to hide the picker)</span>
+            <span class="text-[0.9em] text-muted">Reasoning effort values for the models that think (comma-separated; leave blank to hide the picker)</span>
             <input
               class="field font-mono"
               bind:value={reasoningEfforts}
@@ -121,10 +167,9 @@
             />
           </label>
         {/if}
-        <input class="field font-mono" type="password" bind:value={apiKey} placeholder="API key" aria-label="API key" spellcheck="false" />
         <footer class="flex justify-end gap-2">
           <button type="button" class="pill" onclick={() => dialog?.close()}>Cancel</button>
-          <button type="submit" class="pill pill-primary" disabled={!keysReady}>Save and restart the agent</button>
+          <button type="submit" class="pill pill-primary" disabled={!keysReady}>Save</button>
         </footer>
       </form>
     {:else if step.kind === 'working'}
@@ -137,6 +182,7 @@
       {:then { default: SignInTerminal }}
         <SignInTerminal
           worker={signIn.worker}
+          agent={signIn.agent}
           method={step.method}
           onExit={(exitCode) => {
             failed = exitCode !== 0;

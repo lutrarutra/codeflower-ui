@@ -1,7 +1,8 @@
 // What the whole page shares: the computers and their sandboxes (polled), a
 // quit in progress, and where the page is (#/chat/…, #/focus/… or #/server/…).
 // Through the tunnel the page shows every paired computer (machines.svelte.ts).
-import type { WrapUpNotice } from '../../client/workerConnection.ts';
+import { agentOfKey, type WrapUpNotice } from '../../client/workerConnection.ts';
+import type { AgentName } from '../../protocol/messages.ts';
 import { pairedComputers } from '../../tunnel/computers.ts';
 import { tunnelConnectorId } from '../../tunnel/connect.ts';
 import type { QuitPlan, SystemInfo, Worker } from './api.ts';
@@ -10,10 +11,11 @@ import { chooseHead, fromLink, gone, splitId } from './machineIds.ts';
 import { Machine, type RequestOptions } from './machines.svelte.ts';
 import { Previews } from './previews.svelte.ts';
 import { SignIn } from './signIn.svelte.ts';
+import { TerminalViews } from './terminalViews.ts';
 import { Attention } from './attention.svelte.ts';
 import { Focus } from './focus.svelte.ts';
 import { INTERACTIVE } from './previews.svelte.ts';
-import { Workbench, chatKeyOf, chatTab, splitTab, tabOf } from './workbench.svelte.ts';
+import { Workbench, chatKeyOf, chatTab, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'focus' | 'server';
@@ -107,11 +109,11 @@ class AppState {
     show: (worker, request) => this.previews.show(worker, request),
     openFile: (worker, chat, path) => void this.previews.openPath(worker, path, chat.key),
     openChat: (worker, key) => this.workbench.openChat(worker.id, key),
-    signIn: (worker) => void this.signIn.start(worker),
+    signIn: (worker, agent) => void this.signIn.start(worker, agent),
     elicitUrl: (worker, request) => this.signIn.elicitUrl(worker, request),
     elicitationComplete: (worker, elicitationId) => this.signIn.elicitationComplete(worker, elicitationId),
-    terminalOutput: (terminalId, data) => this.signIn.terminalOutput(terminalId, data),
-    terminalExit: (terminalId, exitCode) => this.signIn.terminalExit(terminalId, exitCode),
+    terminalOutput: (terminalId, data, replayed) => this.terminals.output(terminalId, data, replayed),
+    terminalExit: (terminalId, exitCode) => this.terminals.exit(terminalId, exitCode),
     wrapUp: (worker, notice) => {
       this.wrapUps[worker.id] = notice;
     }
@@ -126,9 +128,11 @@ class AppState {
 
   /** Signing a sandbox's agent in, and the links agents ask the user to open. */
   readonly signIn = new SignIn();
+  /** The terminals the page shows (a sign-in, the user's shells), by id. */
+  readonly terminals = new TerminalViews();
 
-  /** The sandbox whose agent's plugins the Plugins dialog shows. */
-  plugins = $state<{ worker: Worker; agent: WebWorker } | null>(null);
+  /** The sandbox, and its agent (`name`), whose plugins the Plugins dialog shows. */
+  plugins = $state<{ worker: Worker; agent: WebWorker; name: AgentName } | null>(null);
 
   /** Files shown from the sandboxes, in tabs of their workbenches. */
   readonly previews = new Previews({
@@ -174,22 +178,25 @@ class AppState {
   constructor() {
     this.workbench.mayClose = (tab) => {
       const { workerId, local } = splitTab(tab);
-      return !!chatKeyOf(local) || this.previews.mayClose(workerId, local);
+      return !!chatKeyOf(local) || !!terminalIdOf(local) || this.previews.mayClose(workerId, local);
     };
     this.workbench.onClose = (tab) => {
       const { workerId, local } = splitTab(tab);
-      if (!chatKeyOf(local)) this.previews.closed(workerId, local);
+      const terminalId = terminalIdOf(local);
+      // Closing a shell's tab ends the shell; leaving the page or losing the connection does not.
+      if (terminalId) void this.agents.get(workerId)?.connection?.closeTerminal(terminalId).catch(() => undefined);
+      else if (!chatKeyOf(local)) this.previews.closed(workerId, local);
     };
     this.workbench.onChatFocus = (chat) => {
       this.follow(chat);
       if (!chat) return;
       this.wake(chat.workerId);
-      this.agents.get(chat.workerId)?.refreshUsage();
+      this.agents.get(chat.workerId)?.refreshUsage(agentOfKey(chat.key));
     };
     // Back to the page: the chat in front shows the quota as it is now.
     window.addEventListener('focus', () => {
       const chat = this.workbench.focusedChat();
-      if (chat) this.agents.get(chat.workerId)?.refreshUsage();
+      if (chat) this.agents.get(chat.workerId)?.refreshUsage(agentOfKey(chat.key));
     });
     if (this.route.view === 'focus' && this.route.worker && this.route.session) this.focus.selected = { workerId: this.route.worker, key: this.route.session };
     else if (this.route.worker && this.route.session) this.workbench.openChat(this.route.worker, this.route.session);
@@ -387,6 +394,17 @@ class AppState {
 
   worker(id: string | undefined): Worker | undefined {
     return id ? this.workers.find((worker) => worker.id === id) : undefined;
+  }
+
+  /** Starts a shell in the sandbox and opens its tab; says why when it cannot. */
+  async openShell(workerId: string): Promise<void> {
+    const agent = this.agent(workerId);
+    await agent.connect();
+    const connection = agent.connection;
+    if (!connection?.shellTerminals) throw new Error('This sandbox cannot open terminals: it runs an older image.');
+    // The tab fits it to its size once shown.
+    const terminalId = await connection.startShell(100, 30);
+    this.workbench.openTerminal(workerId, terminalId);
   }
 
   /** The sandbox's agent as the page reaches it; made on first use. */

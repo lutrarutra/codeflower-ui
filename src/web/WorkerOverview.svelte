@@ -4,21 +4,25 @@
   // A tab of its own, and what an empty grid shows.
   import ErrorState from '../chat/lib/ErrorState.svelte';
   import OfflineState from '../chat/lib/OfflineState.svelte';
+  import SandboxDialog from './SandboxDialog.svelte';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ActivityChips from './lib/ActivityChips.svelte';
   import AgentSetup from './lib/AgentSetup.svelte';
+  import AgentIcon from '../chat/lib/AgentIcon.svelte';
+  import { agentPresentation } from '../protocol/messages.ts';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
   import ConnectLine from './lib/ConnectLine.svelte';
   import { ago, SOURCE_TITLE, statusText, workerTitle } from './lib/format.ts';
   import StatusDot from './lib/StatusDot.svelte';
-  import UsageChips from './lib/UsageChips.svelte';
   import { chatTab, endDrag, startDrag } from './lib/workbench.svelte.ts';
   import type { WebWorker } from './lib/worker.svelte.ts';
 
   let { worker, agent, elsewhere }: { worker: Worker; agent: WebWorker; elsewhere: boolean } = $props();
   const [name, where] = $derived(workerTitle(worker));
+  // The sandbox while its name, address or place in the list is being changed.
+  let managing: Worker | null = $state(null);
 </script>
 
 <main class="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-auto px-4 py-6">
@@ -27,8 +31,13 @@
     <div class="min-w-0 flex-1">
       <h1 class="m-0 font-display text-2xl font-medium">{name}</h1>
       <p class="m-0 text-muted" title={SOURCE_TITLE[worker.source]}>{where} · {statusText(worker)}</p>
-      <div class="mt-2 flex flex-wrap gap-1.5"><ActivityChips {worker} /><UsageChips {worker} /></div>
+      <div class="mt-2 flex flex-wrap gap-1.5"><ActivityChips {worker} /></div>
     </div>
+    {#if !app.single}
+      <button class="pill pill-small shrink-0" title="Rename, change its address or token, or remove it" onclick={() => (managing = worker)}
+        ><span class="codicon codicon-edit"></span>Edit</button
+      >
+    {/if}
   </header>
   {#if worker.kind === 'task'}
     <p class="m-0 text-muted">This sandbox runs a task by itself and has no chat; its terminal shows its progress.</p>
@@ -48,7 +57,7 @@
                 ondragend={endDrag}
                 onclick={() => app.go({ view: 'chat', worker: worker.id, session: session.key })}
               >
-                <span class="codicon codicon-comment text-muted"></span>
+                <AgentIcon agent={agentPresentation(session.harness, agent.agent(session.harness))} size="1em" title={agent.agent(session.harness)?.name ?? session.harness} />
                 <ChatTitle title={session.title} />
                 <span class="text-[0.8em] text-muted" title={new Date(session.updatedAt).toLocaleString()}>{ago(Date.parse(session.updatedAt))}</span>
               </button>
@@ -74,3 +83,5 @@
     </details>
   {/if}
 </main>
+
+<SandboxDialog bind:worker={managing} />

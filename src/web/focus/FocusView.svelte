@@ -5,6 +5,7 @@
   import { untrack } from 'svelte';
   import App from '../../chat/App.svelte';
   import Skeleton from '../../chat/lib/Skeleton.svelte';
+  import { agentOfKey } from '../../client/workerConnection.ts';
   import { app } from '../lib/app.svelte.ts';
   import { foldSteps, setFoldSteps } from '../lib/foldSteps.svelte.ts';
   import { favoriteModels, setFavoriteModel } from '../lib/favoriteModels.svelte.ts';
@@ -15,6 +16,8 @@
   const worker = $derived(selected ? app.worker(selected.workerId) : undefined);
   const agent = $derived(selected ? app.agent(selected.workerId) : undefined);
   const chat = $derived(selected && agent ? agent.chats[selected.key] : undefined);
+  // The chat's agent, which may not be signed in.
+  const chatAgent = $derived(selected && agent ? agent.agent(agentOfKey(selected.key)) : undefined);
   const elsewhere = $derived(!!worker && app.elsewhere(worker));
   const next = $derived(app.focus.next);
   // The way on shows once this chat no longer waits for the user.
@@ -131,10 +134,10 @@
         </span>
         <button class="pill pill-small pill-primary" onclick={() => void app.openHere(worker)}>Open here</button>
       </section>
-    {:else if agent?.connected && agent.status?.signedIn === false}
+    {:else if agent?.connected && chatAgent?.signedIn === false}
       <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-2.5" role="status">
-        <span class="min-w-0 flex-1">{agent.status.agentLabel} is not signed in for this project, so it cannot answer yet.</span>
-        <button class="pill pill-small pill-primary" onclick={() => void app.signIn.start(agent)}>Sign in</button>
+        <span class="min-w-0 flex-1">{chatAgent.name} is not signed in for this project, so it cannot answer yet.</span>
+        <button class="pill pill-small pill-primary" onclick={() => void app.signIn.start(agent, chatAgent.id)}>Sign in</button>
       </section>
     {:else if agent?.state === 'connecting'}
       <p class="m-0 px-4 py-2.5 text-muted"><span class="spinner"></span> Connecting to {workerTitle(worker)[0]}…</p>

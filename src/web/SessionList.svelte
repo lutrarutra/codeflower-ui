@@ -1,33 +1,51 @@
 <script lang="ts">
-  // The chosen sandbox's chats, the sidebar's view of it: a new chat, then the chats, latest first.
+  // The chosen sandbox's chats, the sidebar's view of it: the agent and a new chat, then the chats, latest first.
   import { untrack } from 'svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import ChatTitle from '../chat/lib/ChatTitle.svelte';
+  import AgentIcon from '../chat/lib/AgentIcon.svelte';
+  import AgentSwitch from './AgentSwitch.svelte';
   import { ago } from './lib/format.ts';
+  import { newChatAgent, rememberAgent } from './lib/newChatAgent.ts';
   import { chatTab, endDrag, startDrag, tabOf } from './lib/workbench.svelte.ts';
+  import { agentPresentation, type AgentName } from '../protocol/messages.ts';
 
   let { worker, onNavigate }: { worker: Worker; onNavigate: () => void } = $props();
   const agent = $derived(app.agent(worker.id));
   let creating = $state(false);
   let error = $state('');
+  const project = $derived(worker.project || worker.id);
+  /** The agent the user chose here; else the one remembered for the project. */
+  let chosen = $state<AgentName | undefined>();
+  const choice = $derived(newChatAgent(agent.agents, project, chosen));
+  const chosenAgent = $derived(choice ? agent.agent(choice) : undefined);
 
-  // The list comes from the app without connecting; once connected, from the agent. An older
-  // sandbox lists its chats only to a connection: connect, unless another window has it (connecting
-  // would take it over).
+  // The list comes from the app without connecting; once connected, from the sandbox, which also
+  // tells its agents. Connecting starts no agent.
   $effect(() => {
     const current = agent;
     void worker.activity?.chats.length;
     const ready = worker.status === 'ready';
-    const elsewhere = !!worker.activity?.connected && !worker.activity.multiClient && worker.relays === 0;
     untrack(async () => {
-      if (await current.listSessions()) return;
-      if (ready && !elsewhere && current.state === 'idle') await current.connect().catch(() => undefined);
+      const listed = await current.listSessions();
+      if (ready && current.state === 'idle') await current.connect().catch(() => undefined);
       // Not listed and not connecting: show what is known rather than loading forever.
-      if (!current.connected) current.sessionsKnown = true;
+      if (!listed && !current.connected) current.sessionsKnown = true;
     });
   });
+
+  function select(name: AgentName): void {
+    chosen = name;
+    rememberAgent(project, name);
+  }
+
+  /** The chat's agent as its row shows it. */
+  function presentation(harness: AgentName) {
+    const state = agent.agent(harness);
+    return agentPresentation(harness, state);
+  }
 
   const DOT: Record<string, string> = { working: 'bg-cyan', waiting: 'bg-orange', ready: 'bg-green', offline: 'bg-muted' };
 
@@ -57,10 +75,17 @@
   }
 
   async function newChat(): Promise<void> {
+    const name = choice;
+    if (!name) return;
+    // An agent not signed in yet signs in first.
+    if (chosenAgent && !chosenAgent.signedIn) {
+      void app.signIn.start(agent, name);
+      return;
+    }
     creating = true;
     error = '';
     try {
-      const key = await agent.newChat();
+      const key = await agent.newChat(name);
       if (key) app.go({ view: 'chat', worker: worker.id, session: key });
       onNavigate();
     } catch (failure) {
@@ -72,9 +97,23 @@
 </script>
 
 <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
+  {#if agent.agents.length > 1}
+    <li class="pb-1"><AgentSwitch agents={agent.agents} selected={choice} onselect={select} /></li>
+  {/if}
   <li class="pb-1.5">
-    <button class="pill pill-small pill-primary w-full justify-center" disabled={creating} onclick={newChat}>
-      <span class="codicon codicon-add"></span>{creating ? 'Starting…' : 'New chat'}
+    <button
+      class="pill pill-small pill-primary w-full justify-center"
+      disabled={creating || (agent.connected && !choice)}
+      title={chosenAgent ? `A new chat with ${chosenAgent.name}${chosenAgent.signedIn ? '' : ': sign it in first'}` : undefined}
+      onclick={newChat}
+    >
+      <span class="codicon codicon-add"></span>{creating
+        ? 'Starting…'
+        : chosenAgent && !chosenAgent.signedIn
+          ? `Sign in to ${chosenAgent.name}…`
+          : chosenAgent
+            ? `New chat with ${chosenAgent.name}`
+            : 'New chat'}
     </button>
   </li>
   {#if error}<li class="px-2 py-1 text-[0.85em] text-red">{error}</li>{/if}
@@ -109,6 +148,7 @@
         {:else}
           <span class="size-2 shrink-0 rounded-full {status ? DOT[status] : 'bg-transparent'}" class:animate-pulse={status === 'working'}></span>
         {/if}
+        <AgentIcon agent={presentation(session.harness)} size="0.95em" title={presentation(session.harness)?.name ?? session.harness} />
         <span class="flex min-w-0 flex-1" class:font-semibold={need}><ChatTitle title={session.title} /></span>
         {#if session.updatedAt}
           <span class="shrink-0 text-[0.8em] font-normal text-muted" title={new Date(session.updatedAt).toLocaleString()}>{ago(Date.parse(session.updatedAt))}</span>

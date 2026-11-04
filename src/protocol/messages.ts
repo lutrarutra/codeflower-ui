@@ -23,6 +23,10 @@ export interface AgentPresentation {
   name?: string;
   /** The agent's accent: one of the chat's palette names (orange, teal, …), or any CSS color. */
   color?: string;
+  /** Its logo: an SVG as a data URL, shown in an <img> (where it runs no script). */
+  icon?: string;
+  /** The logo is drawn in currentColor, which an <img> does not inherit: it is shown as a mask in the text's color. */
+  iconMono?: boolean;
 }
 
 /** The palette's accents, which follow the light or dark theme. */

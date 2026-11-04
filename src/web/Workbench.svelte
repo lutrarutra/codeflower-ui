@@ -15,7 +15,7 @@
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
   import { INTERACTIVE } from './lib/previews.svelte.ts';
-  import { chatKeyOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab } from './lib/workbench.svelte.ts';
+  import { chatKeyOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
   import ReportFrame from './ReportFrame.svelte';
   import WorkerOverview from './WorkerOverview.svelte';
   import { workerTitle } from './lib/format.ts';
@@ -96,8 +96,21 @@
   $effect(() => {
     for (const tab of layout.tabs()) {
       const { workerId, local } = splitTab(tab);
-      if (chatKeyOf(local) || local === OVERVIEW) continue;
+      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local)) continue;
       if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
+    }
+  });
+
+  // A shell that ended, here or elsewhere, leaves the grid once its sandbox lists its shells without it.
+  $effect(() => {
+    for (const tab of layout.tabs()) {
+      const { workerId, local } = splitTab(tab);
+      const terminalId = terminalIdOf(local);
+      if (!terminalId || !app.worker(workerId)) continue;
+      const agent = app.agent(workerId);
+      if (agent.connected && agent.shellsKnown && !agent.shells.some((shell) => shell.terminalId === terminalId)) {
+        untrack(() => workbench.remove(tab));
+      }
     }
   });
 
@@ -127,6 +140,7 @@
     }
     const worker = app.worker(workerId);
     if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
+    if (terminalIdOf(local)) return { icon: 'terminal', label: 'Terminal', title: named(workerId, 'A shell in the sandbox; closing the tab ends it') };
     const preview = app.previews.find(workerId, local);
     const interactive = local.endsWith(INTERACTIVE);
     return {
@@ -267,6 +281,11 @@
     {/if}
   {:else if local === OVERVIEW}
     {#if worker}<WorkerOverview {worker} {agent} elsewhere={app.elsewhere(worker)} />{/if}
+  {:else if terminalIdOf(local)}
+    <!-- xterm.js loads with the first terminal. -->
+    {#await import('./ShellTerminal.svelte') then { default: ShellTerminal }}
+      <ShellTerminal {workerId} terminalId={terminalIdOf(local)!} />
+    {/await}
   {:else}
     {@const preview = app.previews.find(workerId, local)}
     {#if preview && local.endsWith(INTERACTIVE)}

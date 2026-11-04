@@ -37,24 +37,21 @@ export function pageUpTo(page: TranscriptPage, count: number | undefined): Trans
   return count === undefined ? page : { ...page, entries: page.entries.slice(0, Math.max(0, count - page.start)) };
 }
 
-export interface WorkerStatus {
-  instanceId: string;
-  agent: AgentName;
-  agentLabel: string;
-  /** The agent's presentation from its descriptor; missing from older workers. */
-  agentInfo?: Partial<AgentPresentation>;
+/**
+ * One agent of the sandbox (`_codeflower/agents`): how windows show it, whether it can run here and is
+ * signed in, and what it offers.
+ */
+export interface AgentState extends AgentPresentation {
+  name: string;
+  /** Why the agent cannot run in this sandbox, e.g. Claude Code was not downloaded. */
+  unavailable?: string;
   signedIn: boolean;
   /** 'agent': the agent signs in itself (ACP); 'keys': code flower stores keys for it (dsh). */
   credentials: 'agent' | 'keys';
-  stateDirectory: string | null;
-  engine: string;
-  slurmJobId?: string;
-  /** When the batch job ends (ISO 8601); chats are asked to wrap up before. Missing without a known end. */
-  allocationEnd?: string;
-  /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
-  mounts?: Mount[];
-  /** What the worker offers beyond chats; missing from older workers. */
-  capabilities?: {
+  running: boolean;
+  /** The running agent takes changed keys or settings only when it starts again. */
+  restartPending: boolean;
+  capabilities: {
     plugins?: boolean;
     /** Chats open in the agent's own terminal UI (`codeflower attach`). */
     chatTerminals?: boolean;
@@ -63,9 +60,42 @@ export interface WorkerStatus {
   };
 }
 
+/**
+ * The sandbox, as `_codeflower/status` says: on an agent's connection also that agent (`agent` …
+ * `credentials`), on the sandbox's own only the sandbox.
+ */
+export interface WorkerStatus {
+  instanceId: string;
+  agent?: AgentName;
+  agentLabel?: string;
+  /** The agent's presentation from its descriptor. */
+  agentInfo?: Partial<AgentPresentation>;
+  signedIn?: boolean;
+  /** 'agent': the agent signs in itself (ACP); 'keys': code flower stores keys for it (dsh). */
+  credentials?: 'agent' | 'keys';
+  /** Every agent of the sandbox. */
+  agents: AgentState[];
+  /** Sending files both ways, as an agent's `initialize` says it. */
+  files?: FileTransfers;
+  stateDirectory: string | null;
+  engine: string;
+  slurmJobId?: string;
+  /** When the batch job ends (ISO 8601); chats are asked to wrap up before. Missing without a known end. */
+  allocationEnd?: string;
+  /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
+  mounts?: Mount[];
+  /** What the worker offers beyond chats; on an agent's connection also that agent's. */
+  capabilities?: AgentState['capabilities'] & {
+    /** The user's shells in the sandbox (the page's Terminal). */
+    shellTerminals?: boolean;
+  };
+}
+
 /** A chat open in the agent's own terminal UI (`codeflower attach`), running in the sandbox. */
 export interface ChatTerminal {
   terminalId: string;
+  /** Missing from workers older than shells. */
+  kind?: 'chat';
   sessionKey: string;
   sessionId: string;
   /** shared: the chat goes on here too (OpenCode, Codex); handoff: the terminal has it (Claude Code). */
@@ -73,6 +103,23 @@ export interface ChatTerminal {
   /** Terminals that watch it now. */
   viewers: number;
   startedAt: string;
+}
+
+/** The user's shell, running in the sandbox until it ends or is closed. */
+export interface ShellTerminal {
+  terminalId: string;
+  kind: 'shell';
+  /** Windows that show it now. */
+  viewers: number;
+  startedAt: string;
+}
+
+/** The terminals a worker lists: chats' terminal UIs and the user's shells. */
+export function splitTerminals(terminals: (ChatTerminal | ShellTerminal)[]): { chats: ChatTerminal[]; shells: ShellTerminal[] } {
+  return {
+    chats: terminals.filter((terminal): terminal is ChatTerminal => terminal.kind !== 'shell'),
+    shells: terminals.filter((terminal): terminal is ShellTerminal => terminal.kind === 'shell')
+  };
 }
 
 /** What a plugin adds, when known before it is fetched. */
@@ -174,7 +221,7 @@ export interface SessionRecord {
   usage?: UsageTotals | null;
 }
 
-/** What the worker's agent is doing, sent by the worker whenever it changes. */
+/** What the worker's agents are doing, sent by the worker whenever it changes. */
 export interface WorkerActivity {
   chats: { key: string; state: 'working' | 'waiting'; waitingFor?: 'plan' | 'permission' | 'question' }[];
   working: number;
@@ -266,9 +313,43 @@ export interface ShowRequest {
   sessionKey?: string;
 }
 
+/**
+ * A model an OpenAI-compatible endpoint serves, as `_codeflower/credentials/models` lists it: what the endpoint
+ * says of it. `reasoning` is missing when the endpoint does not say; `false` turns the agent's effort picker off.
+ */
+export interface EndpointModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  input?: ('text' | 'image')[];
+  reasoning?: boolean;
+}
+
+/**
+ * Whether an OpenAI-compatible endpoint answers (`modelsStatus`: its `GET /models`) and takes the key
+ * (`keyAccepted`, missing when it cannot tell or no key was given), as `_codeflower/credentials/check` finds.
+ */
+export interface EndpointCheck {
+  reachable: boolean;
+  error?: string;
+  modelsStatus?: number;
+  keyStatus?: number;
+  keyAccepted?: boolean;
+}
+
+/** The keys an agent has saved, and its OpenAI-compatible route to edit, without the key, from `_codeflower/credentials/get`. */
+export interface SavedCredentials {
+  deepseekKey: boolean;
+  openaiCompatible?: { baseURL: string; models: EndpointModel[]; reasoningEfforts: string[]; hasKey: boolean };
+}
+
 export interface DshCredentials {
   deepseekApiKey?: string;
-  openaiCompatible?: { baseURL: string; models: string[]; reasoningEfforts?: string[]; apiKey: string };
+  /**
+   * `models` takes ids, or entries as listed (older bridges take ids only). A blank `apiKey` keeps the one saved for
+   * the same `baseURL`.
+   */
+  openaiCompatible?: { baseURL: string; models: (string | EndpointModel)[]; reasoningEfforts?: string[]; apiKey: string };
 }
 
 export interface CodeflowerHandlers {
@@ -279,27 +360,56 @@ export interface CodeflowerHandlers {
   /** The agent ran `codeflower-show`: the user should see these files. */
   show(request: ShowRequest): void;
   activity(activity: WorkerActivity): void;
-  /** Token counts, cost, or the login's quota changed. */
-  usage(usage: WorkerUsage): void;
+  /** Token counts, cost, or the login's quota of `agent` changed. */
+  usage(agent: AgentName, usage: WorkerUsage): void;
+  /** An agent started or stopped, or signed in. */
+  agents?(agents: AgentState[]): void;
   /** For the worker (no key), or for one chat, with the prompt the worker sent it. */
   wrapUp(notice: WrapUpNotice & { key?: string; prompt?: string }): void;
-  terminalOutput(terminalId: string, data: string): void;
+  /** `replayed`: what the terminal printed before the window attached to it. */
+  terminalOutput(terminalId: string, data: string, replayed?: boolean): void;
   terminalExit(terminalId: string, exitCode: number): void;
-  /** The plugins changed (added, fetched, switched, or the agent restarted): list them again. */
-  pluginsChanged?(): void;
+  /** The agent's plugins changed (added, fetched, switched, or the agent restarted): list them again. */
+  pluginsChanged?(agent: AgentName): void;
   /** A chat's terminal UI started, ended, or a terminal attached to it or left. */
   terminals?(terminals: ChatTerminal[]): void;
+  /** A shell started, ended, or a window attached to it or left. */
+  shells?(shells: ShellTerminal[]): void;
   /** One of a chat's subagents changed (`parentKey`: the chat). */
   subagentChanged?(parentKey: string, subagent: SubagentSummary): void;
-  /** The subagents' defaults changed, from any window. */
-  subagentSettingsChanged?(state: SubagentSettingsState): void;
+  /** An agent's subagent defaults changed, from any window. */
+  subagentSettingsChanged?(agent: AgentName, state: SubagentSettingsState): void;
 }
 
+/** A notification about one agent carries its name. */
+type ForAgent<T> = T & { agent: AgentName };
+
+/**
+ * The bridge's methods on one connection. With `agent`, those that are an agent's (its usage, keys,
+ * plugins, subagent defaults, restart) name it, as the sandbox's own window must; on an agent's window
+ * they are that agent's. With `handlers`, it also takes the bridge's notifications.
+ */
 export class CodeflowerExtensions {
   private readonly rpc: RpcConnection;
+  private readonly agent: AgentName | undefined;
 
-  constructor(rpc: RpcConnection, handlers: CodeflowerHandlers) {
+  constructor(rpc: RpcConnection, handlers?: CodeflowerHandlers, agent?: AgentName) {
     this.rpc = rpc;
+    this.agent = agent;
+    if (handlers) this.listen(handlers);
+  }
+
+  /** The same connection, for another agent's methods; it takes no notifications. */
+  forAgent(agent: AgentName): CodeflowerExtensions {
+    return new CodeflowerExtensions(this.rpc, undefined, agent);
+  }
+
+  private named<T extends object>(params: T): T & { agent?: AgentName } {
+    return this.agent ? { ...params, agent: this.agent } : params;
+  }
+
+  private listen(handlers: CodeflowerHandlers): void {
+    const rpc = this.rpc;
     rpc.on('_codeflower/shell/output', (params) => {
       const { runId, data } = params as { runId: string; data: string };
       handlers.shellOutput(runId, data);
@@ -312,55 +422,58 @@ export class CodeflowerExtensions {
     );
     rpc.on('_codeflower/show', (params) => handlers.show(params as ShowRequest));
     rpc.on('_codeflower/activity', (params) => handlers.activity(params as WorkerActivity));
-    rpc.on('_codeflower/usage', (params) => handlers.usage(params as WorkerUsage));
+    rpc.on('_codeflower/usage', (params) => {
+      const { agent, ...usage } = params as ForAgent<WorkerUsage>;
+      handlers.usage(agent, usage);
+    });
+    rpc.on('_codeflower/agents', (params) => handlers.agents?.((params as { agents: AgentState[] }).agents));
     rpc.on('_codeflower/wrapUp', (params) => handlers.wrapUp(params as WrapUpNotice & { key?: string; prompt?: string }));
     rpc.on('_codeflower/terminal/output', (params) => {
-      const { terminalId, data } = params as { terminalId: string; data: string };
-      handlers.terminalOutput(terminalId, data);
+      const { terminalId, data, replayed } = params as { terminalId: string; data: string; replayed?: boolean };
+      handlers.terminalOutput(terminalId, data, replayed === true);
     });
     rpc.on('_codeflower/terminal/exit', (params) => {
       const { terminalId, exitCode } = params as { terminalId: string; exitCode: number };
       handlers.terminalExit(terminalId, exitCode);
     });
-    rpc.on('_codeflower/plugins/changed', () => handlers.pluginsChanged?.());
+    rpc.on('_codeflower/plugins/changed', (params) => handlers.pluginsChanged?.((params as { agent: AgentName }).agent));
     rpc.on('_codeflower/subagents/changed', (params) => {
       const { parentKey, subagent } = params as { parentKey: string; subagent: SubagentSummary };
       handlers.subagentChanged?.(parentKey, subagent);
     });
-    rpc.on('_codeflower/subagents/settingsChanged', (params) => handlers.subagentSettingsChanged?.(params as SubagentSettingsState));
+    rpc.on('_codeflower/subagents/settingsChanged', (params) => {
+      const { agent, ...state } = params as ForAgent<SubagentSettingsState>;
+      handlers.subagentSettingsChanged?.(agent, state);
+    });
     rpc.on('_codeflower/terminal/changed', (params) => {
-      const { terminals } = params as { terminals?: ChatTerminal[] };
-      if (Array.isArray(terminals)) handlers.terminals?.(terminals);
+      const { terminals } = params as { terminals?: (ChatTerminal | ShellTerminal)[] };
+      if (!Array.isArray(terminals)) return;
+      const { chats, shells } = splitTerminals(terminals);
+      handlers.terminals?.(chats);
+      handlers.shells?.(shells);
     });
   }
 
-  /** The chats open in the agent's terminal UI; none from workers without them. */
-  async chatTerminals(): Promise<ChatTerminal[]> {
+  /** The chats open in the agent's terminal UI and the user's shells; none from workers without them. */
+  async terminals(): Promise<{ chats: ChatTerminal[]; shells: ShellTerminal[] }> {
     try {
-      return (await this.rpc.request<{ terminals: ChatTerminal[] }>('_codeflower/terminal/list', {})).terminals ?? [];
+      return splitTerminals((await this.rpc.request<{ terminals: (ChatTerminal | ShellTerminal)[] }>('_codeflower/terminal/list', {})).terminals ?? []);
     } catch {
-      return [];
+      return { chats: [], shells: [] };
     }
   }
 
-  /** Undefined when no bridge answers: the agent was reached directly. */
-  async status(): Promise<WorkerStatus | undefined> {
-    try {
-      return await this.rpc.request<WorkerStatus>('_codeflower/status', {});
-    } catch (error) {
-      if (isMethodNotFound(error)) return undefined;
-      throw error;
-    }
+  status(): Promise<WorkerStatus> {
+    return this.rpc.request<WorkerStatus>('_codeflower/status', {});
   }
 
-  /** Undefined from workers that do not track usage yet. */
-  async usage(): Promise<WorkerUsage | undefined> {
-    try {
-      return await this.rpc.request<WorkerUsage>('_codeflower/usage', {});
-    } catch (error) {
-      if (isMethodNotFound(error)) return undefined;
-      throw error;
-    }
+  /** The sandbox's agents. */
+  async agents(): Promise<AgentState[]> {
+    return (await this.rpc.request<{ agents: AgentState[] }>('_codeflower/agents', {})).agents;
+  }
+
+  usage(): Promise<WorkerUsage> {
+    return this.rpc.request<WorkerUsage>('_codeflower/usage', this.named({}));
   }
 
   /** Undefined when no bridge answers or when its image predates chat actions. */
@@ -507,7 +620,7 @@ export class CodeflowerExtensions {
   }
 
   async startTerminal(methodId: string, columns: number, rows: number): Promise<string> {
-    return (await this.rpc.request<{ terminalId: string }>('_codeflower/terminal/start', { methodId, columns, rows }))
+    return (await this.rpc.request<{ terminalId: string }>('_codeflower/terminal/start', this.named({ methodId, columns, rows })))
       .terminalId;
   }
 
@@ -519,15 +632,64 @@ export class CodeflowerExtensions {
     await this.rpc.request('_codeflower/terminal/close', { terminalId });
   }
 
+  /** A shell in the workspace, which this window shows; it runs until it ends or is closed. */
+  async startShell(columns: number, rows: number): Promise<string> {
+    return (await this.rpc.request<{ terminalId: string }>('_codeflower/terminal/start', { kind: 'shell', columns, rows })).terminalId;
+  }
+
+  /** Shows a running terminal here: what it printed so far comes as `replayed` output. */
+  async attachTerminal(terminalId: string, columns: number, rows: number): Promise<void> {
+    await this.rpc.request('_codeflower/terminal/attach', { terminalId, columns, rows });
+  }
+
+  async resizeTerminal(terminalId: string, columns: number, rows: number): Promise<void> {
+    await this.rpc.request('_codeflower/terminal/resize', { terminalId, columns, rows });
+  }
+
+  /** Stops showing a terminal here; it keeps running. */
+  async detachTerminal(terminalId: string): Promise<void> {
+    await this.rpc.request('_codeflower/terminal/detach', { terminalId });
+  }
+
   /** dsh keys; the agent must be restarted to pick them up. */
   async setCredentials(credentials: DshCredentials): Promise<void> {
-    await this.rpc.request('_codeflower/credentials/set', credentials);
+    await this.rpc.request('_codeflower/credentials/set', this.named(credentials));
+  }
+
+  /** The keys the agent has saved and its route; undefined from older bridges. */
+  async savedCredentials(): Promise<SavedCredentials | undefined> {
+    try {
+      return await this.rpc.request<SavedCredentials>('_codeflower/credentials/get', this.named({}));
+    } catch (error) {
+      if (isMethodNotFound(error)) return undefined;
+      throw error;
+    }
+  }
+
+  /** The models an OpenAI-compatible endpoint serves, read by the bridge from its `GET /models`. */
+  async endpointModels(baseURL: string, apiKey: string): Promise<EndpointModel[]> {
+    try {
+      return (await this.rpc.request<{ models: EndpointModel[] }>('_codeflower/credentials/models', this.named({ baseURL, apiKey }))).models;
+    } catch (error) {
+      if (isMethodNotFound(error)) throw new Error('this sandbox is too old to list the models; type their ids');
+      throw error;
+    }
+  }
+
+  /** Whether an OpenAI-compatible endpoint answers and takes the key, which the bridge tries without a completion. */
+  async checkEndpoint(baseURL: string, apiKey: string): Promise<EndpointCheck> {
+    try {
+      return await this.rpc.request<EndpointCheck>('_codeflower/credentials/check', this.named({ baseURL, apiKey }));
+    } catch (error) {
+      if (isMethodNotFound(error)) throw new Error('this sandbox is too old to test the endpoint');
+      throw error;
+    }
   }
 
   /** The agent's plugins; `{available: false}` from older bridges and agents without plugins. */
   async plugins(): Promise<PluginsOverview> {
     try {
-      return await this.rpc.request<PluginsOverview>('_codeflower/plugins/list', {});
+      return await this.rpc.request<PluginsOverview>('_codeflower/plugins/list', this.named({}));
     } catch (error) {
       if (isMethodNotFound(error)) return { available: false };
       throw error;
@@ -536,38 +698,38 @@ export class CodeflowerExtensions {
 
   /** A fetched catalog's plugins; `fetched: false` until it is fetched. */
   pluginCatalog(catalog: string): Promise<{ name: string; fetched: boolean; plugins: CatalogPlugin[] }> {
-    return this.rpc.request('_codeflower/plugins/catalog', { catalog });
+    return this.rpc.request('_codeflower/plugins/catalog', this.named({ catalog }));
   }
 
   /** Adds a plugin to the project. `pendingFetch`: the sandbox has no network, so the app has to fetch it. */
   addPlugin(source: string): Promise<{ id: string; pendingFetch: boolean }> {
-    return this.rpc.request('_codeflower/plugins/add', { source });
+    return this.rpc.request('_codeflower/plugins/add', this.named({ source }));
   }
 
   async removePlugin(id: string): Promise<void> {
-    await this.rpc.request('_codeflower/plugins/remove', { id });
+    await this.rpc.request('_codeflower/plugins/remove', this.named({ id }));
   }
 
   async setPluginEnabled(id: string, enabled: boolean): Promise<void> {
-    await this.rpc.request('_codeflower/plugins/setEnabled', { id, enabled });
+    await this.rpc.request('_codeflower/plugins/setEnabled', this.named({ id, enabled }));
   }
 
   addPluginCatalog(source: string): Promise<{ source: string; pendingFetch: boolean }> {
-    return this.rpc.request('_codeflower/plugins/catalogs/add', { source });
+    return this.rpc.request('_codeflower/plugins/catalogs/add', this.named({ source }));
   }
 
   async removePluginCatalog(source: string): Promise<void> {
-    await this.rpc.request('_codeflower/plugins/catalogs/remove', { source });
+    await this.rpc.request('_codeflower/plugins/catalogs/remove', this.named({ source }));
   }
 
   /** Fetches what is missing in the sandbox; refused (`pendingFetch`) without its network. */
   async fetchPlugins(): Promise<void> {
-    await this.rpc.request('_codeflower/plugins/fetch', {});
+    await this.rpc.request('_codeflower/plugins/fetch', this.named({}));
   }
 
-  /** Ends the worker's agent (refused while chats are working); the next connection starts a fresh one. */
+  /** Ends the agent (refused while its chats are working); its next connection starts a fresh one. */
   async restartAgent(): Promise<void> {
-    await this.rpc.request('_codeflower/agent/restart', {});
+    await this.rpc.request('_codeflower/agent/restart', this.named({}));
   }
 
   // ---- subagents ----
@@ -592,7 +754,7 @@ export class CodeflowerExtensions {
 
   /** The subagents' defaults; `settings` changes them first. */
   subagentSettings(settings?: Partial<SubagentSettings>): Promise<SubagentSettingsState> {
-    return this.rpc.request<SubagentSettingsState>('_codeflower/subagents/settings', settings ? { settings } : {});
+    return this.rpc.request<SubagentSettingsState>('_codeflower/subagents/settings', this.named(settings ? { settings } : {}));
   }
 }
 

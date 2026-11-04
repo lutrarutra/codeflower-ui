@@ -1,16 +1,20 @@
-// The host side of the Plugins view (chat/Plugins.svelte): answers its calls
-// from the worker's connection and tells it when the plugins changed. The
+// The host side of the Plugins view (chat/Plugins.svelte) for one agent:
+// answers its calls from the worker's connection and tells it when the
+// agent's plugins changed. The
 // page and the VS Code extension host both use it, with their own way to
 // reconnect after a restart and, on the page, the app's fetch run.
+import type { AgentName } from '../protocol/messages.ts';
 import type { PluginsHostMessage, PluginsWebviewMessage } from '../protocol/plugins.ts';
 import type { WorkerConnection } from './workerConnection.ts';
 
 export interface PluginsServiceOptions {
-  /** The worker's connection now; it changes when the agent restarts. */
+  /** The worker's connection now; it changes when the sandbox reconnects. */
   connection(): WorkerConnection | undefined;
+  /** The agent whose plugins these are. */
+  agent: AgentName;
   send(message: PluginsHostMessage): void;
   agentLabel: string;
-  /** Restarts the agent and reconnects; resolves once connected again. */
+  /** Restarts the agent; resolves once it is asked to. */
   restart(): Promise<void>;
   /** The app's fetch run, where the host can start one (the page, for sandboxes the app started). */
   appFetch?: () => Promise<void>;
@@ -29,13 +33,16 @@ export function servePlugins(options: PluginsServiceOptions): {
   let unsubscribe: (() => void) | undefined;
   let subscribed: WorkerConnection | undefined;
   const changed = () => options.send({ type: 'changed' });
+  const agent = options.agent;
   // Follows the connection, which a restart replaces.
   const subscribe = () => {
     const connection = options.connection();
     if (connection === subscribed) return;
     unsubscribe?.();
     subscribed = connection;
-    unsubscribe = connection?.onPluginsChanged(changed);
+    unsubscribe = connection?.onPluginsChanged((changedAgent) => {
+      if (changedAgent === agent) changed();
+    });
   };
   const require = (): WorkerConnection => {
     subscribe();
@@ -52,21 +59,21 @@ export function servePlugins(options: PluginsServiceOptions): {
   const call = async (method: string, params: Record<string, unknown> | undefined): Promise<unknown> => {
     switch (method) {
       case 'list':
-        return require().plugins();
+        return require().plugins(agent);
       case 'catalog':
-        return require().pluginCatalog(string(params, 'catalog'));
+        return require().pluginCatalog(agent, string(params, 'catalog'));
       case 'add':
-        return require().addPlugin(string(params, 'source'));
+        return require().addPlugin(agent, string(params, 'source'));
       case 'remove':
-        return require().removePlugin(string(params, 'id'));
+        return require().removePlugin(agent, string(params, 'id'));
       case 'setEnabled':
-        return require().setPluginEnabled(string(params, 'id'), params?.enabled === true);
+        return require().setPluginEnabled(agent, string(params, 'id'), params?.enabled === true);
       case 'addCatalog':
-        return require().addPluginCatalog(string(params, 'source'));
+        return require().addPluginCatalog(agent, string(params, 'source'));
       case 'removeCatalog':
-        return require().removePluginCatalog(string(params, 'source'));
+        return require().removePluginCatalog(agent, string(params, 'source'));
       case 'fetch':
-        return require().fetchPlugins();
+        return require().fetchPlugins(agent);
       case 'appFetch':
         if (!options.appFetch) throw new Error(options.fetchHint ?? 'This window cannot fetch plugins for the sandbox');
         await options.appFetch();

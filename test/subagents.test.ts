@@ -83,12 +83,12 @@ test("a subagent's updates reach its chat only once opened, and its requests go 
     subagent: (parentKey, subagent) => changed.push(`${parentKey} ${subagent.key} ${subagent.state}`),
     closed: () => {}
   };
-  const connection = await WorkerConnection.connect(agent.transport, handlers, { name: 'test', version: '0' });
+  const connection = await WorkerConnection.connect(agent.open, handlers, { name: 'test', version: '0' });
+  assert.deepEqual(connection.subagentFeatures('claude'), features);
+
+  const parent = await connection.newSession('claude');
   const initialize = agent.received.find((message) => message.method === 'initialize');
   assert.deepEqual(initialize?.params.clientCapabilities.subagents, {});
-  assert.deepEqual(connection.subagentFeatures, features);
-
-  const parent = await connection.newSession();
   assert.deepEqual((await connection.subagents(parent)).map((subagent) => subagent.key), ['claude-c']);
   const childUpdate = { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } };
   agent.notify('session/update', { sessionId: 'c', update: childUpdate });
@@ -112,7 +112,7 @@ test("a subagent's updates reach its chat only once opened, and its requests go 
   const [key, request] = permissions.at(-1)!;
   assert.equal(key, parent);
   assert.deepEqual(request?.subagent, { key: 'claude-c' });
-  connection.answerPermission(request!.requestId, 'allow');
+  connection.answerPermission(key, request!.requestId, 'allow');
   assert.deepEqual((await answer).result, { outcome: { outcome: 'selected', optionId: 'allow' } });
 
   agent.notify('_codeflower/subagents/changed', { parentKey: parent, subagent: { key: 'claude-c', parentKey: parent, sessionId: 'c', state: 'idle' } });

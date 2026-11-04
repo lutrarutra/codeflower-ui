@@ -4,7 +4,7 @@ import test from 'node:test';
 import { agentPresentation, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { sessionKey } from '../src/client/sessionKey.ts';
 import { TAKEN_OVER, WorkerConnection, mcpNotice, type WorkerHandlers } from '../src/client/workerConnection.ts';
-import { FakeAgent, tick } from './fakeAgent.ts';
+import { FakeAgent, agentState, tick } from './fakeAgent.ts';
 
 function recorder() {
   const entries: Array<[string, TranscriptEntry]> = [];
@@ -31,7 +31,7 @@ const client = { name: 'test', version: '0' };
 
 // No agent's name appears in the client: one it has never heard of works the
 // same, from what it advertises.
-test('works with an agent it knows nothing about, without a code flower bridge', async () => {
+test('works with an agent it knows nothing about', async () => {
   const agent = new FakeAgent({
     initialize: () => ({
       protocolVersion: 1,
@@ -52,17 +52,18 @@ test('works with an agent it knows nothing about, without a code flower bridge',
       });
       return { stopReason: 'end_turn' };
     }
-  });
+  }, [agentState('pi', { name: 'Pi' })]);
   const { entries, events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
 
-  assert.equal(connection.workerStatus, undefined);
-  assert.equal(connection.agent, 'pi');
-  assert.deepEqual(connection.presentation, { id: 'pi', name: 'Pi' });
-  assert.deepEqual(connection.authMethods.map((method) => method.id), ['pi-login']);
-  assert.equal(connection.promptCapabilities.image, true);
+  assert.deepEqual(connection.agents.map((state) => state.id), ['pi']);
+  assert.deepEqual(connection.presentation('pi'), { id: 'pi', name: 'Pi' });
+  // Its own connection opens for what only it tells: its sign-in methods.
+  assert.equal(connection.agentConnected('pi'), false);
+  assert.deepEqual((await connection.authMethods('pi')).map((method) => method.id), ['pi-login']);
+  assert.equal(connection.promptCapabilities('pi').image, true);
 
-  const key = await connection.newSession();
+  const key = await connection.newSession('pi');
   assert.equal(key, `pi-${createHash('sha256').update('s/1').digest('hex').slice(0, 32)}`);
   // Modes only: offered as a setting, changed with session/set_mode.
   await connection.setConfigOption(key, 'mode', 'act');
@@ -75,7 +76,7 @@ test('works with an agent it knows nothing about, without a code flower bridge',
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt', 'update', 'turn_end']);
 
   // Resuming follows the capabilities: this agent loads.
-  await connection.resumeSession('older', null);
+  await connection.resumeSession('pi', 'older', null);
   assert.ok(agent.received.some((message) => message.method === 'session/load'));
   assert.ok(!agent.received.some((message) => message.method === 'session/resume'));
 });
@@ -87,12 +88,12 @@ test('falls back from resume to load when the agent advertises neither', async (
     'session/load': () => ({ _meta: { 'codeflower/busy': true, 'codeflower/transcriptEntries': 7 } })
   });
   const { events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  assert.deepEqual(connection.presentation, { id: 'claude', name: 'Claude Code', color: 'var(--cf-orange)' });
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  assert.deepEqual(connection.presentation('claude'), { id: 'claude', name: 'Claude Code', color: 'var(--cf-orange)' });
   // A worker that names its agent's color: a palette name follows the theme, anything else is used as given.
   assert.deepEqual(agentPresentation('pi', { name: 'Pi', color: 'teal' }), { id: 'pi', name: 'Pi', color: 'var(--cf-teal)' });
   assert.equal(agentPresentation('pi', { color: '#3a7bd5' })?.color, '#3a7bd5');
-  const attached = await connection.resumeSession('abc', null);
+  const attached = await connection.resumeSession('claude', 'abc', null);
   assert.deepEqual(attached, { key: 'claude-abc', transcriptEntries: 7 });
   assert.deepEqual(
     agent.received.filter((message) => message.method?.startsWith('session/')).map((message) => message.method),
@@ -107,8 +108,8 @@ test('asks the user for permission and answers the agent', async () => {
     'session/new': () => ({ sessionId: 'one' })
   });
   const { entries, events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('pi');
   connection.setAutoApprove(key, true);
   const answer = agent.request('session/request_permission', {
     sessionId: 'one',
@@ -117,7 +118,7 @@ test('asks the user for permission and answers the agent', async () => {
   });
   await tick();
   assert.ok(events.includes(`permission ${key} yes`));
-  connection.answerPermission(1, 'yes');
+  connection.answerPermission(key, 1, 'yes');
   assert.deepEqual((await answer).result, { outcome: { outcome: 'selected', optionId: 'yes' } });
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['permission', 'permission_outcome']);
 });
@@ -126,10 +127,10 @@ test('auto-approves DSH permission requests when enabled', async () => {
   const agent = new FakeAgent({
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'dsh', version: '1' } }),
     'session/new': () => ({ sessionId: 'one' })
-  });
+  }, [agentState('dsh')]);
   const { entries, events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('dsh');
   connection.setAutoApprove(key, true);
 
   const answer = agent.request('session/request_permission', {
@@ -151,10 +152,10 @@ test('turning on DSH auto-approval answers an open request', async () => {
   const agent = new FakeAgent({
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'dsh', version: '1' } }),
     'session/new': () => ({ sessionId: 'one' })
-  });
+  }, [agentState('dsh')]);
   const { events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('dsh');
   const answer = agent.request('session/request_permission', {
     sessionId: 'one',
     toolCall: { toolCallId: 't' },
@@ -178,8 +179,8 @@ test('tells the host when another window takes the worker over', async () => {
     'session/prompt': () => new Promise(() => {})
   });
   const { events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('codex');
   const turn = connection.prompt(key, 'long work');
   await tick();
   agent.close(TAKEN_OVER, 'taken over');
@@ -208,13 +209,13 @@ test('reads worker actions and keeps old bridge images compatible', async () => 
     '_codeflower/actions/list': () => ({ actions: [action] }),
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi' } })
   });
-  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
+  const connection = await WorkerConnection.connect(agent.open, recorder().handlers, client);
   assert.deepEqual(await connection.actions(), [action]);
 
   const olderAgent = new FakeAgent({
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi' } })
   });
-  const olderConnection = await WorkerConnection.connect(olderAgent.transport, recorder().handlers, client);
+  const olderConnection = await WorkerConnection.connect(olderAgent.open, recorder().handlers, client);
   assert.equal(await olderConnection.actions(), undefined);
 });
 
@@ -224,8 +225,8 @@ test('records action prompt metadata without changing its text', async () => {
     'session/new': () => ({ sessionId: 'one' }),
     'session/prompt': () => ({ stopReason: 'end_turn' })
   });
-  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, recorder().handlers, client);
+  const key = await connection.newSession('pi');
   await connection.prompt(key, 'Make a checkpoint.', { id: 'checkpoint', title: 'Checkpoint' });
   const request = agent.received.findLast((message) => message.method === 'session/prompt');
   assert.deepEqual(request?.params?.prompt, [
@@ -245,8 +246,8 @@ test('shows the prompts, answers and shell commands of other windows on a bridge
     }
   });
   const { entries, events, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('claude');
 
   // Its own prompt shows once, as the bridge echoes it.
   assert.equal(await connection.prompt(key, 'hello'), 'end_turn');
@@ -291,8 +292,8 @@ test('echoes its own prompt itself on an older bridge', async () => {
     'session/prompt': () => ({ stopReason: 'end_turn' })
   });
   const { entries, handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('pi');
   await connection.prompt(key, 'hello');
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt', 'turn_end']);
 });
@@ -306,14 +307,14 @@ test("keeps the MCP servers from the app's config a session is without, for the 
     'session/resume': () => ({})
   });
   const { handlers } = recorder();
-  const connection = await WorkerConnection.connect(agent.transport, handlers, client);
-  const key = await connection.newSession();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('dsh');
   assert.equal(
     connection.mcpNotice(key),
     'This chat is without MCP servers from your config: docs (it did not start). Fix them under mcp_servers: in config.yaml, then restart the sandbox.'
   );
   // A session with all its servers has no notice.
-  const resumed = await connection.resumeSession('old', null);
+  const resumed = await connection.resumeSession('dsh', 'old', null);
   assert.equal(connection.mcpNotice(resumed.key), undefined);
   assert.equal(mcpNotice([]), undefined);
 });
@@ -334,7 +335,7 @@ test("hears which chats are open in the agent's terminal UI: on connect, and as 
   });
   const heard: string[][] = [];
   const { handlers } = recorder();
-  await WorkerConnection.connect(agent.transport, { ...handlers, terminals: (list) => heard.push(list.map((entry) => `${entry.sessionKey} ${entry.mode}`)) }, client);
+  await WorkerConnection.connect(agent.open, { ...handlers, terminals: (list) => heard.push(list.map((entry) => `${entry.sessionKey} ${entry.mode}`)) }, client);
   assert.deepEqual(heard, [['claude-s1 handoff']]);
   agent.notify('_codeflower/terminal/changed', { terminals: [] });
   await tick();
@@ -345,8 +346,50 @@ test("hears which chats are open in the agent's terminal UI: on connect, and as 
     '_codeflower/status': () => ({ agent: 'claude', agentLabel: 'Claude Code', signedIn: true }),
     initialize: () => ({ protocolVersion: 1, agentCapabilities: {} })
   });
-  await WorkerConnection.connect(older.transport, recorder().handlers, client);
+  await WorkerConnection.connect(older.open, recorder().handlers, client);
   assert.equal(older.received.some((message) => message.method === '_codeflower/terminal/list'), false);
+});
+
+test("hears the user's shells apart from the chats' terminals, and attaches to one with its size", async () => {
+  const chat = { terminalId: 'term-1', kind: 'chat' as const, sessionKey: 'opencode-s1', sessionId: 's1', mode: 'shared' as const, viewers: 0, startedAt: '2026-11-04T10:00:00.000Z' };
+  const shell = { terminalId: 'term-2', kind: 'shell' as const, viewers: 1, startedAt: '2026-11-04T10:01:00.000Z' };
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'opencode', agentLabel: 'OpenCode', signedIn: true, capabilities: { chatTerminals: true, shellTerminals: true } }),
+    '_codeflower/terminal/list': () => ({ terminals: [chat, shell] }),
+    '_codeflower/terminal/start': () => ({ terminalId: 'term-3' }),
+    '_codeflower/terminal/attach': () => ({}),
+    initialize: () => ({ protocolVersion: 1, agentCapabilities: {} })
+  });
+  const chats: string[][] = [];
+  const shells: string[][] = [];
+  const output: [string, string, boolean | undefined][] = [];
+  const { handlers } = recorder();
+  const connection = await WorkerConnection.connect(
+    agent.open,
+    {
+      ...handlers,
+      terminals: (list) => chats.push(list.map((entry) => entry.terminalId)),
+      shells: (list) => shells.push(list.map((entry) => entry.terminalId)),
+      terminalOutput: (terminalId, data, replayed) => output.push([terminalId, data, replayed])
+    },
+    client
+  );
+  assert.equal(connection.shellTerminals, true);
+  assert.deepEqual(chats, [['term-1']]);
+  assert.deepEqual(shells, [['term-2']]);
+  agent.notify('_codeflower/terminal/changed', { terminals: [shell] });
+  await tick();
+  assert.deepEqual(chats.at(-1), []);
+  assert.deepEqual(shells.at(-1), ['term-2']);
+
+  assert.equal(await connection.startShell(90, 25), 'term-3');
+  await connection.attachTerminal('term-2', 120, 40);
+  const sent = (method: string) => agent.received.find((message) => message.method === method)?.params;
+  assert.deepEqual(sent('_codeflower/terminal/start'), { kind: 'shell', columns: 90, rows: 25 });
+  assert.deepEqual(sent('_codeflower/terminal/attach'), { terminalId: 'term-2', columns: 120, rows: 40 });
+  agent.notify('_codeflower/terminal/output', { terminalId: 'term-2', data: '$ ', replayed: true });
+  await tick();
+  assert.deepEqual(output, [['term-2', '$ ', true]]);
 });
 
 // OpenCode lists its slash commands while it creates the chat, before the
@@ -357,10 +400,57 @@ test('a new chat says how many transcript entries came before its live updates',
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1.0' }, agentCapabilities: {} }),
     'session/new': () => ({ sessionId: `s${entries}`, _meta: entries === undefined ? {} : { 'codeflower/transcriptEntries': entries } })
   });
-  const connection = await WorkerConnection.connect(agent.transport, recorder().handlers, client);
-  const started = await connection.startSession();
+  const connection = await WorkerConnection.connect(agent.open, recorder().handlers, client);
+  const started = await connection.startSession('pi');
   assert.equal(started.transcriptEntries, 1);
   assert.equal(connection.isAttached(started.key), true);
   entries = undefined;
-  assert.equal((await connection.startSession()).transcriptEntries, undefined);
+  assert.equal((await connection.startSession('pi')).transcriptEntries, undefined);
+});
+
+// One sandbox, several agents: each chat goes to its own agent's connection,
+// opened when it is first needed, and one agent's restart leaves the others'.
+test("routes each chat to its agent's own connection, and an agent's restart leaves the others", async () => {
+  const agent = new FakeAgent(
+    {
+      initialize: () => ({ protocolVersion: 1, agentCapabilities: {} }),
+      'session/new': () => ({ sessionId: 'one' }),
+      'session/prompt': () => ({ stopReason: 'end_turn' })
+    },
+    [agentState('claude', { name: 'Claude Code' }), agentState('codex', { name: 'Codex', signedIn: false })]
+  );
+  const { events, handlers } = recorder();
+  const closedAgents: string[] = [];
+  const usage: string[] = [];
+  const connection = await WorkerConnection.connect(
+    agent.open,
+    { ...handlers, agentClosed: (name, _reason, code) => closedAgents.push(`${name} ${code}`), usage: (name) => usage.push(name) },
+    client
+  );
+  // The sandbox's own connection starts no agent.
+  assert.equal(agent.received.some((message) => message.method === 'initialize'), false);
+  assert.deepEqual(connection.agents.map((state) => [state.id, state.signedIn]), [['claude', true], ['codex', false]]);
+
+  const claude = await connection.newSession('claude');
+  const codex = await connection.newSession('codex');
+  assert.deepEqual([claude, codex], ['claude-one', 'codex-one']);
+  assert.equal(agent.received.filter((message) => message.method === 'initialize').length, 2);
+  assert.equal(await connection.prompt(codex, 'hi'), 'end_turn');
+  assert.equal(connection.isAttached(claude), true);
+
+  // The agent's usage, which the sandbox's own connection hears, names the agent.
+  agent.notify('_codeflower/usage', { agent: 'codex', auth: { kind: 'api_key' }, limits: [], limitsUpdatedAt: null, costEstimate: false, totals: {}, sessions: [] });
+  await tick();
+  assert.deepEqual(usage, ['codex']);
+
+  // An agent's connection ends (it restarted): its chats detach, the sandbox stays connected.
+  agent.closeAgents(1011, 'Agent process ended');
+  await tick();
+  assert.deepEqual(closedAgents.sort(), ['claude 1011', 'codex 1011']);
+  assert.equal(connection.connected, true);
+  assert.equal(connection.isAttached(claude), false);
+  assert.ok(!events.some((event) => event.startsWith('closed')));
+  // The next chat opens a fresh connection.
+  assert.equal(await connection.newSession('claude'), 'claude-one');
+  assert.equal(connection.agentConnected('claude'), true);
 });

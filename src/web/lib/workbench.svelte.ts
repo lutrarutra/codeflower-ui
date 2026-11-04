@@ -2,14 +2,15 @@
 // as tabs in one grid of groups (see layout.svelte.ts). A tab names its
 // sandbox and what it shows there (`<sandbox>/chat:<key>`). The workbench
 // decides where a tab opens when the user did not drop it somewhere: chats
-// where the chats are, files beside them. The grid is remembered without the
-// file previews, which need their sandbox to load.
+// where the chats are, files and terminals beside them. The grid is
+// remembered without the file previews, which need their sandbox to load.
 import { Layout, type Placement } from './layout.svelte.ts';
 import { INTERACTIVE } from './previews.svelte.ts';
 
 /** A sandbox's overview: its chats, sign-in and connection. */
 export const OVERVIEW = '#overview';
 const CHAT = 'chat:';
+const TERMINAL = 'terminal:';
 
 /** The grid's tab for what a sandbox shows (a chat, its folders, a file). */
 export const tabOf = (workerId: string, local: string) => `${encodeURIComponent(workerId)}/${local}`;
@@ -21,11 +22,16 @@ export function splitTab(tab: string): { workerId: string; local: string } {
 export const chatTab = (key: string) => `${CHAT}${key}`;
 /** The chat a tab shows, by what it shows in its sandbox. */
 export const chatKeyOf = (local: string) => (local.startsWith(CHAT) ? local.slice(CHAT.length) : undefined);
-/** Chats and the overview are the page's own and open again from a saved grid; other tabs show files. */
+export const terminalTab = (terminalId: string) => `${TERMINAL}${terminalId}`;
+/** The shell a tab shows, by what it shows in its sandbox. */
+export const terminalIdOf = (local: string) => (local.startsWith(TERMINAL) ? local.slice(TERMINAL.length) : undefined);
+/** Chats and the overview are the page's own; other tabs show files, or terminals. */
 const isPage = (tab: string) => {
   const { local } = splitTab(tab);
   return local.startsWith(CHAT) || local === OVERVIEW;
 };
+/** What opens again from a saved grid: the page's own tabs, and terminals, which run on in their sandboxes. */
+const isKept = (tab: string) => isPage(tab) || splitTab(tab).local.startsWith(TERMINAL);
 
 /** A tab being dragged, from a group or from a list of chats. */
 export const dragging = $state<{ workerId: string | null; tab: string | null }>({ workerId: null, tab: null });
@@ -106,6 +112,17 @@ export class Workbench {
     this.layout.place(tab, placement, false);
   }
 
+  /** Opens a shell's tab, in front: beside the chat in front, else in the focused group. */
+  openTerminal(workerId: string, terminalId: string): void {
+    const tab = tabOf(workerId, terminalTab(terminalId));
+    if (this.layout.has(tab)) this.layout.activate(tab);
+    else {
+      const focused = this.layout.byRecency()[0]!;
+      this.layout.place(tab, focused.active && isPage(focused.active) ? { group: focused.id, side: 'right' } : { group: focused.id });
+    }
+    this.focusChanged();
+  }
+
   /** Puts a tab where the user dropped it. */
   drop(tab: string, placement: Placement): void {
     this.layout.place(tab, placement);
@@ -146,7 +163,7 @@ export class Workbench {
 
   save(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layout.save(isPage)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.layout.save(isKept)));
     } catch {
       // Not remembered, e.g. in a private window.
     }

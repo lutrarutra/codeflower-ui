@@ -4,7 +4,6 @@
   // room; the rail stays. Through the tunnel its foot says how the page reaches the computers.
   import { tunnelConnectorId } from '../tunnel/connect.ts';
   import Skeleton from '../chat/lib/Skeleton.svelte';
-  import SandboxDialog from './SandboxDialog.svelte';
   import FileTree from './FileTree.svelte';
   import SessionList from './SessionList.svelte';
   import FocusList from './focus/FocusList.svelte';
@@ -47,8 +46,33 @@
     return app.several ? [where, `on ${app.machine(worker.id).name}`].filter(Boolean).join(' ') : where;
   }
 
+  // A shell in the sandbox, in a tab; the sandbox's shells keep running when the page goes.
+  let openingShell = $state(false);
+  let shellError = $state('');
+  const shells = $derived(browsed && browsable(browsed) ? app.agent(browsed.id).shells : []);
+  async function openShell(worker: Worker): Promise<void> {
+    openingShell = true;
+    shellError = '';
+    try {
+      await app.openShell(worker.id);
+      onNavigate();
+    } catch (error) {
+      shellError = error instanceof Error ? error.message : String(error);
+    } finally {
+      openingShell = false;
+    }
+  }
+
   let stopping = $state(false);
+  // Stopping asks first, so that a slip of the mouse does not end the sandbox's chats.
+  let stopDialog: HTMLDialogElement | undefined = $state();
+  let stopped: Worker | null = $state(null);
+  function askToStop(worker: Worker): void {
+    stopped = worker;
+    stopDialog?.showModal();
+  }
   async function stop(worker: Worker): Promise<void> {
+    stopDialog?.close();
     stopping = true;
     await app.workerApi(worker.id, '/stop', { body: {} }).catch(() => undefined);
     await app.refreshWorkers();
@@ -72,9 +96,6 @@
       // Not kept, e.g. in a private window.
     }
   }
-
-  // The sandbox whose name, address or place in the list the user manages.
-  let managing: Worker | null = $state(null);
 </script>
 
 {#snippet fold()}
@@ -112,19 +133,35 @@
       </div>
       <div class="mt-1.5 flex flex-wrap gap-1.5">
         {#if !single && canStop(browsed)}
-          <button class="pill pill-small" disabled={stopping} onclick={() => stop(browsed)}>{stopping ? 'Stopping…' : 'Stop'}</button>
+          <button class="pill pill-small" disabled={stopping} onclick={() => askToStop(browsed)}
+            ><span class="codicon codicon-debug-stop"></span>{stopping ? 'Stopping…' : 'Stop'}</button
+          >
         {:else if browsed.status === 'stopping'}
-          <button class="pill pill-small" disabled>Stopping…</button>
-        {/if}
-        {#if !single}
-          <button class="pill pill-small" title="Rename, change its address or token, or remove it" onclick={() => (managing = browsed)}>Manage</button>
+          <button class="pill pill-small" disabled><span class="codicon codicon-debug-stop"></span>Stopping…</button>
         {/if}
         <button
           class="pill pill-small"
-          title="The sandbox: its chats, the agent's sign-in, and how to reach it from VS Code"
-          onclick={() => (app.workbench.openOverview(browsed.id), onNavigate())}>Details</button
+          title="The sandbox: its chats, the agent's sign-in, how to reach it from VS Code, and its name and address"
+          onclick={() => (app.workbench.openOverview(browsed.id), onNavigate())}><span class="codicon codicon-settings-gear"></span>Manage</button
         >
+        {#if browsable(browsed) && !app.elsewhere(browsed)}
+          <button
+            class="pill pill-small"
+            disabled={openingShell}
+            title="A shell in the sandbox's workspace, in a tab; it runs on when the page goes, until you close its tab"
+            onclick={() => openShell(browsed)}><span class="codicon codicon-terminal"></span>{openingShell ? 'Opening…' : 'Terminal'}</button
+          >
+        {/if}
+        {#each shells as shell, index (shell.terminalId)}
+          <button
+            class="chip"
+            title="A shell running in the sandbox since {new Date(shell.startedAt).toLocaleString()}"
+            onclick={() => (app.workbench.openTerminal(browsed.id, shell.terminalId), onNavigate())}
+            ><span class="codicon codicon-terminal"></span>{index + 1}</button
+          >
+        {/each}
       </div>
+      {#if shellError}<p class="m-0 text-[0.85em] text-red" role="alert">{shellError}</p>{/if}
     </header>
     {#if browsable(browsed)}
       <div class="flex px-3 pb-2">
@@ -213,4 +250,16 @@
   </footer>
 </div>
 
-<SandboxDialog bind:worker={managing} />
+<dialog bind:this={stopDialog} onclose={() => (stopped = null)} aria-labelledby="stop-title">
+  {#if stopped}
+    <div class="card flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-3 p-5">
+      <h2 id="stop-title" class="m-0 font-display text-lg font-medium">Stop {workerTitle(stopped)[0]}?</h2>
+      <p class="m-0">Its agent stops at once, and chats still working lose what they have not saved.</p>
+      <footer class="flex flex-wrap justify-end gap-2">
+        <!-- svelte-ignore a11y_autofocus -->
+        <button class="pill" autofocus onclick={() => stopDialog?.close()}>Keep running</button>
+        <button class="pill pill-pink" onclick={() => stopped && stop(stopped)}>Stop</button>
+      </footer>
+    </div>
+  {/if}
+</dialog>
