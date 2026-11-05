@@ -180,6 +180,18 @@ export class Preview {
     this.post({ type: 'draft', text });
   }
 
+  /** Saves a copy of a file beside the report (a deck's .pptx) through the browser's downloads. */
+  async downloadBeside(name: string): Promise<void> {
+    try {
+      const connection = this.owner.page.agent(this.workerId)?.connection;
+      if (!connection) throw new Error('The sandbox is not connected');
+      const file = await connection.readFile(resolvePath(this.file.path, name));
+      download(basename(file.path), file.mimeType, file.data);
+    } catch (error) {
+      this.error = `Could not download ${name}: ${describe(error)}`;
+    }
+  }
+
   /** Saves the user's comments into the report, one save after another, then shows the new file. */
   saveComments(json: string): void {
     this.commentsSaved = this.commentsSaved

@@ -105,7 +105,11 @@
             <ReportFrame
               html={one.html}
               title="{one.title} (interactive)"
-              onMessage={(message) => (message.type === 'send' ? one.draft(message.text) : message.type === 'comments' && one.saveComments(message.json))}
+              onMessage={(message) => {
+                if (message.type === 'send') one.draft(message.text);
+                else if (message.type === 'comments') one.saveComments(message.json);
+                else if (message.type === 'download') void one.downloadBeside(message.path);
+              }}
             />
           {:else}
             {#key one}<PreviewView host={one.host} />{/key}

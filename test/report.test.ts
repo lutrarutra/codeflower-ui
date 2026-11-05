@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { displayPath, interactiveHtml, isStorytellerReport, reportMessage, resolvePath } from '../src/web/lib/report.ts';
+import {
+  displayPath,
+  interactiveHtml,
+  isStorytellerReport,
+  printableHtml,
+  reportMessage,
+  resolvePath
+} from '../src/web/lib/report.ts';
 
 test('resolves paths a file refers to against its folder', () => {
   assert.equal(resolvePath('/data/output/report/index.md', 'figures/a.png'), '/data/output/report/figures/a.png');
@@ -20,7 +27,15 @@ test('puts the policy and the bridge before the report runs', () => {
 test('accepts only the bridge messages from a report', () => {
   assert.deepEqual(reportMessage({ type: 'send', text: 'x'.repeat(30000) }), { type: 'send', text: 'x'.repeat(20000) });
   assert.deepEqual(reportMessage({ type: 'reload' }), { type: 'reload' });
+  assert.deepEqual(reportMessage({ type: 'print', html: '<evil>' }), { type: 'print' });
   assert.equal(reportMessage({ type: 'comments', json: 1 }), undefined);
   assert.equal(reportMessage({ type: 'prompt', text: 'rm -rf' }), undefined);
   assert.equal(reportMessage('send'), undefined);
+});
+
+test('a printable copy has the policy and prints itself once loaded', () => {
+  const html = printableHtml('<html><head></head><body><p>report</p></body></html>');
+  assert.ok(html.indexOf("default-src 'none'") < html.indexOf('report'));
+  assert.ok(html.indexOf('report') < html.indexOf('print()'));
+  assert.ok(html.indexOf('print()') < html.indexOf('</body>'));
 });

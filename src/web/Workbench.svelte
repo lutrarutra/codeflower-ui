@@ -292,7 +292,11 @@
       <ReportFrame
         html={preview.html}
         title="{preview.title} (interactive)"
-        onMessage={(message) => (message.type === 'send' ? preview.draft(message.text) : message.type === 'comments' && preview.saveComments(message.json))}
+        onMessage={(message) => {
+          if (message.type === 'send') preview.draft(message.text);
+          else if (message.type === 'comments') preview.saveComments(message.json);
+          else if (message.type === 'download') void preview.downloadBeside(message.path);
+        }}
       />
     {:else if preview}
       <PreviewView host={preview.host} />
