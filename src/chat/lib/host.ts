@@ -11,7 +11,13 @@ export interface Host<Outgoing, Incoming> {
   listen(listener: (message: Incoming) => void): () => void;
 }
 
-export type ChatHost = Host<WebviewMessage, HostMessage>;
+export interface ChatHost extends Host<WebviewMessage, HostMessage> {
+  /**
+   * Keeps what the user is writing while no view shows the chat, for a host that
+   * outlives its views (the page, as it switches chats or views); a view starts with it.
+   */
+  draft?: { read(): string; write(text: string): void };
+}
 export type PreviewHost = Host<PreviewWebviewMessage, PreviewHostMessage>;
 
 const CHAT = Symbol('codeflower chat host');

@@ -59,6 +59,8 @@ export class ChatSession {
   shellsRunning = 0;
   /** The files the agent showed in this chat (`codeflower-show`), the latest last, each once. */
   shown = $state<string[]>([]);
+  /** What the user is writing here, kept while the page shows another chat or view. */
+  private draft = '';
 
   private entries: TranscriptEntry[] = [];
   /** The index of `entries[0]` in the transcript; earlier ones load when the view asks. */
@@ -102,7 +104,8 @@ export class ChatSession {
     listen: (listener) => {
       this.listeners.add(listener);
       return () => this.listeners.delete(listener);
-    }
+    },
+    draft: { read: () => this.draft, write: (text) => (this.draft = text) }
   };
 
   /** Sends text to the agent as if typed here; it waits while the agent works. */
@@ -261,6 +264,10 @@ export class ChatSession {
         break;
       case 'subagentSettings':
         this.subagentSettings = message.state;
+        break;
+      case 'draft':
+        // A shown view adds it to what it has; else it waits here for the next one.
+        if (!this.listeners.size) this.draft = this.draft.trim() ? `${this.draft.trimEnd()}\n\n${message.text}` : message.text;
         break;
     }
     for (const listener of this.listeners) listener(message);

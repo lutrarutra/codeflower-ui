@@ -74,7 +74,9 @@
   let permission = $state<PendingPermission | null>(null);
   let question = $state<PendingQuestion | null>(null);
   let notice = $state<Extract<HostMessage, { type: 'notice' }> | null>(null);
-  let draft = $state('');
+  // svelte-ignore state_referenced_locally
+  let draft = $state(host.draft?.read() ?? '');
+  $effect(() => host.draft?.write(draft));
   let config = $state<SessionConfigOption[]>([]);
   let usage = $state<ChatUsage>({ session: null, account: null });
   let queued = $state<QueuedPromptSummary[]>([]);
@@ -221,6 +223,18 @@
   }
 
   let input: HTMLTextAreaElement | undefined = $state();
+  // A kept draft opens at its full height, also in a tab shown later; its lines wrap anew as the width changes.
+  $effect(() => {
+    if (!input) return;
+    let width = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return;
+      width = entry.contentRect.width;
+      fitInput();
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+  });
 
   function fitInput(): void {
     if (!input) return;
