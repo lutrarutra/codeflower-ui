@@ -1,6 +1,7 @@
 <script lang="ts">
   // Beside the chat in Focus: what its agent showed the user (`codeflower-show`) and the files
-  // clicked in it, one at a time, the latest in front.
+  // clicked in it, one at a time, the latest in front. A file that went behind stays open, hidden,
+  // so an interactive report keeps its state; the header steps back and forth through them.
   import { untrack } from 'svelte';
   import PreviewView from '../../chat/Preview.svelte';
   import { app } from '../lib/app.svelte.ts';
@@ -24,6 +25,12 @@
   });
   const path = $derived(app.focus.showing[tab] ?? files.at(-1));
   const preview = $derived(path ? app.previews.find(workerId, path) : undefined);
+  const index = $derived(path ? files.indexOf(path) : -1);
+  /** The files in front since the pane opened, kept open behind the one in front. */
+  let opened = $state<string[]>([]);
+  $effect(() => {
+    if (path && !untrack(() => opened).includes(path)) opened.push(path);
+  });
 
   // A file shown or clicked since comes to the front.
   let known: Set<string> | undefined;
@@ -49,23 +56,26 @@
   function pick(file: string): void {
     app.focus.showing[tab] = file;
   }
+
+  /** The file shown before (older) or after (newer) the one in front. */
+  function move(by: 1 | -1): void {
+    const file = files[index + by];
+    if (file) pick(file);
+  }
 </script>
 
 <section class="flex h-full min-h-0 flex-col" aria-label="Shown by the agent">
   <header class="flex items-center gap-1.5 border-b-[1.5px] border-soft-line px-2 py-1.5">
     <span class="codicon codicon-preview shrink-0 text-muted"></span>
     {#if files.length > 1}
-      <select
-        class="min-w-0 flex-1 truncate rounded-md border-[1.5px] border-soft-line bg-card px-1.5 py-0.5 text-[0.9em]"
-        aria-label="Shown file"
-        value={path}
-        onchange={(event) => pick(event.currentTarget.value)}
-      >
-        {#each [...files].reverse() as file (file)}
-          <option value={file} title={displayPath(file)}>{basename(file)}</option>
-        {/each}
-      </select>
-      <span class="shrink-0 text-[0.8em] text-muted tabular-nums">{files.length}</span>
+      <button class="grid size-6 shrink-0 place-items-center rounded-md text-muted not-disabled:hover:bg-card not-disabled:hover:text-ink disabled:opacity-40" title="The file shown before" aria-label="The file shown before" disabled={index <= 0} onclick={() => move(-1)}>
+        <span class="codicon codicon-chevron-left"></span>
+      </button>
+      <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
+      <button class="grid size-6 shrink-0 place-items-center rounded-md text-muted not-disabled:hover:bg-card not-disabled:hover:text-ink disabled:opacity-40" title="The file shown after" aria-label="The file shown after" disabled={index < 0 || index >= files.length - 1} onclick={() => move(1)}>
+        <span class="codicon codicon-chevron-right"></span>
+      </button>
+      <span class="shrink-0 text-[0.8em] text-muted tabular-nums">{index + 1}/{files.length}</span>
     {:else}
       <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
     {/if}
@@ -85,18 +95,27 @@
       </button>
     {/if}
   </header>
-  <div class="min-h-0 flex-1">
-    {#if preview && preview.interactive && preview.html}
-      <ReportFrame
-        html={preview.html}
-        title="{preview.title} (interactive)"
-        onMessage={(message) => (message.type === 'send' ? preview.draft(message.text) : message.type === 'comments' && preview.saveComments(message.json))}
-      />
-    {:else if preview}
-      {#key preview}<PreviewView host={preview.host} />{/key}
-    {:else if path}
+  <div class="relative min-h-0 flex-1">
+    <!-- Those behind keep their size, so a report's charts need not lay out again when they come back. -->
+    {#each opened as file (file)}
+      {@const one = app.previews.find(workerId, file)}
+      {#if one}
+        <div class="absolute inset-0 {file === path ? '' : 'invisible'}" inert={file !== path}>
+          {#if one.interactive && one.html}
+            <ReportFrame
+              html={one.html}
+              title="{one.title} (interactive)"
+              onMessage={(message) => (message.type === 'send' ? one.draft(message.text) : message.type === 'comments' && one.saveComments(message.json))}
+            />
+          {:else}
+            {#key one}<PreviewView host={one.host} />{/key}
+          {/if}
+        </div>
+      {/if}
+    {/each}
+    {#if path && !preview}
       <p class="m-0 p-4 text-muted"><span class="spinner"></span> Opening {basename(path)}…</p>
-    {:else}
+    {:else if !path}
       <div class="grid h-full place-items-center p-6 text-center text-muted">
         <div class="max-w-xs">
           <span class="codicon codicon-preview text-[28px]!"></span>
