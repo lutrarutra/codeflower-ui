@@ -98,6 +98,8 @@ class AppState {
   offered = $state<string | null>(null);
   /** The New sandbox dialog, open: starting on a computer (by its key), or connecting one running elsewhere. */
   creating = $state<{ tab: 'start' | 'connect'; machine?: string } | null>(null);
+  /** Asks the shell to fold the sidebar (each request counts up); the chat's Focus button sends one. */
+  sidebarFolds = $state(0);
   /** Opens the quit dialog; set by the shell. */
   askToQuit: () => void = () => {};
   /** The latest wrap-up a sandbox announced, by sandbox. */

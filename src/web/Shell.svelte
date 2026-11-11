@@ -49,6 +49,16 @@
     }
   }
 
+  // Into Focus from a chat's Focus button: the chat takes the room, and the sidebar folds. Only for
+  // now: the choice the user keeps (Ctrl/⌘+B) stays as it was.
+  let folds = app.sidebarFolds;
+  $effect(() => {
+    if (app.sidebarFolds === folds) return;
+    folds = app.sidebarFolds;
+    collapsed = true;
+    drawer = false;
+  });
+
   // Wide windows: the sidebar's width, dragged at its edge (double-click: back to the default); it stays so.
   const WIDTH = 'codeflower.sidebarWidth';
   const DEFAULT_WIDTH = 264;
