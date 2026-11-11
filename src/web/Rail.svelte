@@ -1,9 +1,10 @@
 <script lang="ts">
   // The rail, beside the page also with the sidebar folded: Focus, then the sandboxes that run, by
-  // the computer they run on, then + for a new one. A computer that can start sandboxes shows even
+  // the computer they run on, then + for a new chat (in a sandbox chosen there, or a new one). A computer that can start sandboxes shows even
   // with none. Computers that do not answer and sandboxes that stopped stay off it: the computers
   // button at the bottom (the Server view) lists them, and says that some are hidden.
   import Tulip from '../chat/lib/Tulip.svelte';
+  import NewChatDialog from './NewChatDialog.svelte';
   import SandboxDialog from './SandboxDialog.svelte';
   import StatusDot from './lib/StatusDot.svelte';
   import type { Worker } from './lib/api.ts';
@@ -95,6 +96,8 @@
     managing = worker;
   }
 
+  let newChat: NewChatDialog | undefined = $state();
+
   const ICON = 'grid size-11 shrink-0 place-items-center rounded-xl text-muted hover:bg-card hover:text-ink';
 </script>
 
@@ -169,9 +172,10 @@
       <li>
         <button
           class="grid size-11 place-items-center rounded-xl bg-indigo text-on-accent hover:shadow-(--cf-hover)"
-          title="New sandbox: start one, or connect one running elsewhere"
-          aria-label="New sandbox"
-          onclick={() => create()}
+          title="New chat: in one of the sandboxes, or in a new one"
+          aria-label="New chat"
+          aria-haspopup="dialog"
+          onclick={() => newChat?.openAny(current ?? app.browsing)}
         >
           <span class="codicon codicon-add text-[18px]!"></span>
         </button>
@@ -217,3 +221,8 @@
 {/if}
 
 <SandboxDialog bind:worker={managing} />
+<NewChatDialog
+  bind:this={newChat}
+  onstarted={(workerId, key) => app.go({ view: focusing ? 'focus' : 'chat', worker: workerId, session: key })}
+  {onNavigate}
+/>

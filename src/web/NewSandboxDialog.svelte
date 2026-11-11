@@ -1,7 +1,7 @@
 <script lang="ts">
   // A new sandbox: started on a computer the page reaches, or one running elsewhere (a batch job,
-  // another computer) added by the line it printed. Opened by the rail's + (app.creating), on the
-  // computer of the sandbox in front. Computers that cannot start one show why, greyed out.
+  // another computer) added by the line it printed. Opened by the New chat dialog's New sandbox
+  // (app.creating), on the computer of the sandbox in front. Computers that cannot start one show why, greyed out.
   import { untrack } from 'svelte';
   import { tunnelConnectorId } from '../tunnel/connect.ts';
   import type { Worker } from './lib/api.ts';
