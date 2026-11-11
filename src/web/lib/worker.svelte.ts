@@ -296,6 +296,8 @@ export class WebWorker {
     if (existing) {
       // Chosen again after its connection went (e.g. closed after idle minutes): at once, not at the next retry.
       if (this.state === 'disconnected') void this.connect().catch(() => undefined);
+      // Its agent's connection went while the sandbox's stayed: attach it again now.
+      else if (this.connected && !existing.state.live) void this.attach(existing).catch((error) => this.report(existing, error));
       return existing;
     }
     const session = this.sessions.find((candidate) => candidate.key === key);
@@ -685,8 +687,11 @@ export class WebWorker {
   }
 
   /**
-   * An agent's connection ended. After its restart (1011, the agent itself ended) its open chats
-   * attach again, which starts it; otherwise they say so, and attach when opened again.
+   * An agent's connection ended while the sandbox's stayed, e.g. the bridge's ping dropped it after
+   * a sleep, or the agent restarted (1011, the agent itself ended). Its open chats attach again,
+   * which starts the agent if it went, and so pick up a turn still running. A refusal (4xxx, e.g.
+   * the agent cannot run here) would only be refused again: those chats say so, and attach when
+   * chosen again. Without the sandbox's connection, `closed` reattaches every chat.
    */
   private agentClosed(agent: AgentName, code: number, generation: number): void {
     if (generation !== this.generation) return;
@@ -697,12 +702,14 @@ export class WebWorker {
       chat.post({ type: 'config', options: [] });
     }
     delete this.usage[agent];
-    if (!restarted || !this.connected) {
+    if (!this.connected) return;
+    if (code >= 4000 && code < 5000) {
       for (const chat of chats) chat.notify('info', 'Disconnected from the agent; it keeps working. Choose the chat again to reconnect.');
       return;
     }
-    // The bridge starts the agent again once the old one is gone.
+    // After a restart, the bridge starts the agent again once the old one is gone.
     setTimeout(() => {
+      if (generation !== this.generation || !this.connected) return;
       for (const chat of this.chatsOf(agent)) void this.attach(chat).catch((error) => this.report(chat, error));
       this.refreshUsage(agent);
     }, AGENT_RESTART_MS);
