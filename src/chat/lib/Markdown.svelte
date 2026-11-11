@@ -53,6 +53,17 @@
     }
   });
 
+  // Web links open in a new tab, so the chat stays where it is.
+  $effect(() => {
+    void html;
+    if (!root) return;
+    for (const link of root.querySelectorAll('a[href]')) {
+      if (!/^https?:\/\//i.test(link.getAttribute('href') ?? '')) continue;
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+
   // Fenced code in the language it names (```python); others stay plain.
   $effect(() => {
     void html;
