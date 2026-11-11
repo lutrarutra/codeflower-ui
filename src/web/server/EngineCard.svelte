@@ -31,9 +31,17 @@
     {#if engine}
       <Status kind="ok" title="{engine.label} is ready" detail="Sandboxes run in containers with {engine.label}, isolated from the rest of this computer." />
       {@render engines()}
-      {#if system.image?.download}
+      {#if system.image?.ready}
         <div class="mt-4">
-          <Status kind="ok" title="The sandbox image is downloaded when you start" detail="The first start downloads {system.image.name} (a few GB), once." />
+          <Status kind="ok" title="The sandbox image is on this computer" detail={system.image.name} />
+        </div>
+      {:else if system.image?.download}
+        <div class="mt-4">
+          <Status
+            kind="warn"
+            title="The sandbox image is not on this computer yet"
+            detail="The first start downloads {system.image.name} (a few GB), once; or download it now under Sandbox images."
+          />
         </div>
       {:else if system.image && !system.image.ready}
         <div class="mt-4">

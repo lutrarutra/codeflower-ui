@@ -140,9 +140,65 @@ export interface Worker {
   error?: string;
   exitCode: number;
   log: string[];
+  /** When the sandbox last printed anything; missing from older apps. */
+  lastOutput?: string;
+  /** The image download's progress, while the sandbox waits for one (Docker only). */
+  progress?: PullProgress;
   activity?: WorkerActivity;
   relays: number;
   quitting?: string;
+}
+
+/** How far an image download has come: bytes and layers (Docker reports them; Podman and Apptainer only print). */
+export interface PullProgress {
+  current: number;
+  total: number;
+  layers: number;
+  done: number;
+}
+
+/** A build of the published sandbox image an engine has on the computer. */
+export interface LocalImage {
+  /** What removing it names: name:tag, an id, or an Apptainer file. */
+  ref: string;
+  /** What it was downloaded as: a release, latest or a commit's build; empty when a newer download took its tag. */
+  tag: string;
+  version?: string;
+  revision?: string;
+  size: number;
+  created?: string;
+  untagged?: boolean;
+  /** The build the app runs when no version is chosen. */
+  default?: boolean;
+  /** A sandbox the app started runs it. */
+  inUse?: boolean;
+}
+
+/** An image download the page started; it stays listed until dismissed. */
+export interface ImagePull {
+  id: string;
+  engine: string;
+  image: string;
+  tag: string;
+  started: string;
+  status: 'pulling' | 'done' | 'failed' | 'cancelled';
+  error?: string;
+  log: string[];
+  lastOutput?: string;
+  progress?: PullProgress;
+}
+
+/** GET /api/images: an engine's sandbox images and the downloads for it (missing from older apps). */
+export interface ImagesInfo {
+  engine: string;
+  label: string;
+  /** Where Apptainer keeps its image files. */
+  directory?: string;
+  defaultTag: string;
+  images: LocalImage[];
+  pulls: ImagePull[];
+  /** Why the images could not be listed. */
+  error?: string;
 }
 
 export interface QuitPlan {

@@ -4,10 +4,11 @@
   import ActivityChips from '../lib/ActivityChips.svelte';
   import AgentSetup from '../lib/AgentSetup.svelte';
   import ConnectLine from '../lib/ConnectLine.svelte';
+  import PullBar from './PullBar.svelte';
   import StatusDot from '../lib/StatusDot.svelte';
   import type { Worker } from '../lib/api.ts';
   import { app } from '../lib/app.svelte.ts';
-  import { canForget, canStop, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
+  import { canForget, canStop, duration, QUIET_SECONDS, SOURCE_TEXT, SOURCE_TITLE, statusText, workerTitle } from '../lib/format.ts';
 
   let { worker }: { worker: Worker } = $props();
   const [name, where] = $derived(workerTitle(worker));
@@ -43,6 +44,19 @@
   const agent = $derived(chats ? app.agent(worker.id) : undefined);
   const elsewhere = $derived(app.elsewhere(worker));
   let log: HTMLPreElement | undefined = $state();
+
+  // While a sandbox this app started is starting: how long it takes and how long it
+  // has been quiet (its log, open meanwhile, says what it does), so a slow start (a download, a first environment) tells apart from a stuck one.
+  const starting = $derived(worker.status === 'starting' && worker.source === 'started');
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!starting) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  const elapsed = $derived(starting ? (now - Date.parse(worker.started)) / 1000 : 0);
+  const quiet = $derived(starting && worker.lastOutput ? (now - Date.parse(worker.lastOutput)) / 1000 : 0);
 
   $effect(() => {
     const current = agent;
@@ -119,9 +133,23 @@
       </div>
     </details>
   {/if}
+  {#if starting}
+    <div class="flex flex-col gap-1.5 rounded-lg border border-soft-line p-2.5" role="status" aria-live="polite">
+      <p class="m-0 flex flex-wrap items-baseline gap-x-2 text-[0.85em]">
+        <span class="spinner"></span><strong>Starting</strong>
+        <span class="text-muted tabular-nums">{duration(elapsed)}</span>
+        {#if quiet >= QUIET_SECONDS}
+          <span class="text-orange" title="It may still be working, e.g. on a slow network or a big first environment; the log below shows its last output."
+            >no output for {duration(quiet)}</span
+          >
+        {/if}
+      </p>
+      {#if worker.progress}<PullBar progress={worker.progress} label="Downloading the sandbox image" />{/if}
+    </div>
+  {/if}
   {#if worker.error}<p class="m-0 text-red">{worker.error}</p>{/if}
   {#if worker.log.length}
-    <details open={worker.status === 'failed'}>
+    <details open={worker.status === 'failed' || starting}>
       <summary class="cursor-pointer text-[0.9em] font-semibold text-muted">Log</summary>
       <pre bind:this={log} class="mt-2 max-h-64 overflow-auto rounded-lg bg-code p-2.5 font-mono text-[0.78em] whitespace-pre-wrap">{worker.log.join('\n')}</pre>
     </details>

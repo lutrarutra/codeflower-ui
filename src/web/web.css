@@ -80,6 +80,30 @@ dialog::backdrop {
   height: 100%;
 }
 
+/* A download whose size is unknown: a stripe that moves along. */
+.meter.indeterminate > span {
+  width: 30%;
+  background: var(--cf-teal);
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter.indeterminate > span {
+    width: 100%;
+    opacity: 0.5;
+    animation: none;
+  }
+}
+
 .meter .user,
 .meter .used,
 .key-user {

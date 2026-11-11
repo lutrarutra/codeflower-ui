@@ -109,6 +109,31 @@ export function ago(timeMs: number): string {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
+/** A duration in seconds as a clock reads it: 45 s, 2 min 05 s, 1 h 03 min. */
+export function duration(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  if (whole < 60) return `${whole} s`;
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return `${minutes} min ${String(whole % 60).padStart(2, '0')} s`;
+  return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
+}
+
+/** An image download's progress as a line: 812 MB of 3.3 GB, 4 of 19 layers. */
+export function pullText(progress: { current: number; total: number; layers: number; done: number }): string {
+  const parts = [];
+  if (progress.total > 0) parts.push(`${fileSize(progress.current)} of ${fileSize(progress.total)}`);
+  if (progress.layers > 0) parts.push(`${progress.done} of ${plural(progress.layers, 'layer')}`);
+  return parts.join(', ');
+}
+
+/** A download's or an image's size: 613 MB, 2.5 GB. */
+export function fileSize(value: number): string {
+  return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(1)} GB` : `${Math.round(value / 1024 ** 2)} MB`;
+}
+
+/** Output older than this while starting is worth pointing out: the start may be stuck. */
+export const QUIET_SECONDS = 30;
+
 /** Bytes as htop writes them: 512M, 15.8G. */
 export function bytes(value: number): string {
   const units = ['B', 'K', 'M', 'G', 'T'];

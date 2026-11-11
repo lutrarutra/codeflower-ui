@@ -6,6 +6,7 @@
   import { app } from '../lib/app.svelte.ts';
   import { REACH_TEXT } from '../lib/format.ts';
   import EngineCard from './EngineCard.svelte';
+  import ImagesCard from './ImagesCard.svelte';
   import ResourcesCard from './ResourcesCard.svelte';
   import SandboxCard from './SandboxCard.svelte';
   import StartForm from './StartForm.svelte';
@@ -99,6 +100,9 @@
     {:else if !connectOnly && reach !== 'newer' && reach !== 'elsewhere'}
       <h2 class="m-0 mt-2 font-display text-xl font-medium">Start a sandbox</h2>
       <EngineCard {machine} recheck={() => recheck()} />
+      {#if machine.system?.engine}
+        <ImagesCard {machine} />
+      {/if}
       <ResourcesCard {machine} />
       {#if machine.system}
         <StartForm {machine} {recheck} />
