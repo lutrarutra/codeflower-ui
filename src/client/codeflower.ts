@@ -3,6 +3,7 @@
 // user's shell commands, sign-in terminals, usage and subagents. An agent reached without
 // the bridge answers none of them, and the chat works without them.
 import type { AgentName, AgentPresentation, ChatAction, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
+import type { AgentCommand } from '../protocol/commands.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import { RpcError, isMethodNotFound, type RpcConnection } from './rpc.ts';
@@ -57,6 +58,8 @@ export interface AgentState extends AgentPresentation {
     chatTerminals?: boolean;
     /** What the agent tells of its subagents; missing for agents without them in code flower. */
     subagents?: SubagentFeatures;
+    /** The commands its chats run (`_codeflower/commands/*`), to watch read-only. */
+    commands?: boolean;
   };
 }
 
@@ -377,6 +380,8 @@ export interface CodeflowerHandlers {
   shells?(shells: ShellTerminal[]): void;
   /** One of a chat's subagents changed (`parentKey`: the chat). */
   subagentChanged?(parentKey: string, subagent: SubagentSummary): void;
+  /** The commands a chat's agent runs changed: one started or ended, or a window watches it. */
+  commandsChanged?(key: string, commands: AgentCommand[]): void;
   /** An agent's subagent defaults changed, from any window. */
   subagentSettingsChanged?(agent: AgentName, state: SubagentSettingsState): void;
 }
@@ -440,6 +445,10 @@ export class CodeflowerExtensions {
     rpc.on('_codeflower/subagents/changed', (params) => {
       const { parentKey, subagent } = params as { parentKey: string; subagent: SubagentSummary };
       handlers.subagentChanged?.(parentKey, subagent);
+    });
+    rpc.on('_codeflower/commands/changed', (params) => {
+      const { key, commands } = params as { key?: string; commands?: AgentCommand[] };
+      if (typeof key === 'string' && Array.isArray(commands)) handlers.commandsChanged?.(key, commands);
     });
     rpc.on('_codeflower/subagents/settingsChanged', (params) => {
       const { agent, ...state } = params as ForAgent<SubagentSettingsState>;
@@ -730,6 +739,13 @@ export class CodeflowerExtensions {
   /** Ends the agent (refused while its chats are working); its next connection starts a fresh one. */
   async restartAgent(): Promise<void> {
     await this.rpc.request('_codeflower/agent/restart', this.named({}));
+  }
+
+  // ---- the agents' commands ----
+
+  /** The commands a chat's agent runs, and the last few that ended. */
+  async commands(key: string): Promise<AgentCommand[]> {
+    return (await this.rpc.request<{ commands?: AgentCommand[] }>('_codeflower/commands/list', { key })).commands ?? [];
   }
 
   // ---- subagents ----

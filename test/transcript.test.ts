@@ -212,3 +212,31 @@ test('a permission request takes what it leaves out from the tool call it names'
   const none = { requestId: 2, toolCall: null, options: [] };
   assert.equal(withKnownToolCall(none, entries), none);
 });
+
+test("shows a command's output streamed on its tool call (Codex's terminal _meta)", () => {
+  const meta = (value: Record<string, unknown>) => ({ _meta: value });
+  const items = buildItems([
+    update({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'cmd',
+      title: 'ls',
+      kind: 'execute',
+      status: 'in_progress',
+      content: [{ type: 'terminal', terminalId: 'cmd' }],
+      ...meta({ terminal_info: { terminal_id: 'cmd', cwd: '/workspace' } })
+    }),
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'cmd', ...meta({ terminal_output_delta: { terminal_id: 'cmd', data: 'a\n' } }) }),
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'cmd', ...meta({ terminal_output: { terminal_id: 'cmd', data: 'b\n' } }) }),
+    update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'cmd',
+      status: 'failed',
+      ...meta({ terminal_exit: { terminal_id: 'cmd', exit_code: 2, signal: null } })
+    })
+  ]);
+  const tool = items[0] as Extract<ChatItem, { kind: 'tool' }>;
+  assert.equal(tool.output, 'a\nb\n');
+  assert.equal(tool.exitCode, 2);
+  // The terminal content is the output, not a detail of its own.
+  assert.deepEqual(tool.details, []);
+});

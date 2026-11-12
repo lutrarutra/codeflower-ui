@@ -253,7 +253,7 @@
           <span class="shrink-0 font-mono text-[0.78em] text-muted tabular-nums" title={item.ended === null ? 'Running for' : 'Took'}>{took}</span>
         {/if}
         <span class="codicon {statusIcon[item.status] ?? statusIcon.pending}"></span>
-        {#if item.details.length || item.description}
+        {#if item.details.length || item.description || item.output}
           <span class="codicon codicon-chevron-right text-muted transition-transform group-open:rotate-90"></span>
         {/if}
       </summary>
@@ -267,6 +267,12 @@
           class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap"
           use:highlighted={{ text: detail, language: looksLikeDiff(detail) ? 'diff' : undefined }}></pre>
       {/each}
+      {#if item.output || (item.exitCode ?? 0) !== 0}
+        <pre
+          class="mx-2.5 mb-2.5 max-h-60 overflow-auto rounded-lg bg-code px-2.5 py-2 font-mono text-[0.8em] whitespace-pre-wrap">{item.output}{#if item.exitCode !== null && item.exitCode !== 0}<span
+              class="text-muted">{item.output ? '\n' : ''}exited {item.exitCode}</span
+            >{/if}</pre>
+      {/if}
     </details>
     <!-- Figures the agent looked at, so the user sees them too. -->
     {#if item.status === 'completed' && item.files.some(isImage)}

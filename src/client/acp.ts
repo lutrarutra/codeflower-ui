@@ -5,8 +5,8 @@
 //
 // The code flower bridge adds a few `_meta` fields, which other agents never
 // send: `codeflower/replayed` on requests it sends again to a window that
-// reattaches, and `codeflower/busy` / `codeflower/transcriptEntries` on
-// resumes. They are read where present and otherwise ignored. A bridge that
+// reattaches, and `codeflower/busy` / `codeflower/transcriptEntries` /
+// `codeflower/backgroundTasks` on resumes. They are read where present and otherwise ignored. A bridge that
 // serves several windows at once says so with `codeflower/multiClient` in its
 // `initialize` answer: it then tells every window with a chat open of each
 // prompt (`_codeflower/prompted`), this window's own too, and of requests
@@ -40,6 +40,7 @@ import type {
   StopReason
 } from '@agentclientprotocol/sdk';
 import type {
+  BackgroundTask,
   FormContent,
   FormSchema,
   PendingPermission,
@@ -73,6 +74,8 @@ interface SessionSettings {
     'codeflower/busy'?: boolean;
     /** MCP servers from the app's config the session is without. */
     'codeflower/mcpLeftOut'?: McpLeftOut[];
+    /** The agent's background tasks that were running then; later ones come as AIR async task updates. */
+    'codeflower/backgroundTasks'?: BackgroundTask[];
   } | null;
 }
 
@@ -110,6 +113,8 @@ export interface AcpHandlers {
   /** A question for the user (an ACP form), e.g. Claude Code's AskUserQuestion; null when answered. */
   question(sessionKey: string, request: PendingQuestion | null): void;
   busy(sessionKey: string, busy: boolean): void;
+  /** The agent's work that runs on after its turns started or ended. */
+  background?(sessionKey: string, tasks: BackgroundTask[]): void;
   /** The session's settings the agent offers (mode, model, effort, …) changed. */
   config(sessionKey: string, options: SessionConfigOption[]): void;
   /** Resolves when the user accepted or declined. */
@@ -191,6 +196,8 @@ export class AcpClient {
   private readonly busySessions = new Set<string>();
   /** Sessions with a turn an earlier connection started, as the worker reports. */
   private readonly remoteBusy = new Set<string>();
+  /** Each session's background tasks still running, by task id (AIR async tasks, e.g. Claude Code's background commands). */
+  private readonly backgroundTasks = new Map<string, Map<string, BackgroundTask>>();
 
   constructor(rpc: RpcConnection, handlers: AcpHandlers, keyOf: (sessionId: string) => string = (id) => id) {
     this.rpc = rpc;
@@ -298,6 +305,7 @@ export class AcpClient {
     this.setLeftOut(key, meta);
     // A turn an earlier connection started is still running.
     if (meta?.['codeflower/busy']) this.setRemoteBusy(key, true);
+    this.setBackground(key, Array.isArray(meta?.['codeflower/backgroundTasks']) ? meta['codeflower/backgroundTasks'] : []);
     const transcriptEntries = meta?.['codeflower/transcriptEntries'];
     return { key, ...(typeof transcriptEntries === 'number' ? { transcriptEntries } : {}) };
   }
@@ -314,10 +322,10 @@ export class AcpClient {
   }
 
   /** What a session is doing now, for a chat that opens mid-turn. */
-  activity(key: string): { busy: boolean; permission: PendingPermission | null; question: PendingQuestion | null } {
+  activity(key: string): { busy: boolean; background: BackgroundTask[]; permission: PendingPermission | null; question: PendingQuestion | null } {
     const find = <T>(map: Map<number, { sessionKey: string; request: T }>) =>
       [...map.values()].find((pending) => pending.sessionKey === key)?.request ?? null;
-    return { busy: this.isBusy(key), permission: find(this.permissions), question: find(this.questions) };
+    return { busy: this.isBusy(key), background: this.background(key), permission: find(this.permissions), question: find(this.questions) };
   }
 
   config(key: string): SessionConfigOption[] {
@@ -441,6 +449,35 @@ export class AcpClient {
     if (this.isBusy(key) !== before) this.handlers.busy(key, !before);
   }
 
+  /** The session's background tasks still running. */
+  background(key: string): BackgroundTask[] {
+    return [...(this.backgroundTasks.get(key)?.values() ?? [])];
+  }
+
+  private setBackground(key: string, tasks: BackgroundTask[]): void {
+    const had = this.backgroundTasks.has(key);
+    if (tasks.length) this.backgroundTasks.set(key, new Map(tasks.map((task) => [task.id, task])));
+    else this.backgroundTasks.delete(key);
+    if (had || tasks.length) this.handlers.background?.(key, tasks);
+  }
+
+  /** An AIR async task other than the agent's own turns started or ended. */
+  private followBackgroundTask(key: string, update: AsyncTaskUpdate): void {
+    if (typeof update.asyncTaskId !== 'string') return;
+    const tasks = this.backgroundTasks.get(key) ?? new Map<string, BackgroundTask>();
+    if (update.sessionUpdate === 'async_task_spawned' && update.taskType !== 'turn') {
+      tasks.set(update.asyncTaskId, {
+        id: update.asyncTaskId,
+        name: update.name || 'Background task',
+        taskType: update.taskType ?? 'task',
+        ...(update.description ? { description: update.description } : {})
+      });
+    } else if (update.sessionUpdate === 'async_task_state_update' && TASK_ENDED.has(update.state ?? '')) {
+      if (!tasks.delete(update.asyncTaskId)) return;
+    } else return;
+    this.setBackground(key, [...tasks.values()]);
+  }
+
   /** Answers every open request as cancelled, e.g. before the connection closes. */
   dropAll(): void {
     for (const [requestId] of this.permissions) this.answerPermission(requestId, null);
@@ -549,6 +586,7 @@ export class AcpClient {
     } else if (update.sessionUpdate === 'current_mode_update') {
       this.applyMode(key, update.currentModeId);
     }
+    if (!this.children.has(key)) this.followBackgroundTask(key, update as unknown as AsyncTaskUpdate);
     this.handlers.entry(key, { t: now(), kind: 'update', update });
   }
 
@@ -623,7 +661,22 @@ export class AcpClient {
     this.sessions.clear();
     this.children.clear();
     this.remoteBusy.clear();
+    // The worker tells a window that attaches again of those still running.
+    for (const key of [...this.backgroundTasks.keys()]) this.setBackground(key, []);
   }
+}
+
+/** The states an AIR async task ends in. */
+const TASK_ENDED = new Set(['completed', 'failed', 'stopped']);
+
+/** The AIR async task updates (`async_task_spawned`, `async_task_state_update`), which ACP's types do not have. */
+interface AsyncTaskUpdate {
+  sessionUpdate: string;
+  asyncTaskId?: string;
+  name?: string;
+  taskType?: string;
+  description?: string;
+  state?: string;
 }
 
 function requestKeyOf(meta: Record<string, unknown> | null | undefined): { requestKey?: string } {

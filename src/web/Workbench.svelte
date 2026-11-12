@@ -15,8 +15,10 @@
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
   import { INTERACTIVE } from './lib/previews.svelte.ts';
-  import { chatKeyOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
+  import { chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
+  import { commandTitle } from '../protocol/commands.ts';
   import ReportFrame from './ReportFrame.svelte';
+  import { displayPath } from './lib/report.ts';
   import WorkerOverview from './WorkerOverview.svelte';
   import { workerTitle } from './lib/format.ts';
 
@@ -96,7 +98,7 @@
   $effect(() => {
     for (const tab of layout.tabs()) {
       const { workerId, local } = splitTab(tab);
-      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local)) continue;
+      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local) || commandIdOf(local)) continue;
       if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
     }
   });
@@ -141,6 +143,15 @@
     const worker = app.worker(workerId);
     if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
     if (terminalIdOf(local)) return { icon: 'terminal', label: 'Terminal', title: named(workerId, 'A shell in the sandbox; closing the tab ends it') };
+    const commandId = commandIdOf(local);
+    if (commandId) {
+      const command = agent.commands[commandId];
+      return {
+        icon: 'eye',
+        label: command ? commandTitle(command, 32) : 'Command',
+        title: named(workerId, `${command?.command ?? 'A command the agent runs'} (read-only; closing the tab only stops watching it)`)
+      };
+    }
     const preview = app.previews.find(workerId, local);
     const interactive = local.endsWith(INTERACTIVE);
     return {
@@ -286,12 +297,22 @@
     {#await import('./ShellTerminal.svelte') then { default: ShellTerminal }}
       <ShellTerminal {workerId} terminalId={terminalIdOf(local)!} />
     {/await}
+  {:else if commandIdOf(local)}
+    {@const commandId = commandIdOf(local)!}
+    {#await import('./ShellTerminal.svelte') then { default: ShellTerminal }}
+      <ShellTerminal {workerId} terminalId={commandId} command title={app.agent(workerId).commands[commandId]?.command} />
+    {/await}
   {:else}
     {@const preview = app.previews.find(workerId, local)}
     {#if preview && local.endsWith(INTERACTIVE)}
       <ReportFrame
         html={preview.html}
         title="{preview.title} (interactive)"
+        figures={{
+          path: displayPath(preview.file.path),
+          blocked: preview.feedbackBlocked,
+          send: (text, annotations, figure) => void preview.sendFeedback(text, annotations, figure)
+        }}
         onMessage={(message) => {
           if (message.type === 'send') preview.draft(message.text);
           else if (message.type === 'comments') preview.saveComments(message.json);

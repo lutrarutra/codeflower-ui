@@ -43,6 +43,8 @@ export interface ChatActions {
   openSubagent(chat: ChatSession, key: string): void;
   openParent(chat: ChatSession): void;
   stopSubagent(chat: ChatSession, key: string): Promise<void>;
+  /** A command the chat's agent runs, watched read-only in a tab of its own. */
+  openCommand(chat: ChatSession, commandId: string): void;
   setSubagentSettings(chat: ChatSession, settings: Partial<SubagentSettings>): Promise<void>;
   restartAgent(chat: ChatSession): Promise<void>;
 }
@@ -385,6 +387,9 @@ export class ChatSession {
         break;
       case 'stopSubagent':
         await this.failing('Could not stop the subagent', this.actions.stopSubagent(this, message.key));
+        break;
+      case 'openCommand':
+        this.actions.openCommand(this, message.commandId);
         break;
       case 'subagentSettings':
         await this.failing('Could not change the subagent settings', this.actions.setSubagentSettings(this, message.settings));

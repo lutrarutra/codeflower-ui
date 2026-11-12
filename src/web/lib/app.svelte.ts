@@ -15,7 +15,7 @@ import { TerminalViews } from './terminalViews.ts';
 import { Attention } from './attention.svelte.ts';
 import { Focus } from './focus.svelte.ts';
 import { INTERACTIVE } from './previews.svelte.ts';
-import { Workbench, chatKeyOf, chatTab, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
+import { Workbench, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'focus' | 'server';
@@ -110,7 +110,13 @@ class AppState {
   private readonly events: WorkerEvents = {
     show: (worker, request) => this.previews.show(worker, request),
     openFile: (worker, chat, path) => void this.previews.openPath(worker, path, chat.key),
-    openChat: (worker, key) => this.workbench.openChat(worker.id, key),
+    // E.g. a subagent's chat from its parent's: in Focus, Focus shows it.
+    openChat: (worker, key) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker: worker.id, session: key }),
+    // Watched beside the chat; Focus shows only chats, so the grid comes back.
+    openCommand: (worker, chat, commandId) => {
+      if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });
+      this.workbench.openCommand(worker.id, commandId);
+    },
     signIn: (worker, agent) => void this.signIn.start(worker, agent),
     elicitUrl: (worker, request, agent) => this.signIn.elicitUrl(worker, request, agent),
     elicitationComplete: (worker, elicitationId) => this.signIn.elicitationComplete(worker, elicitationId),
@@ -180,14 +186,15 @@ class AppState {
   constructor() {
     this.workbench.mayClose = (tab) => {
       const { workerId, local } = splitTab(tab);
-      return !!chatKeyOf(local) || !!terminalIdOf(local) || this.previews.mayClose(workerId, local);
+      return !!chatKeyOf(local) || !!terminalIdOf(local) || !!commandIdOf(local) || this.previews.mayClose(workerId, local);
     };
     this.workbench.onClose = (tab) => {
       const { workerId, local } = splitTab(tab);
       const terminalId = terminalIdOf(local);
       // Closing a shell's tab ends the shell; leaving the page or losing the connection does not.
       if (terminalId) void this.agents.get(workerId)?.connection?.closeTerminal(terminalId).catch(() => undefined);
-      else if (!chatKeyOf(local)) this.previews.closed(workerId, local);
+      // A command's tab stops watching it as it goes; the command runs on.
+      else if (!chatKeyOf(local) && !commandIdOf(local)) this.previews.closed(workerId, local);
     };
     this.workbench.onChatFocus = (chat) => {
       this.follow(chat);

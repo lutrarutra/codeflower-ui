@@ -29,6 +29,7 @@ import {
   type TranscriptEntry
 } from '../protocol/messages.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
+import type { AgentCommand } from '../protocol/commands.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
 import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
 import {
@@ -119,6 +120,8 @@ export interface WorkerHandlers {
   /** A question for the user (an ACP form), e.g. Claude Code's AskUserQuestion; null when answered. */
   question(sessionKey: string, request: PendingQuestion | null): void;
   busy(sessionKey: string, busy: boolean): void;
+  /** The agent's work that runs on after its turns (e.g. background commands) started or ended. */
+  background?(sessionKey: string, tasks: BackgroundTask[]): void;
   /** The session's settings the agent offers (mode, model, effort, …) changed. */
   config(sessionKey: string, options: SessionConfigOption[]): void;
   /** Resolves when the user accepted or declined. */
@@ -141,6 +144,8 @@ export interface WorkerHandlers {
   shells?(shells: ShellTerminal[]): void;
   /** One of a chat's subagents changed: started, ended, or its summary. */
   subagent?(parentKey: string, subagent: SubagentSummary): void;
+  /** The commands a chat's agent runs changed: one started or ended, or a window watches it. */
+  commands?(sessionKey: string, commands: AgentCommand[]): void;
   /** An agent's subagent defaults changed, from any window. */
   subagentSettings?(agent: AgentName, state: SubagentSettingsState): void;
   /** An agent's connection ended, e.g. it restarted (1011): its chats are detached. */
@@ -321,7 +326,10 @@ export class WorkerConnection {
       wrapUp: ({ key }) => {
         if (key !== undefined && acp.isAttached(key)) acp.dropPending(key);
       },
-      subagentChanged: (parentKey, subagent) => handlers.subagent?.(parentKey, subagent)
+      subagentChanged: (parentKey, subagent) => handlers.subagent?.(parentKey, subagent),
+      commandsChanged: (key, commands) => {
+        if (acp.isAttached(key)) handlers.commands?.(key, commands);
+      }
     });
     link = { agent, rpc, acp, bridge };
     try {
@@ -539,7 +547,7 @@ export class WorkerConnection {
   }
 
   /** What a session is doing now, for a chat that opens mid-turn. */
-  activity(key: string): { busy: boolean; permission: PendingPermission | null; question: PendingQuestion | null } {
+  activity(key: string): { busy: boolean; background: BackgroundTask[]; permission: PendingPermission | null; question: PendingQuestion | null } {
     return this.linkOf(key).acp.activity(key);
   }
 
@@ -732,6 +740,17 @@ export class WorkerConnection {
   /** What the agent reports of its subagents; undefined when it has none in code flower. */
   subagentFeatures(agent: AgentName): SubagentFeatures | undefined {
     return this.agent(agent)?.capabilities.subagents;
+  }
+
+  /** Whether the bridge tells of the commands the agent's chats run. */
+  commandsFeature(agent: AgentName): boolean {
+    return this.agent(agent)?.capabilities.commands === true;
+  }
+
+  /** The commands a chat's agent runs, and the last few that ended; none from older bridges. */
+  async commands(key: string): Promise<AgentCommand[]> {
+    if (!this.commandsFeature(agentOfKey(key))) return [];
+    return this.linkOf(key).bridge.commands(key);
   }
 
   /** A chat's subagents, running and recorded; none for agents without them. */

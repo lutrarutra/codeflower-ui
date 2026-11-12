@@ -42,23 +42,22 @@
   <div class="relative" bind:this={root}>
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 rounded-full border-none bg-transparent px-1 py-0 text-inherit hover:text-ink {running.length
+      class="inline-flex items-center gap-1 rounded-full border-none bg-transparent px-1 py-0 text-inherit hover:text-ink {running.length
         ? waiting
           ? 'font-semibold text-orange'
           : 'font-semibold text-cyan'
         : ''}"
       aria-haspopup="dialog"
       aria-expanded={open}
-      title={running.length ? `${running.length} subagent${running.length === 1 ? '' : 's'} running` : 'Subagents of this chat'}
+      title={running.length
+        ? `${running.length} subagent${running.length === 1 ? '' : 's'} running${waiting ? ', one waiting for you' : ''} · ${subagents.length} in all`
+        : `${subagents.length} subagent${subagents.length === 1 ? '' : 's'} of this chat`}
+      aria-label={running.length ? `${running.length} subagents running` : `${subagents.length} subagents`}
       onclick={() => (open = !open)}
       onkeydown={(event) => event.key === 'Escape' && (open = false)}
     >
       <span class="codicon codicon-organization"></span>
-      {#if running.length}
-        {running.length} running
-      {:else}
-        {subagents.length} subagent{subagents.length === 1 ? '' : 's'}
-      {/if}
+      {running.length || subagents.length}
     </button>
     {#if open}
       <div

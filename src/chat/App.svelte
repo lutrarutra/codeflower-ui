@@ -10,6 +10,7 @@
     type TranscriptEntry
   } from '../protocol/messages.ts';
   import type { ChatUsage } from '../protocol/usage.ts';
+  import { runningCommands, type BackgroundWork } from '../protocol/commands.ts';
   import { choiceLabel, subagentActive, subagentStatus, subagentTitle, type SubagentSettingsState, type SubagentSummary } from '../protocol/subagents.ts';
   import type { AvailableCommand, SessionConfigOption } from '@agentclientprotocol/sdk';
   import CommandMenu from './lib/CommandMenu.svelte';
@@ -284,6 +285,25 @@
   const subagent = $derived(chat.subagent);
   const subagentRunning = $derived(subagent ? subagentActive(subagent) : false);
 
+  // What goes on outside the turn, in the footer: the commands the agent runs
+  // (with the last few that ended), which the bridge tells of, and its other
+  // background tasks (with older bridges, its background commands too); the
+  // chat's running subagents have their own badge. All of them carry on after
+  // the turn and bring the agent back.
+  const agentCommands = $derived(subagent ? [] : (chat.commands ?? []));
+  const background = $derived<BackgroundWork[]>(
+    subagent
+      ? []
+      : (chat.background ?? [])
+          // Its background commands are among the commands, when the bridge tells of them.
+          .filter((task) => chat.commands === undefined || (task.taskType !== 'shell' && task.taskType !== 'monitor'))
+          .map((task) => ({ id: `task:${task.id}`, name: task.name, kind: task.taskType, ...(task.description ? { detail: task.description } : {}) }))
+  );
+  const runningCount = $derived(
+    runningCommands(agentCommands).length + background.length + (subagent ? 0 : subagents.filter(subagentActive).length)
+  );
+  const runningNote = $derived(runningCount ? ` · ${runningCount} running in the background` : '');
+
   // "Claude Code · 127.0.0.1:7710": the agent, then where it runs.
   const [agentLabel, location] = $derived(chat.subtitle.split(' · '));
 </script>
@@ -340,7 +360,7 @@
     {/if}
     <span
       class="inline-flex shrink-0 items-center gap-1.5 text-[0.8em] font-semibold {statusLook[status][1]}"
-      title={statusLook[status][2]}
+      title={statusLook[status][2] + runningNote}
       role="status"
       aria-label={statusLook[status][3]}
     >
@@ -575,5 +595,5 @@
   </form>
   {/if}
 
-  <UsageMeter {usage} {subagents} />
+  <UsageMeter {usage} {subagents} commands={agentCommands} {background} />
 </main>

@@ -46,6 +46,7 @@ function actions(
     openSubagent: () => {},
     openParent: () => {},
     stopSubagent: async () => {},
+    openCommand: () => {},
     setSubagentSettings: async () => {},
     restartAgent: async () => {}
   };

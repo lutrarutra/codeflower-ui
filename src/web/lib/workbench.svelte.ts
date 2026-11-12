@@ -11,6 +11,7 @@ import { INTERACTIVE } from './previews.svelte.ts';
 export const OVERVIEW = '#overview';
 const CHAT = 'chat:';
 const TERMINAL = 'terminal:';
+const COMMAND = 'command:';
 
 /** The grid's tab for what a sandbox shows (a chat, its folders, a file). */
 export const tabOf = (workerId: string, local: string) => `${encodeURIComponent(workerId)}/${local}`;
@@ -25,6 +26,9 @@ export const chatKeyOf = (local: string) => (local.startsWith(CHAT) ? local.slic
 export const terminalTab = (terminalId: string) => `${TERMINAL}${terminalId}`;
 /** The shell a tab shows, by what it shows in its sandbox. */
 export const terminalIdOf = (local: string) => (local.startsWith(TERMINAL) ? local.slice(TERMINAL.length) : undefined);
+export const commandTab = (commandId: string) => `${COMMAND}${commandId}`;
+/** The agent's command a tab watches, by what it shows in its sandbox. */
+export const commandIdOf = (local: string) => (local.startsWith(COMMAND) ? local.slice(COMMAND.length) : undefined);
 /** Chats and the overview are the page's own; other tabs show files, or terminals. */
 const isPage = (tab: string) => {
   const { local } = splitTab(tab);
@@ -114,7 +118,15 @@ export class Workbench {
 
   /** Opens a shell's tab, in front: beside the chat in front, else in the focused group. */
   openTerminal(workerId: string, terminalId: string): void {
-    const tab = tabOf(workerId, terminalTab(terminalId));
+    this.openBeside(tabOf(workerId, terminalTab(terminalId)));
+  }
+
+  /** A command an agent runs, watched in a tab beside the chats. */
+  openCommand(workerId: string, commandId: string): void {
+    this.openBeside(tabOf(workerId, commandTab(commandId)));
+  }
+
+  private openBeside(tab: string): void {
     if (this.layout.has(tab)) this.layout.activate(tab);
     else {
       const focused = this.layout.byRecency()[0]!;

@@ -31,6 +31,10 @@ export type ChatItem =
       status: string;
       toolKind: string;
       details: string[];
+      /** A command's output, as the agent streamed it on the call (the end of it when long); '' when none came. */
+      output: string;
+      /** A command's exit code, when the agent said. */
+      exitCode: number | null;
       files: string[];
       /** When the call started and ended, in ms since the epoch; null when unknown or still running. */
       started: number | null;
@@ -156,13 +160,44 @@ const time = (t: string) => {
 };
 const finished = (status: string | null | undefined) => status === 'completed' || status === 'failed';
 
+// A command's terminal content ({type: 'terminal'}) is its output, which comes
+// as chunks (terminalOutput below), so it has no detail of its own.
 function toolDetails(content: ToolCallContent[] | null | undefined): string[] {
   if (!content) return [];
-  return content.map((item) => {
-    if (item.type === 'content') return blockText(item.content);
-    if (item.type === 'diff') return `edited ${item.path}`;
-    return 'terminal output';
+  return content.flatMap((item) => {
+    if (item.type === 'content') return [blockText(item.content)];
+    if (item.type === 'diff') return [`edited ${item.path}`];
+    return [];
   });
+}
+
+/** What the chat keeps of a command's output: its end. */
+export const TOOL_OUTPUT_CHARS = 64 * 1024;
+
+/**
+ * A command's output and exit on its tool call, in the `_meta` convention Zed
+ * started and agents such as Codex's adapter use: `terminal_output_delta` (or
+ * `terminal_output`, sent to clients that ask for it) with `{terminal_id, data}`
+ * chunks of text, and `terminal_exit` with `{exit_code}`.
+ */
+export function terminalOutput(meta: unknown): { data: string; exitCode: number | null | undefined } | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const record = meta as Record<string, unknown>;
+  const chunk = (record.terminal_output_delta ?? record.terminal_output) as { data?: unknown } | undefined;
+  const exit = record.terminal_exit as { exit_code?: unknown } | undefined;
+  const data = typeof chunk?.data === 'string' ? chunk.data : '';
+  const exitCode = exit && typeof exit === 'object' ? (typeof exit.exit_code === 'number' ? exit.exit_code : null) : undefined;
+  return data || exitCode !== undefined ? { data, exitCode } : null;
+}
+
+function addOutput(tool: Extract<ChatItem, { kind: 'tool' }>, meta: unknown): void {
+  const terminal = terminalOutput(meta);
+  if (!terminal) return;
+  if (terminal.data) {
+    const output = tool.output + terminal.data;
+    tool.output = output.length > TOOL_OUTPUT_CHARS ? output.slice(-TOOL_OUTPUT_CHARS) : output;
+  }
+  if (terminal.exitCode !== undefined) tool.exitCode = terminal.exitCode;
 }
 
 /** `start` is the index of `entries[0]` in the transcript: ids stay the same as earlier entries load. */
@@ -359,10 +394,13 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
               status: update.status ?? 'pending',
               toolKind: update.kind ?? 'other',
               details: toolDetails(update.content),
+              output: '',
+              exitCode: null,
               files: toolFiles(update.locations),
               started: time(entry.t),
               ended: finished(update.status) ? time(entry.t) : null
             };
+            addOutput(tool, update._meta);
             tools.set(update.toolCallId, tool);
             items.push(tool);
             break;
@@ -376,6 +414,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
             if (finished(update.status) && tool.ended === null) tool.ended = time(entry.t);
             if (update.content) tool.details = toolDetails(update.content);
             if (update.locations) tool.files = toolFiles(update.locations);
+            addOutput(tool, update._meta);
             const compacted = compactTitle(update.rawOutput);
             if (compacted) tool.title = compacted;
             break;

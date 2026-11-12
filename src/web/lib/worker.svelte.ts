@@ -5,6 +5,7 @@
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 import {
   type AgentName,
+  type BackgroundTask,
   type ChatAction,
   type ChatState,
   type PendingPermission,
@@ -12,6 +13,7 @@ import {
   type TranscriptEntry
 } from '../../protocol/messages.ts';
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
+import type { AgentCommand } from '../../protocol/commands.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
   agentOfKey,
@@ -53,6 +55,8 @@ export interface WorkerEvents {
   openFile(worker: WebWorker, chat: ChatSession, path: string): void;
   /** A chat of the sandbox in front, e.g. a subagent's from its parent. */
   openChat(worker: WebWorker, key: string): void;
+  /** A command a chat's agent runs, watched read-only in a tab. */
+  openCommand(worker: WebWorker, chat: ChatSession, commandId: string): void;
   /** The agent should sign in, e.g. a chat of it cannot start without. */
   signIn(worker: WebWorker, agent: AgentName): void;
   elicitUrl(worker: WebWorker, request: UrlElicitation, agent?: AgentName): Promise<'accept' | 'decline'>;
@@ -79,6 +83,8 @@ export class WebWorker {
   private availableActions: ChatAction[] | undefined;
   /** Open chats, by key. */
   chats = $state<Record<string, ChatSession>>({});
+  /** The commands the open chats' agents run, by id: what their tabs show. */
+  commands = $state<Record<string, AgentCommand>>({});
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
   /** The user's shells running in the sandbox (the page's Terminal). */
@@ -400,10 +406,17 @@ export class WebWorker {
       const activity = connection.activity(chat.key);
       chat.post({ type: 'permission', request: activity.permission });
       chat.post({ type: 'question', request: activity.question });
-      chat.setState({ ...this.presentation(chat.key), live: true, busy: activity.busy, steer: connection.canSteer(chat.key) });
+      chat.setState({
+        ...this.presentation(chat.key),
+        live: true,
+        busy: activity.busy,
+        background: activity.background,
+        steer: connection.canSteer(chat.key)
+      });
       this.noticeMcp(chat, connection.mcpNotice(chat.key));
       this.noticeTerminal(chat);
       void this.loadSubagents(chat);
+      void this.loadCommands(chat);
     } catch (error) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
@@ -425,6 +438,19 @@ export class WebWorker {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
     }
+  }
+
+  /** The commands a chat's agent runs, for its strip and their tabs. */
+  private async loadCommands(chat: ChatSession): Promise<void> {
+    const connection = this.connection;
+    if (!connection?.commandsFeature(agentOfKey(chat.key))) return;
+    const commands = await connection.commands(chat.key).catch(() => undefined);
+    if (commands && this.connection === connection) this.setCommands(chat.key, commands);
+  }
+
+  private setCommands(key: string, commands: AgentCommand[]): void {
+    for (const command of commands) this.commands[command.commandId] = command;
+    this.chats[key]?.setState({ commands });
   }
 
   /** A chat's subagents, for its cards and its badge. */
@@ -557,6 +583,7 @@ export class WebWorker {
     openFile: (chat, path) => this.events.openFile(this, chat, path),
     signIn: (chat) => this.events.signIn(this, agentOfKey(chat.key)),
     openSubagent: (_chat, key) => this.events.openChat(this, key),
+    openCommand: (chat, commandId) => this.events.openCommand(this, chat, commandId),
     openParent: (chat) => {
       if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
     },
@@ -672,7 +699,7 @@ export class WebWorker {
     const agentEnded = code === 1011;
     this.state = code === TAKEN_OVER ? 'taken-over' : 'disconnected';
     for (const chat of Object.values(this.chats)) {
-      chat.setState(agentEnded ? { live: false, busy: false } : { live: false });
+      chat.setState(agentEnded ? { live: false, busy: false, background: [] } : { live: false });
       chat.post({ type: 'config', options: [] });
       chat.notify(
         'info',
@@ -698,7 +725,7 @@ export class WebWorker {
     const chats = this.chatsOf(agent);
     const restarted = code === 1011;
     for (const chat of chats) {
-      chat.setState(restarted ? { live: false, busy: false } : { live: false });
+      chat.setState(restarted ? { live: false, busy: false, background: [] } : { live: false });
       chat.post({ type: 'config', options: [] });
     }
     delete this.usage[agent];
@@ -734,6 +761,8 @@ export class WebWorker {
       permission: (key: string, request: PendingPermission | null) => this.chats[key]?.post({ type: 'permission', request }),
       question: (key: string, request: PendingQuestion | null) => this.chats[key]?.post({ type: 'question', request }),
       busy: (key: string, busy: boolean) => this.chats[key]?.setState({ busy }),
+      background: (key: string, background: BackgroundTask[]) => this.chats[key]?.setState({ background }),
+      commands: (key: string, commands: AgentCommand[]) => this.setCommands(key, commands),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),
       elicitUrl: (request: UrlElicitation, agent?: AgentName) => this.events.elicitUrl(this, request, agent),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),

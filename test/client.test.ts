@@ -14,6 +14,7 @@ function recorder() {
     permission: (key, request) => events.push(`permission ${key} ${request ? request.options.map((o) => o.optionId) : 'none'}`),
     question: (key, request) => events.push(`question ${key} ${request ? request.message : 'none'}`),
     busy: (key, busy) => events.push(`busy ${key} ${busy}`),
+    background: (key, tasks) => events.push(`background ${key} ${tasks.map((task) => task.name).join(',')}`),
     config: (key, options) => events.push(`config ${key} ${options.map((o) => `${o.id}=${String(o.currentValue)}`).join(',')}`),
     elicitUrl: async () => 'accept',
     elicitationComplete: () => {},

@@ -11,12 +11,21 @@
     totalsLines,
     type ChatUsage
   } from '../../protocol/usage.ts';
+  import type { AgentCommand, BackgroundWork } from '../../protocol/commands.ts';
   import type { SubagentSummary } from '../../protocol/subagents.ts';
+  import BackgroundBadge from './BackgroundBadge.svelte';
+  import CommandsBadge from './CommandsBadge.svelte';
   import SubagentBadge from './SubagentBadge.svelte';
 
-  // Under the composer: the chat's subagents, how full the context is, what
-  // this chat used, and how much of the worker's subscription quota is left.
-  let { usage, subagents = [] }: { usage: ChatUsage; subagents?: SubagentSummary[] } = $props();
+  // Under the composer, mostly icons with the details on hover: what runs in
+  // the background (the agent's commands, its other tasks), the chat's subagents, how full the context is, what this
+  // chat used, and how much of the worker's subscription quota is left.
+  let {
+    usage,
+    subagents = [],
+    commands = [],
+    background = []
+  }: { usage: ChatUsage; subagents?: SubagentSummary[]; commands?: AgentCommand[]; background?: BackgroundWork[] } = $props();
 
   // Resets count down; a minute is fine enough.
   let now = $state(Date.now());
@@ -36,25 +45,25 @@
   const tokens = $derived(session?.tokens);
 </script>
 
-{#if subagents.length || context || tokens?.totalTokens || limits.length}
+{#if commands.length || background.length || subagents.length || context || tokens?.totalTokens || limits.length}
   <div class="mx-4 -mt-2.5 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[0.78em] text-muted">
+    <CommandsBadge {commands} />
+    <BackgroundBadge work={background} />
     <SubagentBadge {subagents} />
     {#if context}
       <span
-        class="inline-flex items-center gap-1.5"
+        class="inline-flex items-center gap-1 {contextPercent >= 80 ? 'font-semibold text-orange' : ''}"
         title="Context: {formatTokens(context.used)} of {formatTokens(context.size)} tokens"
       >
         <span class="codicon codicon-layers"></span>
-        <span class="meter"><span class="fill {contextPercent >= 80 ? 'bg-orange' : 'bg-indigo'}" style:width="{Math.min(contextPercent, 100)}%"></span></span>
         {formatPercent(contextPercent)}
       </span>
     {/if}
     {#if tokens?.totalTokens}
-      <span class="inline-flex items-center gap-1.5" title={totalsLines(session!, estimate).join('\n')}>
-        <span class="codicon codicon-symbol-numeric"></span>
-        {formatTokens(tokens.inputTokens + tokens.cachedReadTokens + tokens.cachedWriteTokens)} in ·
-        {formatTokens(tokens.outputTokens)} out
-        {#if session?.cost}· {formatCost(session.cost, estimate)}{/if}
+      <span class="inline-flex items-center gap-1" title={totalsLines(session!, estimate).join('\n')}>
+        <span class="codicon codicon-arrow-up text-[10px]!" aria-label="in"></span>{formatTokens(tokens.inputTokens + tokens.cachedReadTokens + tokens.cachedWriteTokens)}
+        <span class="codicon codicon-arrow-down ml-1 text-[10px]!" aria-label="out"></span>{formatTokens(tokens.outputTokens)}
+        {#if session?.cost}<span class="ml-1">{formatCost(session.cost, estimate)}</span>{/if}
       </span>
     {/if}
     {#each limits as limit (limit.id)}

@@ -3,6 +3,8 @@
   // and outlives the tab's window: the tab attaches to it (again after a lost
   // connection or a reload), gets what it printed so far, and detaches when
   // it goes. Closing the tab ends the shell (see app.svelte.ts).
+  // With `command`, a command the agent runs, watched read-only: nothing is
+  // typed into it, and closing the tab only stops watching it.
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import { Terminal } from '@xterm/xterm';
@@ -12,7 +14,13 @@
   import { app } from './lib/app.svelte.ts';
   import { isWebLink } from './lib/authMethods.ts';
 
-  let { workerId, terminalId }: { workerId: string; terminalId: string } = $props();
+  let {
+    workerId,
+    terminalId,
+    command = false,
+    title
+  }: { workerId: string; terminalId: string; command?: boolean; title?: string } = $props();
+  const what = $derived(command ? 'command' : 'shell');
   const agent = $derived(app.agent(workerId));
   const worker = $derived(app.worker(workerId));
   let element: HTMLDivElement;
@@ -45,9 +53,13 @@
     const shell = new Terminal({
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       fontSize: 13,
-      cursorBlink: true,
-      scrollback: 5000,
-      theme: { background: '#1e1e1e', foreground: '#e4e4e4' }
+      cursorBlink: !command,
+      // A command's output has bare line feeds; it reads nothing typed.
+      convertEol: command,
+      disableStdin: command,
+      scrollback: command ? 10000 : 5000,
+      // A command's tab has no cursor: nothing is typed there.
+      theme: { background: '#1e1e1e', foreground: '#e4e4e4', ...(command ? { cursor: '#1e1e1e', cursorAccent: '#1e1e1e' } : {}) }
     });
     fit = new FitAddon();
     shell.loadAddon(fit);
@@ -63,14 +75,14 @@
       },
       exit: (exitCode) => {
         ended = true;
-        shell.write(`\r\n\x1b[2mThe shell ended${exitCode ? ` with code ${exitCode}` : ''}.\x1b[0m\r\n`);
+        shell.write(`\r\n\x1b[2mThe ${what} ended${exitCode ? ` with code ${exitCode}` : ''}.\x1b[0m\r\n`);
       }
     });
     shell.onData((data) => {
-      if (!ended && attachedTo?.connected) void attachedTo.terminalInput(terminalId, data).catch(() => undefined);
+      if (!command && !ended && attachedTo?.connected) void attachedTo.terminalInput(terminalId, data).catch(() => undefined);
     });
     shell.onResize(({ cols, rows }) => {
-      if (!ended && attachedTo?.connected) void attachedTo.resizeTerminal(terminalId, cols, rows).catch(() => undefined);
+      if (!command && !ended && attachedTo?.connected) void attachedTo.resizeTerminal(terminalId, cols, rows).catch(() => undefined);
     });
     // The tab's group changes size, or the tab is shown: it has no size while its group has none.
     const observer = new ResizeObserver(() => {
@@ -78,7 +90,7 @@
     });
     observer.observe(element);
     terminal = shell;
-    shell.focus();
+    if (!command) shell.focus();
 
     return () => {
       observer.disconnect();
@@ -92,9 +104,16 @@
 </script>
 
 <div class="flex h-full flex-col bg-[#1e1e1e]">
+  {#if command}
+    <p class="m-0 flex min-w-0 items-center gap-1.5 px-3 py-1.5 text-[0.85em] text-[#b0b0b0]" role="status">
+      <span class="codicon codicon-eye shrink-0 text-[12px]!"></span>
+      <span class="shrink-0">{ended ? 'Ended' : 'Watching'} (read-only):</span>
+      <span class="min-w-0 truncate font-mono text-[#e4e4e4]" title={title}>{title ?? 'a command'}</span>
+    </p>
+  {/if}
   {#if !agent.connected && !ended}
     <p class="m-0 px-3 py-1.5 text-[0.85em] text-[#b0b0b0]" role="status">
-      {agent.state === 'connecting' ? 'Connecting to the sandbox…' : 'Not connected to the sandbox: the shell runs on there.'}
+      {agent.state === 'connecting' ? 'Connecting to the sandbox…' : `Not connected to the sandbox: the ${what} runs on there.`}
     </p>
   {/if}
   <div bind:this={element} class="min-h-0 flex-1 overflow-hidden p-2"></div>

@@ -11,6 +11,7 @@ import type {
   ToolCallUpdate
 } from '@agentclientprotocol/sdk';
 import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from './subagents.ts';
+import type { AgentCommand } from './commands.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -220,6 +221,10 @@ export interface ChatState {
   busy: boolean;
   /** The agent takes a message while it works (ACP steering); without, sending one now stops the turn first. */
   steer?: boolean;
+  /** The agent's work that runs on after its turn, e.g. background commands (not subagents, which `subagents` lists). */
+  background?: BackgroundTask[];
+  /** The commands the agent runs, and the last few that ended (bridges that tell of them). */
+  commands?: AgentCommand[];
   /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
   subagent?: SubagentSummary & { parentTitle?: string };
   /** The chat shows only each turn's prompt and final message, its steps folded (VS Code keeps the choice). */
@@ -320,6 +325,8 @@ export type WebviewMessage =
   | { type: 'openSubagent'; key: string }
   | { type: 'openParent' }
   | { type: 'stopSubagent'; key: string }
+  /** Show a command the agent runs, its output so far and the rest as it comes (read-only). */
+  | { type: 'openCommand'; commandId: string }
   | { type: 'subagentSettings'; settings: Partial<SubagentSettings> }
   /** Restart the agent so settings it reads at start apply. */
   | { type: 'restartAgent' };
