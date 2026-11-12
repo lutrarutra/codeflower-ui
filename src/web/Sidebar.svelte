@@ -206,7 +206,28 @@
       {#if !app.listed}
         <div role="status" aria-label="Loading the sandboxes"><Skeleton lines={['60%', '40%']} height="0.75rem" /></div>
       {:else if railed}
-        <p class="m-0 text-[0.9em] text-muted">Choose a sandbox in the rail to see its chats, or Focus for the chats of every sandbox.</p>
+        <ul class="-mx-2 m-0 flex list-none flex-col gap-0.5 p-0">
+          {#each app.workers.filter((worker) => inRail(worker, app.machine(worker.id), app.browsing)) as worker (worker.id)}
+            {@const count = app.attention.count(worker.id)}
+            <li>
+              <button
+                class="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-soft-line"
+                title={statusText(worker)}
+                onclick={() => (app.browse(worker.id), onNavigate())}
+              >
+                <span class="size-2 shrink-0 rounded-full" style:background-color={color(worker)}></span>
+                <span class="flex min-w-0 flex-1 flex-col leading-tight">
+                  <span class="truncate font-semibold">{workerTitle(worker)[0]}</span>
+                  <span class="truncate text-[0.8em] text-muted">{[place(worker), statusText(worker)].filter(Boolean).join(' · ')}</span>
+                </span>
+                {#if count}
+                  <span class="grid h-4.5 min-w-4.5 shrink-0 place-items-center rounded-full bg-indigo px-1 text-[11px] font-bold text-on-accent">{count}</span>
+                {/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
+        <p class="m-0 text-[0.85em] text-muted">Or Focus, in the rail, for the chats of every sandbox.</p>
       {:else if !single}
         <p class="m-0 text-[0.9em] text-muted">
           {#if app.workers.length}

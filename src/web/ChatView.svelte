@@ -5,6 +5,7 @@
   // has it, the agent is not signed in, a wrap-up).
   import Skeleton from '../chat/lib/Skeleton.svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
+  import Home from './Home.svelte';
   import Workbench from './Workbench.svelte';
   import WorkerOverview from './WorkerOverview.svelte';
   import { agentOfKey } from '../client/workerConnection.ts';
@@ -84,13 +85,19 @@
 {/if}
 
 {#snippet choose()}
+  {#if railed}
+    <Home />
+  {:else}
+    {@render nothing()}
+  {/if}
+{/snippet}
+
+{#snippet nothing()}
   <main class="grid h-full place-items-center p-8 text-center">
     <div class="flex max-w-md flex-col items-center gap-3">
       <Tulip size={56} />
-      <h1 class="m-0 font-display text-2xl font-medium">{railed ? 'Choose a sandbox' : app.workers.length ? 'No sandbox running' : 'No sandbox yet'}</h1>
-      <p class="m-0 text-muted">
-        {railed ? 'Pick one in the rail on the left to see its chats.' : 'Start one on a computer, or connect one running elsewhere, for example in a batch job.'}
-      </p>
+      <h1 class="m-0 font-display text-2xl font-medium">{app.workers.length ? 'No sandbox running' : 'No sandbox yet'}</h1>
+      <p class="m-0 text-muted">Start one on a computer, or connect one running elsewhere, for example in a batch job.</p>
       <div class="flex flex-wrap justify-center gap-2">
         {#if !app.single && (!app.system?.capabilities.connectOnly || tunnelConnectorId() !== undefined)}
           <button class="pill pill-primary" onclick={() => (app.creating = { tab: 'start' })}>Start a sandbox</button>
