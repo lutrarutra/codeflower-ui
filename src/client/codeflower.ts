@@ -226,7 +226,8 @@ export interface SessionRecord {
 
 /** What the worker's agents are doing, sent by the worker whenever it changes. */
 export interface WorkerActivity {
-  chats: { key: string; state: 'working' | 'waiting'; waitingFor?: 'plan' | 'permission' | 'question' }[];
+  /** `turn`: whether a turn runs (a chat can wait for the user without one); older workers leave it out. */
+  chats: { key: string; state: 'working' | 'waiting'; waitingFor?: 'plan' | 'permission' | 'question'; turn?: boolean }[];
   working: number;
   waiting: number;
 }

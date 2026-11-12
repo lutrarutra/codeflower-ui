@@ -174,6 +174,59 @@ test('asks the user for permission and answers the agent', async () => {
   assert.deepEqual(entries.map(([, entry]) => entry.kind), ['permission', 'permission_outcome']);
 });
 
+test('shows requests that come at once one after the other, the oldest first', async () => {
+  // Background subagents can each ask in the same chat.
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' })
+  });
+  const { events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('pi');
+  const ask = (optionId: string) =>
+    agent.request('session/request_permission', {
+      sessionId: 'one',
+      toolCall: { toolCallId: optionId, title: optionId },
+      options: [{ optionId, name: 'Allow', kind: 'allow_once' }]
+    });
+  const first = ask('first');
+  await tick();
+  const second = ask('second');
+  await tick();
+  assert.deepEqual(events.filter((event) => event.startsWith('permission')), [`permission ${key} first`, `permission ${key} first`]);
+  connection.answerPermission(key, 1, 'first');
+  assert.equal(events.at(-1), `permission ${key} second`);
+  assert.deepEqual((await first).result, { outcome: { outcome: 'selected', optionId: 'first' } });
+  connection.answerPermission(key, 2, 'second');
+  assert.equal(events.at(-1), `permission ${key} none`);
+  assert.deepEqual((await second).result, { outcome: { outcome: 'selected', optionId: 'second' } });
+});
+
+test('a chat that waits for the user without a turn running takes a prompt', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' })
+  });
+  const { events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('pi');
+  const activity = (chat: Record<string, unknown>) => agent.notify('_codeflower/activity', { chats: [{ key, ...chat }], working: 0, waiting: 1 });
+  // A background subagent asks after the turn that started it ended.
+  activity({ state: 'waiting', waitingFor: 'permission', turn: false });
+  await tick();
+  assert.ok(!events.includes(`busy ${key} true`));
+  activity({ state: 'waiting', waitingFor: 'permission', turn: true });
+  await tick();
+  assert.equal(events.at(-1), `busy ${key} true`);
+  activity({ state: 'waiting', waitingFor: 'permission', turn: false });
+  await tick();
+  assert.equal(events.at(-1), `busy ${key} false`);
+  // An older worker does not say: its chats wait in a turn.
+  activity({ state: 'waiting', waitingFor: 'permission' });
+  await tick();
+  assert.equal(events.at(-1), `busy ${key} true`);
+});
+
 test('auto-approves DSH permission requests when enabled', async () => {
   const agent = new FakeAgent({
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'dsh', version: '1' } }),

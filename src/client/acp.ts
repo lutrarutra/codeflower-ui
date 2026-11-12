@@ -323,9 +323,12 @@ export class AcpClient {
 
   /** What a session is doing now, for a chat that opens mid-turn. */
   activity(key: string): { busy: boolean; background: BackgroundTask[]; permission: PendingPermission | null; question: PendingQuestion | null } {
-    const find = <T>(map: Map<number, { sessionKey: string; request: T }>) =>
-      [...map.values()].find((pending) => pending.sessionKey === key)?.request ?? null;
-    return { busy: this.isBusy(key), background: this.background(key), permission: find(this.permissions), question: find(this.questions) };
+    return {
+      busy: this.isBusy(key),
+      background: this.background(key),
+      permission: this.pendingOf(this.permissions, key),
+      question: this.pendingOf(this.questions, key)
+    };
   }
 
   config(key: string): SessionConfigOption[] {
@@ -417,7 +420,7 @@ export class AcpClient {
     this.permissions.delete(requestId);
     const outcome = optionId ? ({ outcome: 'selected', optionId } as const) : ({ outcome: 'cancelled' } as const);
     this.handlers.entry(pending.sessionKey, { t: now(), kind: 'permission_outcome', outcome });
-    this.handlers.permission(pending.sessionKey, null);
+    this.handlers.permission(pending.sessionKey, this.pendingOf(this.permissions, pending.sessionKey));
     pending.resolve({ outcome });
   }
 
@@ -437,7 +440,7 @@ export class AcpClient {
     if (!pending) return;
     this.questions.delete(requestId);
     this.handlers.entry(pending.sessionKey, { t: now(), kind: 'question_outcome', action, content });
-    this.handlers.question(pending.sessionKey, null);
+    this.handlers.question(pending.sessionKey, this.pendingOf(this.questions, pending.sessionKey));
     pending.resolve(action === 'accept' ? { action, content: content ?? {} } : { action });
   }
 
@@ -492,6 +495,14 @@ export class AcpClient {
   }
 
   // ---- internals ----
+
+  /**
+   * The chat's oldest request still open, the one it shows: background
+   * subagents can ask at the same time, and each is shown in turn.
+   */
+  private pendingOf<T>(map: Map<number, { sessionKey: string; request: T }>, key: string): T | null {
+    return [...map.values()].find((pending) => pending.sessionKey === key)?.request ?? null;
+  }
 
   private isBusy(key: string): boolean {
     return this.busySessions.has(key) || this.remoteBusy.has(key);
@@ -560,7 +571,7 @@ export class AcpClient {
       this.permissions.delete(requestId);
       const outcome = result.outcome ?? ({ outcome: 'cancelled' } as const);
       this.handlers.entry(pending.sessionKey, { t: now(), kind: 'permission_outcome', outcome });
-      this.handlers.permission(pending.sessionKey, null);
+      this.handlers.permission(pending.sessionKey, this.pendingOf(this.permissions, pending.sessionKey));
       // The bridge drops this window's answer; it only ends the request here.
       pending.resolve({ outcome });
     }
@@ -569,7 +580,7 @@ export class AcpClient {
       this.questions.delete(requestId);
       const action = result.action ?? 'cancel';
       this.handlers.entry(pending.sessionKey, { t: now(), kind: 'question_outcome', action, content: result.content ?? null });
-      this.handlers.question(pending.sessionKey, null);
+      this.handlers.question(pending.sessionKey, this.pendingOf(this.questions, pending.sessionKey));
       pending.resolve(action === 'accept' ? { action, content: result.content ?? {} } : { action });
     }
   }
@@ -601,7 +612,8 @@ export class AcpClient {
       const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options, ...(chat.subagent ? { subagent: chat.subagent } : {}) };
       this.permissions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
       if (this.autoApprovedSessions.has(key) && this.autoApprovePermission(requestId, pending)) return;
-      this.handlers.permission(key, pending);
+      // After the one it shows, if any.
+      this.handlers.permission(key, this.pendingOf(this.permissions, key));
     });
   }
 
@@ -635,7 +647,7 @@ export class AcpClient {
       return new Promise((resolve) => {
         const pending = { requestId, ...question };
         this.questions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
-        this.handlers.question(key, pending);
+        this.handlers.question(key, this.pendingOf(this.questions, key));
       });
     }
     if (request.mode !== 'url' || typeof request.url !== 'string') return { action: 'decline' };

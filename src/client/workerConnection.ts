@@ -316,7 +316,9 @@ export class WorkerConnection {
     const bridge = new CodeflowerExtensions(rpc, {
       ...this.sharedHandlers(() => link),
       activity: (activity) => {
-        const working = new Set(activity.chats.map((chat) => chat.key));
+        // A chat can wait for the user with no turn running (a background subagent asks
+        // after the turn ended): it takes a prompt. Older workers do not say; theirs wait in a turn.
+        const working = new Set(activity.chats.filter((chat) => chat.turn !== false).map((chat) => chat.key));
         for (const key of acp.keys()) acp.setRemoteBusy(key, working.has(key));
       },
       // The sandbox's own connection hands on what is the agent's.
