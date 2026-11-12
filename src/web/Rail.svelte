@@ -122,12 +122,11 @@
   <ul class="m-0 flex min-h-0 w-full flex-1 list-none flex-col items-center gap-2 overflow-y-auto p-0 pt-1.5 scrollbar-none">
     {#each groups as group (group.key)}
       <li
-        class="flex w-[3.6rem] flex-col items-center gap-2 {group.labeled ? 'rounded-2xl border-t-[3px] bg-sunken px-0.5 pt-1 pb-2' : 'py-1'}"
-        style:border-top-color={group.labeled ? group.color : undefined}
+        class="flex w-16 flex-col items-center gap-2 {group.labeled ? 'rounded-2xl bg-sunken px-1 pt-1.5 pb-2' : 'py-1'}"
         title={group.name}
       >
         {#if group.labeled}
-          <span class="w-full truncate text-center text-[0.56rem] font-bold text-muted uppercase">{group.name}</span>
+          <span class="w-full truncate text-center text-[0.56rem] font-bold tracking-wide uppercase" style:color={group.color}>{group.name}</span>
         {/if}
         {#each group.workers as worker (worker.id)}
           {@const selected = current === worker.id}
