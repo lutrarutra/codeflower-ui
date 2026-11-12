@@ -75,6 +75,33 @@ export type TranscriptEntry =
 /** Marks the prompt block that tells the agent about the user's shell commands. */
 export const SHELL_CONTEXT_META = 'codeflower/shellContext';
 
+/** Marks the block before a message the user sent while the agent worked (ACP steering). */
+export const STEER_NOTE_META = 'codeflower/steerNote';
+
+/**
+ * What the agent reads before such a message: most add to the task rather than
+ * stop it, but an agent that is interrupted mid-step tends to take the message
+ * as all there is left to do.
+ */
+export const STEER_NOTE =
+  'The user sent this message while you were working. It adds to your task; it does not stop it. ' +
+  'Take it into account and carry on with what you were doing, including waiting for background tasks ' +
+  'and subagents, unless the message asks you to stop, wait, or change course.';
+
+/** A block the client adds to a prompt for the agent, which the user did not write and the chat does not show. */
+export function hiddenBlock(block: { _meta?: Record<string, unknown> | null }): boolean {
+  return Boolean(block._meta?.[SHELL_CONTEXT_META] || block._meta?.[STEER_NOTE_META]);
+}
+
+/** Work of the agent's that goes on after its turn ends, e.g. Claude Code's background commands. */
+export interface BackgroundTask {
+  id: string;
+  name: string;
+  /** e.g. `shell`, `monitor`, `workflow`. */
+  taskType: string;
+  description?: string;
+}
+
 /** An agent's question as an ACP form elicitation, e.g. Claude Code's AskUserQuestion. */
 export interface PendingQuestion {
   requestId: number;

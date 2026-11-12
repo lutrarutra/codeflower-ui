@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { agentPresentation, type TranscriptEntry } from '../src/protocol/messages.ts';
+import { agentPresentation, STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { sessionKey } from '../src/client/sessionKey.ts';
 import { TAKEN_OVER, WorkerConnection, mcpNotice, type WorkerHandlers } from '../src/client/workerConnection.ts';
 import { FakeAgent, agentState, tick } from './fakeAgent.ts';
@@ -100,6 +100,56 @@ test('falls back from resume to load when the agent advertises neither', async (
     ['session/resume', 'session/load']
   );
   assert.ok(events.includes('busy claude-abc true'));
+});
+
+test('tells the agent that a message sent while it works adds to its task', async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' }, _meta: { steering: { supported: true } } }),
+    'session/new': () => ({ sessionId: 'one' }),
+    '_session/steering': () => ({ outcome: 'injected' })
+  });
+  const { entries, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('pi');
+  assert.equal(connection.canSteer(key), true);
+  assert.equal(await connection.steer(key, 'btw, also X'), true);
+  const sent = agent.received.find((message) => message.method === '_session/steering')!.params as { prompt: unknown[] };
+  assert.deepEqual(sent.prompt, [
+    { type: 'text', text: STEER_NOTE, _meta: { [STEER_NOTE_META]: true } },
+    { type: 'text', text: 'btw, also X' }
+  ]);
+  assert.deepEqual(entries.map(([, entry]) => entry.kind), ['prompt']);
+});
+
+test("follows the agent's background tasks, from the attach on", async () => {
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),
+    'session/load': () => ({
+      _meta: { 'codeflower/backgroundTasks': [{ id: 'bash-1', name: 'npm test', taskType: 'shell' }] }
+    })
+  });
+  const { events, handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const { key } = await connection.resumeSession('pi', 'abc', null);
+  assert.deepEqual(connection.activity(key).background, [{ id: 'bash-1', name: 'npm test', taskType: 'shell' }]);
+  const update = (update: Record<string, unknown>) => agent.notify('session/update', { sessionId: 'abc', update });
+  update({ sessionUpdate: 'async_task_spawned', asyncTaskId: 'turn-1', name: 'Pi is working', taskType: 'turn' });
+  update({ sessionUpdate: 'async_task_spawned', asyncTaskId: 'mon-1', name: 'watch logs', taskType: 'monitor', description: 'tail -f' });
+  await tick();
+  assert.deepEqual(
+    connection.activity(key).background.map((task) => task.id),
+    ['bash-1', 'mon-1']
+  );
+  update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'bash-1', state: 'running' });
+  update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'turn-1', state: 'completed' });
+  update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'bash-1', state: 'completed' });
+  update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'mon-1', state: 'stopped' });
+  await tick();
+  assert.deepEqual(connection.activity(key).background, []);
+  assert.deepEqual(
+    events.filter((event) => event.startsWith('background')),
+    [`background ${key} npm test`, `background ${key} npm test,watch logs`, `background ${key} watch logs`, `background ${key} `]
+  );
 });
 
 test('asks the user for permission and answers the agent', async () => {

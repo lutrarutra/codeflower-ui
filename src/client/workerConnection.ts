@@ -14,8 +14,11 @@ import {
   ACTION_PROMPT_META,
   agentPresentation,
   SHELL_CONTEXT_META,
+  STEER_NOTE,
+  STEER_NOTE_META,
   type ActionPromptMeta,
   type AgentName,
+  type BackgroundTask,
   type ChatAction,
   type AgentPresentation,
   type FormContent,
@@ -584,9 +587,14 @@ export class WorkerConnection {
   /**
    * Gives the turn the agent is working on a message. False when no turn took
    * it: send it as a prompt. Commands and shell context wait for a prompt.
+   * A note before it tells the agent to go on with its task, which the chat
+   * does not show.
    */
   steer(key: string, text: string): Promise<boolean> {
-    return this.linkOf(key).acp.steer(key, [{ type: 'text', text }]);
+    return this.linkOf(key).acp.steer(key, [
+      { type: 'text', text: STEER_NOTE, _meta: { [STEER_NOTE_META]: true } },
+      { type: 'text', text }
+    ]);
   }
 
   cancel(key: string): void {

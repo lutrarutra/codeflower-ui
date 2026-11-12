@@ -3,7 +3,7 @@ import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCa
 import { looksLikeFile } from './files.ts';
 import {
   ACTION_PROMPT_META,
-  SHELL_CONTEXT_META,
+  hiddenBlock,
   type ActionPromptMeta,
   formFields,
   type FormContent,
@@ -202,8 +202,9 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
     switch (entry.kind) {
       case 'prompt':
         {
-          // The agent also got the user's earlier shell commands; the chat shows them as their own cards.
-          const prompt = entry.prompt.filter((block) => !block._meta?.[SHELL_CONTEXT_META]);
+          // The agent also got what the client added, e.g. the user's earlier shell
+          // commands, which the chat shows as their own cards.
+          const prompt = entry.prompt.filter((block) => !hiddenBlock(block));
           const text = prompt.map(blockText).join('\n');
           const action = promptAction(prompt);
           const times = { started: time(entry.t), ended: null };

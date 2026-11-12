@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionUpdate, ToolCallUpdate } from '@agentclientprotocol/sdk';
-import type { TranscriptEntry } from '../src/protocol/messages.ts';
+import { STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { activity, buildItems, foldTurns, withKnownToolCall, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
@@ -54,6 +54,20 @@ test('renders action prompts compactly and falls back when metadata is missing',
   const plain = buildItems([{ t: '', kind: 'prompt', prompt: [{ type: 'text', text: 'Make a checkpoint.' }] }]);
   assert.deepEqual(action, [{ kind: 'action', id: '0', title: 'Checkpoint', text: 'Make a checkpoint.', started: null, ended: null }]);
   assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.', started: null, ended: null }]);
+});
+
+test("shows a message sent while the agent worked without the client's note to the agent", () => {
+  const items = buildItems([
+    {
+      t: '',
+      kind: 'prompt',
+      prompt: [
+        { type: 'text', text: STEER_NOTE, _meta: { [STEER_NOTE_META]: true } },
+        { type: 'text', text: 'btw, also X' }
+      ]
+    }
+  ]);
+  assert.deepEqual(items, [{ kind: 'user', id: '0', text: 'btw, also X', started: null, ended: null }]);
 });
 
 test('times tool calls, until the turn ends for those left running', () => {
