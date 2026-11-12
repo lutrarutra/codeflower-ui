@@ -80,6 +80,23 @@ test('loads earlier entries when the view asks, and replays them with the rest',
   assert.deepEqual(transcript, { type: 'transcript', entries: [prompt('first'), prompt('second'), prompt('third')], start: 0, context: [] });
 });
 
+test("lists the files shown before the loaded page, from the page's context", async () => {
+  const t = '2026-11-02T10:00:00.000Z';
+  const prompt = (text: string) => ({ t, kind: 'prompt' as const, prompt: [{ type: 'text' as const, text }] });
+  const early = { t, kind: 'show' as const, files: ['/workspace/early.png', '/workspace/report.html'] };
+  const again = { t, kind: 'show' as const, files: ['/workspace/early.png'] };
+  const chat = new ChatSession('worker', 'session', {}, {
+    ...actions(async () => {}),
+    transcriptPage: async () => ({ entries: [early, prompt('first')], start: 0, context: [] })
+  });
+  chat.loaded({ entries: [prompt('second'), again], start: 2, context: [early] });
+  assert.deepEqual(chat.shown, ['/workspace/report.html', '/workspace/early.png']);
+  // The earlier page brings the same entry again: each file once, the latest last.
+  chat.host.send({ type: 'loadEarlier' });
+  await new Promise((resolve) => setTimeout(resolve));
+  assert.deepEqual(chat.shown, ['/workspace/report.html', '/workspace/early.png']);
+});
+
 test('enables DSH auto-approval by default and lets the user turn it off', () => {
   const choices: boolean[] = [];
   const chat = new ChatSession(

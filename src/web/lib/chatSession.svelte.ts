@@ -232,12 +232,13 @@ export class ChatSession {
         this.start = message.start ?? 0;
         this.context = message.context ?? [];
         this.transcriptKnown = true;
-        this.shown = shownFiles(this.entries, []);
+        // The context has the files shown before the page (from workers that send them), so all list at once.
+        this.shown = shownFiles([...this.context, ...this.entries], []);
         break;
       case 'earlier':
         this.entries = [...message.entries, ...this.entries];
         this.start = message.start;
-        this.shown = shownFiles(this.entries, []);
+        this.shown = shownFiles([...this.context, ...this.entries], []);
         break;
       case 'entry':
         this.entries.push(message.entry);
