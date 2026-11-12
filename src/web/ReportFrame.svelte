@@ -3,9 +3,65 @@
   // iframe without the page's origin (no cookie, no API), whose policy keeps it
   // off the network. The frame asks for the report once it has loaded.
   import { untrack } from 'svelte';
+  import type { FeedbackAnnotation, FeedbackFigure } from '../protocol/messages.ts';
+  import Annotator, { type Note } from '../chat/lib/Annotator.svelte';
   import { interactiveHtml, isStorytellerReport, printableHtml, reportMessage, type ReportMessage } from './lib/report.ts';
 
-  let { html, title, onMessage }: { html: string; title: string; onMessage: (message: ReportMessage) => void } = $props();
+  let {
+    html,
+    title,
+    onMessage,
+    figures
+  }: {
+    html: string;
+    title: string;
+    onMessage: (message: ReportMessage) => void;
+    /**
+     * A figure the user clicks opens over the whole window, full size, to comment on its parts;
+     * this says where it is and where the comments go.
+     */
+    figures?: {
+      /** The report, as the user knows it. */
+      path: string;
+      /** Why the comments cannot be sent now, or '' when they can. */
+      blocked: string;
+      send: (text: string, annotations: FeedbackAnnotation[], figure: FeedbackFigure) => void;
+    };
+  } = $props();
+
+  // The figure open over the window, as clicked, and the comments not sent yet on each one.
+  interface Draft {
+    notes: Note[];
+    general: string;
+    figure: FeedbackFigure;
+    mimeType: string;
+    data: string;
+  }
+  let drafts = $state<Record<string, Draft>>({});
+  let annotating = $state<string | null>(null);
+  const figureKey = (figure: FeedbackFigure) => `${figure.index}:${figure.part ?? ''}:${figure.caption ?? ''}`;
+
+  function openFigure(message: Extract<ReportMessage, { type: 'figure' }>): void {
+    const key = figureKey(message.figure);
+    const draft = drafts[key];
+    // Shown as it was clicked: the report may change meanwhile.
+    drafts[key] = { notes: draft?.notes ?? [], general: draft?.general ?? '', figure: message.figure, mimeType: message.mimeType, data: message.data };
+    annotating = key;
+  }
+
+  function closeFigure(): void {
+    const draft = annotating ? drafts[annotating] : undefined;
+    if (annotating && draft && !draft.notes.length && !draft.general.trim()) delete drafts[annotating];
+    annotating = null;
+  }
+
+  function sendFigure(text: string, annotations: FeedbackAnnotation[]): void {
+    const draft = annotating ? drafts[annotating] : undefined;
+    if (!draft || !figures || figures.blocked) return;
+    figures.send(text, annotations, $state.snapshot(draft.figure));
+    delete drafts[annotating!];
+    annotating = null;
+  }
 
   let frame: HTMLIFrameElement | undefined = $state();
   /** Bumped to load the frame afresh. */
@@ -43,6 +99,7 @@
       }
       const message = reportMessage(event.data);
       if (message?.type === 'reload') reload();
+      else if (message?.type === 'figure') openFigure(message);
       else if (message?.type === 'print') printCopy();
       else if (message) onMessage(message);
     };
@@ -102,4 +159,22 @@
     onload={loaded}
     class="block h-full w-full border-0 bg-white"
   ></iframe>
+{/if}
+
+{#if annotating && drafts[annotating]}
+  {@const draft = drafts[annotating]!}
+  {#key annotating}
+    <Annotator
+      title={draft.figure.caption || `Figure ${draft.figure.index}`}
+      subtitle={figures ? `figure ${draft.figure.index} in ${figures.path}` : `figure ${draft.figure.index}`}
+      mimeType={draft.mimeType}
+      data={draft.data}
+      bind:notes={drafts[annotating]!.notes}
+      bind:general={drafts[annotating]!.general}
+      sendable={Boolean(figures && !figures.blocked)}
+      sendHint={figures ? figures.blocked : 'Comments on this report cannot be sent from here.'}
+      onsend={sendFigure}
+      onclose={closeFigure}
+    />
+  {/key}
 {/if}

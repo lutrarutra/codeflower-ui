@@ -33,6 +33,22 @@ test('accepts only the bridge messages from a report', () => {
   assert.equal(reportMessage('send'), undefined);
 });
 
+test('a clicked figure comes as its image, checked', () => {
+  assert.deepEqual(reportMessage({ type: 'figure', src: 'data:image/png;base64,iVBO Rw0=', index: 2, caption: '  UMAP\n of cells ', part: 'umap' }), {
+    type: 'figure',
+    mimeType: 'image/png',
+    data: 'iVBORw0=',
+    figure: { index: 2, caption: 'UMAP of cells', part: 'umap' }
+  });
+  const svg = reportMessage({ type: 'figure', src: `data:image/svg+xml;utf8,${encodeURIComponent('<svg>é</svg>')}`, index: 1 });
+  assert.equal(svg?.type === 'figure' && Buffer.from(svg.data, 'base64').toString(), '<svg>é</svg>');
+  // Only images, with a number; nothing from elsewhere.
+  assert.equal(reportMessage({ type: 'figure', src: 'data:text/html;base64,PGI+', index: 1 }), undefined);
+  assert.equal(reportMessage({ type: 'figure', src: 'https://example.com/a.png', index: 1 }), undefined);
+  assert.equal(reportMessage({ type: 'figure', src: 'data:image/png;base64,!!', index: 1 }), undefined);
+  assert.equal(reportMessage({ type: 'figure', src: 'data:image/png;base64,iVBO', index: 0 }), undefined);
+});
+
 test('a printable copy has the policy and prints itself once loaded', () => {
   const html = printableHtml('<html><head></head><body><p>report</p></body></html>');
   assert.ok(html.indexOf("default-src 'none'") < html.indexOf('report'));

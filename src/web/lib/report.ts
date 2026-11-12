@@ -1,15 +1,20 @@
 // Files from a sandbox as the page shows them: paths, and HTML reports with
 // their scripts running. A report runs in the app's /frame, a sandboxed iframe
 // with no network and no access to the page; all it can do is tell the page
-// five things, through the bridge below:
+// six things, through the bridge below:
 // - "send": settings from a report control, or the user's comments for the agent,
 //   which go to the preview's feedback box for the user to read and send;
 // - "comments": the comments the user left on the report (JSON), to save into it;
 // - "reload": the page could not apply an update in place and wants a fresh load;
 // - "print": the user pressed Print, which the frame may not do (no allow-modals);
 // - "download": the user pressed a button for a file beside the report (a deck's
-//   .pptx), named relative to it: the page saves it through the browser.
+//   .pptx), named relative to it: the page saves it through the browser;
+// - "figure": the user clicked a figure, which the page opens over the whole
+//   window, to look at full size and comment on its parts.
 import { WORKSPACE } from '../../client/codeflower.ts';
+import type { FeedbackFigure } from '../../protocol/messages.ts';
+import { feedbackFigure } from '../../chat/lib/feedback.ts';
+import { encodeText } from '../../chat/lib/files.ts';
 
 /** Paths in the workspace read best relative to it, as the agent writes them. */
 export function displayPath(path: string): string {
@@ -53,7 +58,9 @@ export type ReportMessage =
   | { type: 'comments'; json: string }
   | { type: 'reload' }
   | { type: 'print' }
-  | { type: 'download'; path: string };
+  | { type: 'download'; path: string }
+  /** The figure's image is base64. */
+  | { type: 'figure'; figure: FeedbackFigure; mimeType: string; data: string };
 
 // Defined before the report's own scripts run, so its runtime finds the host.
 const BRIDGE = `<script>(() => {
@@ -64,6 +71,7 @@ const BRIDGE = `<script>(() => {
     reload: () => post({ type: 'reload' }),
     print: () => post({ type: 'print' }),
     download: (path) => typeof path === 'string' && post({ type: 'download', path }),
+    figure: (figure) => figure && typeof figure === 'object' && post({ type: 'figure', src: String(figure.src), index: figure.index, caption: figure.caption, part: figure.part, anchor: figure.anchor }),
     saveComments: (json) => typeof json === 'string' && json.length <= 2000000 && post({ type: 'comments', json })
   });
 })();</script>`;
@@ -91,6 +99,25 @@ export function printableHtml(html: string): string {
 /** A file in the report's own folder: a plain name, not a path that leads elsewhere. */
 const BESIDE = /^(?!\.)[^/\\]{1,200}$/;
 
+/** Images a figure may be: a raster or SVG, as a data URL. */
+const FIGURE_IMAGE = /^data:(image\/(?:png|jpeg|gif|webp|svg\+xml))((?:;[^;,]*)*?)(;base64)?,(.*)$/s;
+/** The largest figure a report may hand over, as a data URL. */
+export const MAX_FIGURE_URL = 30_000_000;
+
+/** A figure's image from its data URL: base64, or null when it is not an image. */
+function figureImage(src: string): { mimeType: string; data: string } | null {
+  if (src.length > MAX_FIGURE_URL) return null;
+  const match = FIGURE_IMAGE.exec(src);
+  if (!match) return null;
+  try {
+    const data = match[3] ? match[4]!.replace(/\s/g, '') : encodeText(decodeURIComponent(match[4]!));
+    if (match[3]) atob(data);
+    return { mimeType: match[1]!, data };
+  } catch {
+    return null;
+  }
+}
+
 /** A message from a report's bridge, checked: it comes from an untrusted page. */
 export function reportMessage(data: unknown): ReportMessage | undefined {
   if (!data || typeof data !== 'object') return undefined;
@@ -102,5 +129,10 @@ export function reportMessage(data: unknown): ReportMessage | undefined {
   if (message.type === 'print') return { type: 'print' };
   if (message.type === 'download' && typeof message.path === 'string' && BESIDE.test(message.path))
     return { type: 'download', path: message.path };
+  if (message.type === 'figure' && typeof message.src === 'string') {
+    const image = figureImage(message.src);
+    const figure = feedbackFigure(message);
+    if (image && figure) return { type: 'figure', ...image, figure };
+  }
   return undefined;
 }

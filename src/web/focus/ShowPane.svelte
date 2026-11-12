@@ -8,8 +8,20 @@
   import { basename, displayPath } from '../lib/report.ts';
   import { chatTab, tabOf } from '../lib/workbench.svelte.ts';
   import ReportFrame from '../ReportFrame.svelte';
+  import { feedbackText } from '../../chat/lib/feedback.ts';
 
-  let { workerId, chatKey, onCollapse }: { workerId: string; chatKey: string; onCollapse?: () => void } = $props();
+  let {
+    workerId,
+    chatKey,
+    onCollapse,
+    onDraft
+  }: {
+    workerId: string;
+    chatKey: string;
+    onCollapse?: () => void;
+    /** Text from a report went into the chat's composer, e.g. to bring the chat to the front. */
+    onDraft?: () => void;
+  } = $props();
 
   const agent = $derived(app.agent(workerId));
   const chat = $derived(agent.chats[chatKey]);
@@ -52,6 +64,17 @@
     tried.add(file);
     untrack(() => void app.previews.openPath(agent, file, chatKey));
   });
+
+  /**
+   * Settings or comments a report sends: into the composer of the chat beside it. The preview's
+   * own feedback box is not on screen here, so `Preview.draft` would leave them nowhere.
+   */
+  function draft(file: string, text: string): void {
+    if (!chat) return;
+    // Says which report, as the feedback box does when it sends.
+    chat.post({ type: 'draft', text: feedbackText(displayPath(file), 'the code flower app', text) });
+    onDraft?.();
+  }
 
   function pick(file: string): void {
     app.focus.showing[tab] = file;
@@ -105,8 +128,13 @@
             <ReportFrame
               html={one.html}
               title="{one.title} (interactive)"
+              figures={{
+                path: displayPath(one.file.path),
+                blocked: one.feedbackBlocked,
+                send: (text, annotations, figure) => void one.sendFeedback(text, annotations, figure)
+              }}
               onMessage={(message) => {
-                if (message.type === 'send') one.draft(message.text);
+                if (message.type === 'send') draft(file, message.text);
                 else if (message.type === 'comments') one.saveComments(message.json);
                 else if (message.type === 'download') void one.downloadBeside(message.path);
               }}

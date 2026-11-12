@@ -180,6 +180,21 @@ export class Preview {
     this.post({ type: 'draft', text });
   }
 
+  /** Why feedback cannot go to the chat now, or '' when it can. */
+  get feedbackBlocked(): string {
+    if (!this.chatKey) return 'Open a chat on this worker to send comments to its agent.';
+    return this.owner.page.agent(this.workerId)?.state === 'connected' ? '' : 'The worker is not connected.';
+  }
+
+  /** Sends the user's feedback on the file (or one of its figures) to the chat it came from. */
+  sendFeedback(text: string, annotations?: unknown, figure?: unknown): 'sent' | 'queued' | undefined {
+    const chat = this.chatKey ? this.owner.page.agent(this.workerId)?.chats[this.chatKey] : undefined;
+    if (!chat) return undefined;
+    return chat.send(
+      feedbackText(displayPath(this.file.path), 'the code flower app', text, feedbackAnnotations(annotations), feedbackFigure(figure))
+    );
+  }
+
   /** Saves a copy of a file beside the report (a deck's .pptx) through the browser's downloads. */
   async downloadBeside(name: string): Promise<void> {
     try {
@@ -217,12 +232,8 @@ export class Preview {
         });
         break;
       case 'feedback': {
-        const chat = this.chatKey ? agent?.chats[this.chatKey] : undefined;
-        if (!chat) return;
-        const outcome = chat.send(
-          feedbackText(displayPath(this.file.path), 'the code flower app', message.text, feedbackAnnotations(message.annotations), feedbackFigure(message.figure))
-        );
-        this.post({ type: 'feedbackSent', queued: outcome === 'queued' });
+        const outcome = this.sendFeedback(message.text, message.annotations, message.figure);
+        if (outcome) this.post({ type: 'feedbackSent', queued: outcome === 'queued' });
         break;
       }
       case 'asset': {

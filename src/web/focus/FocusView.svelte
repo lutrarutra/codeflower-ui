@@ -200,7 +200,7 @@
       {#if narrow ? front === 'pane' : pane}
         <div class="min-w-0 flex-1">
           {#key selected.workerId + '/' + selected.key}
-            <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} />
+            <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (front = 'chat')} />
           {/key}
         </div>
       {/if}
