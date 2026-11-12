@@ -60,6 +60,14 @@
   let layout = $state(0);
   let zoomPercent = $state(100);
   let panning = $state(false);
+  // What one finger or the mouse does on the figure: move it around, or select a part to comment on.
+  // Touch screens open in move mode, to zoom in first; a mouse has the wheel for that.
+  type Mode = 'move' | 'select';
+  let mode = $state<Mode>(typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'move' : 'select');
+  function setMode(next: Mode): void {
+    mode = next;
+    hovered = null;
+  }
   const boxes: Record<number, HTMLTextAreaElement | undefined> = $state({});
   let nextKey = Math.max(0, ...notes.map((note) => note.key)) + 1;
 
@@ -232,64 +240,95 @@
     if (figure instanceof HTMLImageElement && !figure.complete) figure.addEventListener('load', ready, { once: true });
     else ready();
 
-    // Marking: a drag over the figure marks an area, a click picks an SVG element.
-    let start: { x: number; y: number } | null = null;
+    // One finger, or the mouse, moves the figure in move mode; in select mode it
+    // drags out an area, or clicks an SVG element. Two fingers pinch and move in
+    // either mode. The middle button, or Space and drag, always moves.
+    type Point = { x: number; y: number };
+    const pointers = new Map<number, Point>();
+    let gesture: { kind: 'mark'; start: Point } | { kind: 'pan'; from: Point } | { kind: 'pinch'; mid: Point; distance: number } | null = null;
     let spaceHeld = false;
+    const local = (point: Point): Point => {
+      const at = viewport.getBoundingClientRect();
+      return { x: point.x - at.left, y: point.y - at.top };
+    };
+    const startPan = (point: Point) => {
+      gesture = { kind: 'pan', from: { x: point.x - offset.x, y: point.y - offset.y } };
+      panning = true;
+    };
+    const startPinch = () => {
+      const [a, b] = [...pointers.values()] as [Point, Point];
+      gesture = { kind: 'pinch', mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, distance: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+      dragBox = null;
+      hovered = null;
+      panning = true;
+    };
     const down = (event: PointerEvent) => {
-      if (event.button !== 0 || spaceHeld) return;
-      event.stopPropagation();
-      start = { x: event.clientX, y: event.clientY };
-      stage.setPointerCapture(event.pointerId);
+      if (event.button !== 0 && event.button !== 1) return;
+      event.preventDefault();
+      const point = { x: event.clientX, y: event.clientY };
+      pointers.set(event.pointerId, point);
+      viewport.setPointerCapture(event.pointerId);
+      if (pointers.size >= 2) startPinch();
+      else if (event.button === 1 || spaceHeld || mode === 'move') startPan(point);
+      else gesture = { kind: 'mark', start: point };
     };
     const move = (event: PointerEvent) => {
-      if (!start) {
-        hovered = svg && !panning ? (selectableElement(event.target, svg)?.id ?? null) : null;
+      if (!pointers.has(event.pointerId)) {
+        hovered = svg && mode === 'select' && !spaceHeld ? (selectableElement(event.target, svg)?.id ?? null) : null;
         return;
       }
-      if (dragBox || Math.hypot(event.clientX - start.x, event.clientY - start.y) > DRAG_PIXELS) {
+      const point = { x: event.clientX, y: event.clientY };
+      pointers.set(event.pointerId, point);
+      if (!gesture) return;
+      if (gesture.kind === 'pinch') {
+        if (pointers.size < 2) return;
+        const [a, b] = [...pointers.values()] as [Point, Point];
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const distance = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+        offset = { x: offset.x + mid.x - gesture.mid.x, y: offset.y + mid.y - gesture.mid.y };
+        view!.zoom(distance / gesture.distance, local(mid));
+        gesture = { kind: 'pinch', mid, distance };
+      } else if (gesture.kind === 'pan') {
+        offset = { x: point.x - gesture.from.x, y: point.y - gesture.from.y };
+        fitted = false;
+        apply();
+      } else if (dragBox || Math.hypot(point.x - gesture.start.x, point.y - gesture.start.y) > DRAG_PIXELS) {
         hovered = null;
+        const { start } = gesture;
         dragBox = {
-          left: Math.min(start.x, event.clientX),
-          top: Math.min(start.y, event.clientY),
-          right: Math.max(start.x, event.clientX),
-          bottom: Math.max(start.y, event.clientY)
+          left: Math.min(start.x, point.x),
+          top: Math.min(start.y, point.y),
+          right: Math.max(start.x, point.x),
+          bottom: Math.max(start.y, point.y)
         };
       }
     };
     const up = (event: PointerEvent) => {
-      if (!start) return;
-      const area = dragBox;
-      start = null;
+      if (!pointers.delete(event.pointerId)) return;
+      const ended = gesture;
+      if (ended?.kind === 'mark' && event.type === 'pointerup') {
+        const area = dragBox;
+        dragBox = null;
+        if (area) {
+          const marked = region(figure, area);
+          if (marked) addNote({ region: marked });
+        } else if (svg) {
+          // The pointer is captured by the view: find what is under it.
+          pick(selectableElement(root.elementFromPoint(event.clientX, event.clientY), svg), event.shiftKey || event.metaKey || event.ctrlKey);
+        }
+      }
       dragBox = null;
-      if (area) {
-        const marked = region(figure, area);
-        if (marked) addNote({ region: marked });
-      } else if (svg) {
-        // The pointer is captured by the stage: find what is under it.
-        pick(selectableElement(root.elementFromPoint(event.clientX, event.clientY), svg), event.shiftKey || event.metaKey || event.ctrlKey);
+      // A finger left after a pinch keeps moving the figure; it does not start an area.
+      const [rest] = pointers.values();
+      if (rest && pointers.size >= 2) startPinch();
+      else if (rest && ended?.kind !== 'mark') startPan(rest);
+      else {
+        gesture = null;
+        panning = false;
       }
     };
     const leave = () => (hovered = null);
 
-    // Moving around: drag the background, the middle button, or Space and drag.
-    let pan: { x: number; y: number } | null = null;
-    const panDown = (event: PointerEvent) => {
-      if (event.button !== 0 && event.button !== 1) return;
-      event.preventDefault();
-      pan = { x: event.clientX - offset.x, y: event.clientY - offset.y };
-      panning = true;
-      viewport.setPointerCapture(event.pointerId);
-    };
-    const panMove = (event: PointerEvent) => {
-      if (!pan) return;
-      offset = { x: event.clientX - pan.x, y: event.clientY - pan.y };
-      fitted = false;
-      apply();
-    };
-    const panUp = () => {
-      pan = null;
-      panning = false;
-    };
     // Ctrl or Cmd and the wheel, or a pinch, zooms at the cursor; the wheel alone moves.
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -314,6 +353,8 @@
       else if (event.key === '-') view!.zoom(1 / ZOOM_STEP);
       else if (event.key === '0') view!.fit();
       else if (event.key === '1') view!.actual();
+      else if (event.key === 'h') setMode('move');
+      else if (event.key === 'v') setMode('select');
     };
     const keyUp = (event: KeyboardEvent) => {
       if (event.key !== ' ') return;
@@ -321,14 +362,11 @@
       viewport.classList.remove('grab');
     };
 
-    stage.addEventListener('pointerdown', down);
-    stage.addEventListener('pointermove', move);
-    stage.addEventListener('pointerup', up);
-    stage.addEventListener('pointerleave', leave);
-    viewport.addEventListener('pointerdown', panDown);
-    viewport.addEventListener('pointermove', panMove);
-    viewport.addEventListener('pointerup', panUp);
-    viewport.addEventListener('pointercancel', panUp);
+    viewport.addEventListener('pointerdown', down);
+    viewport.addEventListener('pointermove', move);
+    viewport.addEventListener('pointerup', up);
+    viewport.addEventListener('pointercancel', up);
+    viewport.addEventListener('pointerleave', leave);
     viewport.addEventListener('wheel', wheel, { passive: false });
     window.addEventListener('keydown', keyDown);
     window.addEventListener('keyup', keyUp);
@@ -340,6 +378,13 @@
       window.removeEventListener('keyup', keyUp);
       view = undefined;
     };
+  });
+
+  // The cursor follows the mode; the figure is redrawn when the file changes.
+  $effect(() => {
+    void layout;
+    const viewport = host?.shadowRoot?.querySelector<HTMLElement>('.view');
+    if (viewport) viewport.dataset.mode = mode;
   });
 
   // Outlines and numbers over what each comment is about, the hovered element and the area being dragged.
@@ -381,11 +426,11 @@
   });
 
   const FIGURE_STYLE = `:host{all:initial;display:block;position:absolute;inset:0}
-    .view{position:absolute;inset:0;overflow:hidden;cursor:grab;touch-action:none;user-select:none}
-    .view.grab,.view.grab *{cursor:grab!important}
-    .view:active{cursor:grabbing}
+    .view{position:absolute;inset:0;overflow:hidden;cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+    .view[data-mode=move],.view[data-mode=move] *,.view.grab,.view.grab *{cursor:grab!important}
+    .view[data-mode=move]:active,.view[data-mode=move]:active *{cursor:grabbing!important}
     .stage{position:absolute;left:0;top:0}
-    svg,img{display:block;max-width:none;background:#fff;border-radius:4px;box-shadow:0 1px 4px rgb(0 0 0 / 0.15);cursor:crosshair}
+    svg,img{display:block;max-width:none;background:#fff;border-radius:4px;box-shadow:0 1px 4px rgb(0 0 0 / 0.15)}
     svg [id]{cursor:pointer}
     .marks{position:absolute;inset:0;pointer-events:none}
     .mark{position:absolute;box-sizing:border-box;border-radius:5px}
@@ -423,12 +468,36 @@
 />
 
 <div class="fixed inset-0 z-50 flex flex-col bg-paper" role="dialog" aria-modal="true" aria-label="Comment on {title}">
-  <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5">
-    <div class="min-w-0 flex-1">
+  <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5 max-[640px]:flex-wrap max-[640px]:gap-2 max-[640px]:px-3">
+    <div class="min-w-0 flex-1 max-[640px]:basis-[calc(100%-3rem)]">
       <h2 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">{title}</h2>
       <p class="m-0 truncate text-[0.8em] text-muted" title={subtitle}>
-        {subtitle ? `${subtitle} · ` : ''}{isSvg ? 'Click an element or drag over an area to comment on it' : 'Drag over an area to comment on it'}
+        {subtitle ? `${subtitle} · ` : ''}{mode === 'move'
+          ? 'Switch to Select to comment on a part'
+          : isSvg
+            ? 'Click an element or drag over an area to comment on it'
+            : 'Drag over an area to comment on it'}
       </p>
+    </div>
+    <div
+      class="flex shrink-0 rounded-full border-[1.5px] border-soft-line bg-code p-0.5 text-[0.8em] font-semibold"
+      role="radiogroup"
+      aria-label="What dragging does"
+    >
+      {#each [{ value: 'move', icon: 'move', label: 'Move', title: 'Drag to move, pinch to zoom (H)' }, { value: 'select', icon: 'inspect', label: 'Select', title: 'Drag over an area, or click an element, to comment on it (V)' }] as const as option (option.value)}
+        <button
+          role="radio"
+          aria-checked={mode === option.value}
+          class="flex items-center gap-1 rounded-full border-none px-2 py-0.5 pointer-coarse:px-3 pointer-coarse:py-1.5 {mode === option.value
+            ? 'bg-card text-ink shadow-sm'
+            : 'bg-transparent text-muted hover:text-ink'}"
+          title={option.title}
+          onclick={() => setMode(option.value)}
+        >
+          <span class="codicon codicon-{option.icon} text-[12px]!"></span>
+          {option.label}
+        </button>
+      {/each}
     </div>
     <div class="flex shrink-0 items-center gap-1" role="group" aria-label="Zoom">
       <button class="chip" title="Zoom out (-)" aria-label="Zoom out" onclick={() => view?.zoom(1 / ZOOM_STEP)}>
@@ -462,7 +531,9 @@
     <div class="relative min-h-[40vh] flex-1 bg-sunken">
       <div bind:this={host}></div>
       <p class="pointer-events-none absolute bottom-2 left-1/2 m-0 -translate-x-1/2 rounded-full bg-card/90 px-3 py-0.5 text-[0.75em] whitespace-nowrap text-muted">
-        Scroll to move · Ctrl+scroll or pinch to zoom · drag the background or Space+drag to pan
+        {mode === 'move'
+          ? 'Drag to move · pinch or Ctrl+scroll to zoom'
+          : `Drag to select · ${isSvg ? 'click an element · ' : ''}two fingers or Space+drag to move`}
       </p>
     </div>
     <aside
