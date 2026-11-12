@@ -153,6 +153,8 @@ export class Focus {
       const sandbox = names.filter((other) => other === name).length > 1 && where ? `${name} · ${where}` : name;
       const unreachable = !this.owner.reachable(worker.id);
       for (const key of keys) {
+        // A subagent's chat, opened from its parent's, is no chat of the list.
+        if (!sessions.has(key) && !polled.has(key) && agent.isSubagent(key)) continue;
         const chat = agent.chats[key];
         const activity = polled.get(key);
         const session = sessions.get(key);
