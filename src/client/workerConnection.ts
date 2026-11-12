@@ -187,6 +187,8 @@ export class WorkerConnection {
   /** The agents' connections, by agent: opening, and open. */
   private readonly opening = new Map<AgentName, Promise<AgentLink>>();
   private readonly links = new Map<AgentName, AgentLink>();
+  /** The terminals this window attached to (shells, chats' terminal UIs): the bridge takes their input only from the connection that attached. */
+  private readonly attached = new Set<string>();
   private readonly shells = new Map<string, ShellRun>();
   /** Shell commands the agent has not been told about yet, by session. */
   private readonly shellContext = new Map<string, string[]>();
@@ -657,6 +659,7 @@ export class WorkerConnection {
 
   /** Types into a terminal: a sign-in's, a chat's or a shell. */
   async terminalInput(terminalId: string, data: string): Promise<void> {
+    if (this.attached.has(terminalId)) return this.bridge.terminalInput(terminalId, data);
     await this.terminalCall(terminalId, (bridge) => bridge.terminalInput(terminalId, data));
   }
 
@@ -687,8 +690,9 @@ export class WorkerConnection {
     return this.bridge.startShell(columns, rows);
   }
 
-  attachTerminal(terminalId: string, columns: number, rows: number): Promise<void> {
-    return this.bridge.attachTerminal(terminalId, columns, rows);
+  async attachTerminal(terminalId: string, columns: number, rows: number): Promise<void> {
+    await this.bridge.attachTerminal(terminalId, columns, rows);
+    this.attached.add(terminalId);
   }
 
   resizeTerminal(terminalId: string, columns: number, rows: number): Promise<void> {
@@ -696,6 +700,7 @@ export class WorkerConnection {
   }
 
   detachTerminal(terminalId: string): Promise<void> {
+    this.attached.delete(terminalId);
     return this.bridge.detachTerminal(terminalId);
   }
 
