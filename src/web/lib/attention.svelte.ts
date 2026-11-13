@@ -41,6 +41,11 @@ export class Attention {
   private readonly owner: AttentionOwner;
   /** Each chat's phase as last seen, by tab; a chat seen for the first time only sets it. */
   private readonly phases = new Map<string, ChatPhase>();
+  /**
+   * Chats a turn ran in since they were last idle, by tab: only those finish. Background work
+   * (a command, a subagent) that ends, while a turn runs or after, does not finish the chat.
+   */
+  private readonly turned = new Set<string>();
   private pageShown = $state(typeof document === 'undefined' || document.visibilityState === 'visible');
   private next = 1;
 
@@ -93,11 +98,17 @@ export class Attention {
         // A chat whose connection dropped says nothing about its agent.
         if (status === 'offline') continue;
         const polled = active.get(key);
-        const phase: ChatPhase = chatPhase(status, polled);
+        const phase: ChatPhase = chatPhase(status, polled, chat?.backgroundWork);
         const tab = tabOf(worker.id, chatTab(key));
         present.add(tab);
         const before = this.phases.get(tab);
         this.phases.set(tab, phase);
+        // Working on a turn, not only on background work after one. Looked at after its turn,
+        // the chat is seen: background work that ends later does not finish it again.
+        // An open chat says it at once; the poll can still show a turn that ended.
+        if (phase === 'working' && (chat ? status === 'working' : polled?.turn !== false)) this.turned.add(tab);
+        else if (looking(tab)) this.turned.delete(tab);
+        const finished = phase === 'idle' && this.turned.delete(tab);
         if (phase === 'working') {
           if (this.unseen[tab]) delete this.unseen[tab];
           continue;
@@ -107,7 +118,7 @@ export class Attention {
           continue;
         }
         const need: Need | undefined =
-          phase === 'waiting' && before !== undefined && before !== 'waiting' ? 'waiting' : phase === 'idle' && before === 'working' ? 'done' : undefined;
+          phase === 'waiting' && before !== undefined && before !== 'waiting' ? 'waiting' : finished ? 'done' : undefined;
         if (!need) continue;
         this.unseen[tab] = need;
         const session = agent?.sessions.find((candidate) => candidate.key === key);
@@ -118,7 +129,7 @@ export class Attention {
       for (const [tab, phase] of this.phases) {
         if (!tab.startsWith(tabOf(worker.id, '')) || present.has(tab) || phase === 'idle') continue;
         this.phases.set(tab, 'idle');
-        if (phase !== 'working' || looking(tab)) continue;
+        if (!this.turned.delete(tab) || looking(tab)) continue;
         this.unseen[tab] = 'done';
         const key = tab.slice(tabOf(worker.id, chatTab('')).length);
         const title = agent?.sessions.find((candidate) => candidate.key === key)?.title || 'Untitled chat';

@@ -12,6 +12,7 @@
   import StatusDot from './lib/StatusDot.svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
+  import { chatStatus } from './lib/focusList.ts';
   import { plural, statusText, WAITING_FOR, workerTitle } from './lib/format.ts';
   import type { Machine } from './lib/machines.svelte.ts';
   import { badge, ELSEWHERE_COLOR, inRail, machineColor, startState, stopped } from './lib/rail.ts';
@@ -134,7 +135,7 @@
     }
     return sessions.map((session, index) => {
       const busy = worker.activity?.chats.find((chat) => chat.key === session.key);
-      const status = agent.chats[session.key]?.status ?? busy?.state;
+      const status = chatStatus(agent.chats[session.key]?.status, busy, agent.chats[session.key]?.backgroundWork);
       const active = status === 'working' || status === 'waiting';
       const state = active ? status : app.attention.need(worker.id, session.key) ? 'done' : undefined;
       const title = session.title || 'Untitled chat';

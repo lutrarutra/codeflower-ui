@@ -6,8 +6,20 @@ import type { ChatActivity } from './api.ts';
 
 export type ChatPhase = 'working' | 'waiting' | 'idle';
 
-/** A chat's phase: an open chat says it at once, the others as the app polls the sandbox. */
-export function chatPhase(status: SessionStatus | undefined, polled: ChatActivity | undefined): ChatPhase {
+/**
+ * A chat's status: an open chat says it at once, the others as the app polls the sandbox.
+ * An open chat that is ready still works on a background command or subagent: as it knows
+ * (`background`), or the poll says (a subagent of a subagent's, say).
+ */
+export function chatStatus(status: SessionStatus | undefined, polled: ChatActivity | undefined, background = false): SessionStatus | undefined {
+  if (status === 'ready' && background) return 'working';
+  if (status === 'ready' && polled?.turn === false) return polled.state;
+  return status ?? polled?.state;
+}
+
+/** A chat's phase, from its status (chatStatus). */
+export function chatPhase(status: SessionStatus | undefined, polled: ChatActivity | undefined, background = false): ChatPhase {
+  status = chatStatus(status, polled, background);
   if (status && status !== 'offline') return status === 'ready' ? 'idle' : status;
   return polled?.state ?? 'idle';
 }

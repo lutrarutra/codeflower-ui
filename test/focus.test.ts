@@ -19,6 +19,9 @@ test('an open chat says its phase; the others go by the poll', () => {
   assert.equal(chatPhase(undefined, { key: 'a', title: '', state: 'working' }), 'working');
   assert.equal(chatPhase('offline', { key: 'a', title: '', state: 'waiting' }), 'waiting');
   assert.equal(chatPhase(undefined, undefined), 'idle');
+  // A ready chat still works on a background command or subagent.
+  assert.equal(chatPhase('ready', { key: 'a', title: '', state: 'working', turn: false }), 'working');
+  assert.equal(chatPhase('ready', { key: 'a', title: '', state: 'waiting', turn: false }), 'waiting');
 });
 
 test('waiting chats come first, longest waiting first, then working, done and idle ones', () => {

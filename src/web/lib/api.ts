@@ -72,6 +72,8 @@ export interface ChatActivity {
   title: string;
   state: 'working' | 'waiting';
   waitingFor?: 'plan' | 'permission' | 'question';
+  /** False for a chat with no turn running: it works on a background command or subagent, or one of those waits. */
+  turn?: boolean;
 }
 
 export interface UsageLimit {

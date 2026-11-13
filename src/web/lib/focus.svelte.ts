@@ -158,7 +158,7 @@ export class Focus {
         const chat = agent.chats[key];
         const activity = polled.get(key);
         const session = sessions.get(key);
-        const phase = chatPhase(chat?.status, activity);
+        const phase = chatPhase(chat?.status, activity, chat?.backgroundWork);
         const tab = tabOf(worker.id, chatTab(key));
         present.add(tab);
         const updated = session?.updatedAt ? Date.parse(session.updatedAt) : NaN;

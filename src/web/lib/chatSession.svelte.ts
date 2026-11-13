@@ -16,7 +16,7 @@ import {
   type TranscriptEntry,
   type WebviewMessage
 } from '../../protocol/messages.ts';
-import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from '../../protocol/subagents.ts';
+import { subagentActive, type SubagentSettings, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { ChatUsage } from '../../protocol/usage.ts';
 import { ChatQueue } from '../../client/chatQueue.ts';
 import type { TranscriptPage, WorkerQueue } from '../../client/codeflower.ts';
@@ -108,6 +108,11 @@ export class ChatSession {
 
   get status(): SessionStatus {
     return sessionStatus(this.state, this.permission !== null || this.question !== null);
+  }
+
+  /** Its agent works on after the turn: a background command or subagent of it runs. */
+  get backgroundWork(): boolean {
+    return (this.state.background?.length ?? 0) > 0 || this.subagents.some(subagentActive);
   }
 
   /** The host the chat view talks to. */

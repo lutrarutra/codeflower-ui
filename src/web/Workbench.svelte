@@ -10,6 +10,7 @@
   import PreviewView from '../chat/Preview.svelte';
   import GridNode from './GridNode.svelte';
   import { app } from './lib/app.svelte.ts';
+  import { chatStatus } from './lib/focusList.ts';
   import { foldSteps, setFoldSteps } from './lib/foldSteps.svelte.ts';
   import { favoriteModels, setFavoriteModel } from './lib/favoriteModels.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
@@ -130,7 +131,7 @@
     if (key) {
       const chat = agent.chats[key];
       const title = chat?.state.title || agent.sessions.find((session) => session.key === key)?.title || 'Chat';
-      const status = chat?.status;
+      const status = chatStatus(chat?.status, app.worker(workerId)?.activity?.chats.find((candidate) => candidate.key === key), chat?.backgroundWork);
       const need = app.attention.need(workerId, key);
       return {
         icon: 'comment',

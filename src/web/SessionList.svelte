@@ -8,6 +8,7 @@
   import AgentIcon from '../chat/lib/AgentIcon.svelte';
   import NewChatDialog from './NewChatDialog.svelte';
   import { ago } from './lib/format.ts';
+  import { chatStatus } from './lib/focusList.ts';
   import { chatTab, endDrag, startDrag, tabOf } from './lib/workbench.svelte.ts';
   import { agentPresentation, type AgentName } from '../protocol/messages.ts';
 
@@ -77,7 +78,7 @@
   {#each agent.sessions as session (session.key)}
     {@const chat = agent.chats[session.key]}
     {@const busy = worker.activity?.chats.find((candidate) => candidate.key === session.key)}
-    {@const status = chat?.status ?? (busy ? busy.state : undefined)}
+    {@const status = chatStatus(chat?.status, busy, chat?.backgroundWork)}
     {@const current = app.route.worker === worker.id && app.route.session === session.key}
     {@const need = status === 'working' || status === 'waiting' ? undefined : app.attention.need(worker.id, session.key)}
     <li class="flex items-center">
