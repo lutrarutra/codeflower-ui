@@ -61,9 +61,9 @@
   let zoomPercent = $state(100);
   let panning = $state(false);
   // What one finger or the mouse does on the figure: move it around, or select a part to comment on.
-  // Touch screens open in move mode, to zoom in first; a mouse has the wheel for that.
+  // It opens in move mode, to look the figure over first.
   type Mode = 'move' | 'select';
-  let mode = $state<Mode>(typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'move' : 'select');
+  let mode = $state<Mode>('move');
   function setMode(next: Mode): void {
     mode = next;
     hovered = null;
