@@ -2,7 +2,17 @@
 // notifications for the worker's status, recorded sessions, files, the
 // user's shell commands, sign-in terminals, usage and subagents. An agent reached without
 // the bridge answers none of them, and the chat works without them.
-import type { AgentName, AgentPresentation, ChatAction, SandboxFile, TranscriptEntry } from '../protocol/messages.ts';
+import type { ContentBlock } from '@agentclientprotocol/sdk';
+import type {
+  ActionPromptMeta,
+  AgentName,
+  AgentPresentation,
+  ChatAction,
+  QueuedPromptSummary,
+  QueuePaused,
+  SandboxFile,
+  TranscriptEntry
+} from '../protocol/messages.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
@@ -60,7 +70,22 @@ export interface AgentState extends AgentPresentation {
     subagents?: SubagentFeatures;
     /** The commands its chats run (`_codeflower/commands/*`), to watch read-only. */
     commands?: boolean;
+    /** The chats' prompt queues are on the worker (`_codeflower/queue/*`). */
+    promptQueue?: boolean;
   };
+}
+
+/** A chat's prompts waiting on the worker, as every window with it open shows them. */
+export interface WorkerQueue {
+  items: QueuedPromptSummary[];
+  paused?: QueuePaused;
+}
+
+/** A queued prompt taken back from the worker: what the user wrote, and what the agent would get. */
+export interface TakenPrompt extends QueuedPromptSummary {
+  text: string;
+  prompt: ContentBlock[];
+  action?: ActionPromptMeta;
 }
 
 /**
@@ -385,6 +410,8 @@ export interface CodeflowerHandlers {
   commandsChanged?(key: string, commands: AgentCommand[]): void;
   /** An agent's subagent defaults changed, from any window. */
   subagentSettingsChanged?(agent: AgentName, state: SubagentSettingsState): void;
+  /** A chat's queue on the worker changed, from any window or a turn's end. */
+  queue?(key: string, queue: WorkerQueue): void;
 }
 
 /** A notification about one agent carries its name. */
@@ -455,6 +482,10 @@ export class CodeflowerExtensions {
       const { agent, ...state } = params as ForAgent<SubagentSettingsState>;
       handlers.subagentSettingsChanged?.(agent, state);
     });
+    rpc.on('_codeflower/queue', (params) => {
+      const { key, items, paused } = params as { key?: string } & Partial<WorkerQueue>;
+      if (typeof key === 'string' && Array.isArray(items)) handlers.queue?.(key, { items, ...(paused ? { paused } : {}) });
+    });
     rpc.on('_codeflower/terminal/changed', (params) => {
       const { terminals } = params as { terminals?: (ChatTerminal | ShellTerminal)[] };
       if (!Array.isArray(terminals)) return;
@@ -462,6 +493,37 @@ export class CodeflowerExtensions {
       handlers.terminals?.(chats);
       handlers.shells?.(shells);
     });
+  }
+
+  /**
+   * Queues a prompt in a chat on the worker, which sends it once the turn ends, also with no window
+   * open. `replace`: instead of the queue, after stopping the turn (an interrupting action).
+   */
+  async queueAdd(
+    key: string,
+    prompt: ContentBlock[],
+    options: { text: string; title: string; editable?: boolean; action?: ActionPromptMeta; replace?: boolean }
+  ): Promise<string> {
+    const { replace, ...rest } = options;
+    return (await this.rpc.request<{ id: string }>('_codeflower/queue/add', { key, prompt, ...rest, ...(replace ? { mode: 'replace' } : {}) })).id;
+  }
+
+  async queueRemove(key: string, id: string): Promise<void> {
+    await this.rpc.request('_codeflower/queue/remove', { key, id });
+  }
+
+  /** Takes queued prompts back: the one with `id`, or with `editable` the user's own. */
+  async queueTake(key: string, which: { id: string } | { editable: true }): Promise<TakenPrompt[]> {
+    return (await this.rpc.request<{ items: TakenPrompt[] }>('_codeflower/queue/take', { key, ...which })).items;
+  }
+
+  /** Into the running turn where the agent takes messages while it works, else next, after stopping the turn. */
+  async queueSendNow(key: string, id: string): Promise<void> {
+    await this.rpc.request('_codeflower/queue/sendNow', { key, id });
+  }
+
+  async queueResume(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/queue/resume', { key });
   }
 
   /** The chats open in the agent's terminal UI and the user's shells; none from workers without them. */

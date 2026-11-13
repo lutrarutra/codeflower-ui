@@ -18,14 +18,17 @@ import {
 } from '../../protocol/messages.ts';
 import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from '../../protocol/subagents.ts';
 import type { ChatUsage } from '../../protocol/usage.ts';
-import { PromptQueue } from '../../client/promptQueue.ts';
-import type { TranscriptPage } from '../../client/codeflower.ts';
+import { ChatQueue } from '../../client/chatQueue.ts';
+import type { TranscriptPage, WorkerQueue } from '../../client/codeflower.ts';
+import type { ChatWorkerQueue } from '../../client/workerConnection.ts';
 
 /** What a chat asks of the sandbox it runs on. */
 export interface ChatActions {
   prompt(chat: ChatSession, text: string, action?: ActionPromptMeta): Promise<void>;
   /** Into the turn the agent is working on; false when it did not take it. */
   steer(chat: ChatSession, text: string): Promise<boolean>;
+  /** The chat's prompt queue on the worker, when it has one and is connected. */
+  workerQueue?(chat: ChatSession): ChatWorkerQueue | undefined;
   shell(chat: ChatSession, command: string): Promise<void>;
   cancelShell(chat: ChatSession, runId: string): void;
   cancel(chat: ChatSession): void;
@@ -78,9 +81,16 @@ export class ChatSession {
   private subagentSettings: SubagentSettingsState | null = null;
   private notice: Extract<HostMessage, { type: 'notice' }> | null = null;
   private readonly listeners = new Set<(message: HostMessage) => void>();
-  /** Messages sent from elsewhere (e.g. a preview's feedback) while the agent was busy. */
-  private readonly waiting = new PromptQueue();
-  private sending = false;
+  /** The prompts that wait for the turn to end: on the worker, or here (chatQueue.ts). */
+  private readonly queue = new ChatQueue({
+    state: () => this.state,
+    prompt: (text, action) => this.actions.prompt(this, text, action),
+    steer: (text) => this.actions.steer(this, text),
+    cancel: () => this.actions.cancel(this),
+    worker: () => this.actions.workerQueue?.(this),
+    post: (message) => this.post(message),
+    error: (message) => this.notify('error', message)
+  });
   /** Live entries that arrive while the transcript loads; they follow it. */
   private held: TranscriptEntry[] | undefined;
   private readonly actions: ChatActions;
@@ -112,62 +122,12 @@ export class ChatSession {
 
   /** Sends text to the agent as if typed here; it waits while the agent works. */
   send(text: string): 'sent' | 'queued' {
-    if (this.state.busy || this.sending) {
-      this.waiting.enqueue(text, 'Preview feedback');
-      this.publishQueue();
-      return 'queued';
-    }
-    void this.sendPrompt(text);
-    return 'sent';
+    return this.queue.send(text);
   }
 
-  private async sendPrompt(text: string, action?: ActionPromptMeta): Promise<void> {
-    this.sending = true;
-    try {
-      await this.actions.prompt(this, text, action);
-    } finally {
-      this.sending = false;
-      this.flushWaiting();
-    }
-  }
-
-  /** A message from the composer: while the agent works it waits for the turn to end, unless sent `now`. */
-  private message(text: string, now: boolean): void {
-    if (!this.state.busy && !this.sending) void this.sendPrompt(text);
-    else if (now) void this.sendNow(this.waiting.enqueueMessage(text).id);
-    else {
-      this.waiting.enqueueMessage(text);
-      this.publishQueue();
-    }
-  }
-
-  /**
-   * A queued prompt, now: into the turn where the agent takes messages while it
-   * works, otherwise first in the queue, and the turn stops so it goes next.
-   */
-  private async sendNow(id: string): Promise<void> {
-    const item = this.waiting.take(id);
-    if (!item) return;
-    // A command or an action is a prompt of its own.
-    if (this.state.steer && item.editable && !item.text.trimStart().startsWith('/')) {
-      this.publishQueue();
-      if (await this.actions.steer(this, item.text)) return;
-    }
-    this.waiting.putFirst(item);
-    this.publishQueue();
-    if (this.state.busy || this.sending) this.actions.cancel(this);
-    else this.flushWaiting();
-  }
-
-  private publishQueue(): void {
-    this.post({ type: 'queue', items: this.waiting.summaries() });
-  }
-
-  private flushWaiting(): void {
-    if (this.state.busy || !this.state.live || this.sending) return;
-    const next = this.waiting.take();
-    this.publishQueue();
-    if (next) void this.sendPrompt(next.text, next.action);
+  /** The chat's prompts queued on the worker changed, or the chat opened here. */
+  queueChanged(queue: WorkerQueue): void {
+    this.queue.workerChanged(queue);
   }
 
   private runAction(id: string): void {
@@ -180,19 +140,7 @@ export class ChatSession {
       this.notify('error', 'This action is unavailable on this worker. Reconnect to an updated sandbox.');
       return;
     }
-    const meta = { id: action.id, title: action.title };
-    if (this.state.busy || this.sending) {
-      if (action.mode === 'interrupt') {
-        this.waiting.replace(action.prompt, action.title, meta);
-        this.publishQueue();
-        this.actions.cancel(this);
-      } else {
-        this.waiting.enqueue(action.prompt, action.title, meta);
-        this.publishQueue();
-      }
-      return;
-    }
-    void this.sendPrompt(action.prompt, meta);
+    this.queue.action(action);
   }
 
   /** Holds live entries until `loaded` shows the transcript they follow. */
@@ -284,7 +232,7 @@ export class ChatSession {
       this.actions.setAutoApprove(this, this.state.autoApprove);
     }
     this.post({ type: 'state', state: this.state });
-    this.flushWaiting();
+    this.queue.flush();
   }
 
   notify(level: 'info' | 'error', message: string, signIn = false): void {
@@ -300,7 +248,7 @@ export class ChatSession {
     listener({ type: 'question', request: this.question });
     listener({ type: 'config', options: this.config });
     listener({ type: 'usage', usage: this.usage });
-    listener({ type: 'queue', items: this.waiting.summaries() });
+    listener(this.queue.message());
     listener({ type: 'subagents', subagents: this.subagents });
     listener({ type: 'subagentSettings', state: this.subagentSettings });
     if (this.notice) listener(this.notice);
@@ -317,7 +265,7 @@ export class ChatSession {
       case 'prompt':
         this.lastUsed = Date.now();
         this.notice = null;
-        this.message(message.text, message.now ?? false);
+        this.queue.compose(message.text, message.now ?? false);
         break;
       case 'shell':
         this.lastUsed = Date.now();
@@ -331,16 +279,10 @@ export class ChatSession {
       case 'cancelShell':
         this.actions.cancelShell(this, message.runId);
         break;
-      case 'cancel': {
+      case 'cancel':
         // The user's queued messages go back to the composer instead of after the stop.
-        const messages = this.waiting.takeMessages();
-        if (messages.length) {
-          this.publishQueue();
-          this.post({ type: 'draft', text: messages.map((item) => item.text).join('\n\n') });
-        }
-        this.actions.cancel(this);
+        await this.queue.stop();
         break;
-      }
       case 'setConfig':
         await this.actions.setConfig(this, message.configId, message.value);
         break;
@@ -368,18 +310,17 @@ export class ChatSession {
         else this.runAction(message.id);
         break;
       case 'removeQueued':
-        if (this.waiting.remove(message.id)) this.publishQueue();
+        this.queue.remove(message.id);
         break;
       case 'sendQueued':
-        void this.sendNow(message.id);
+        void this.queue.sendNow(message.id);
         break;
-      case 'editQueued': {
-        const item = this.waiting.take(message.id);
-        if (!item) break;
-        this.publishQueue();
-        this.post({ type: 'draft', text: item.text });
+      case 'editQueued':
+        await this.queue.edit(message.id);
         break;
-      }
+      case 'resumeQueue':
+        this.queue.resume();
+        break;
       case 'openSubagent':
         this.actions.openSubagent(this, message.key);
         break;

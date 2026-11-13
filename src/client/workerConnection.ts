@@ -6,6 +6,7 @@
 import type {
   AgentCapabilities,
   AuthMethod,
+  ContentBlock,
   PromptCapabilities,
   SessionConfigOption,
   StopReason
@@ -54,7 +55,9 @@ import {
   type WorkerStatus,
   type WrapUpNotice,
   type CatalogPlugin,
-  type PluginsOverview
+  type PluginsOverview,
+  type TakenPrompt,
+  type WorkerQueue
 } from './codeflower.ts';
 import { ConnectionClosed, RpcConnection, RpcError } from './rpc.ts';
 import { sessionKey } from './sessionKey.ts';
@@ -100,7 +103,9 @@ export {
   type PluginCatalog,
   type PluginContents,
   type PluginEntry,
-  type PluginsOverview
+  type PluginsOverview,
+  type TakenPrompt,
+  type WorkerQueue
 } from './codeflower.ts';
 export { ConnectionClosed, METHOD_NOT_FOUND, RpcError } from './rpc.ts';
 
@@ -148,6 +153,8 @@ export interface WorkerHandlers {
   commands?(sessionKey: string, commands: AgentCommand[]): void;
   /** An agent's subagent defaults changed, from any window. */
   subagentSettings?(agent: AgentName, state: SubagentSettingsState): void;
+  /** A chat's prompts queued on the worker: when it opens here, and when they change from any window. */
+  queue?(sessionKey: string, queue: WorkerQueue): void;
   /** An agent's connection ended, e.g. it restarted (1011): its chats are detached. */
   agentClosed?(agent: AgentName, reason: string, code: number): void;
   /** The connection to the sandbox ended. */
@@ -156,6 +163,17 @@ export interface WorkerHandlers {
 
 /** Opens a transport to the sandbox: to one agent, or without one to the sandbox itself. */
 export type OpenTransport = (agent?: AgentName) => Promise<Transport>;
+
+/** A chat's prompt queue on the worker (`WorkerConnection.workerQueue`). */
+export interface ChatWorkerQueue {
+  /** Resolves with the queued prompt's id. `replace`: instead of the queue, after stopping the turn. */
+  add(text: string, options?: { title?: string; editable?: boolean; action?: ActionPromptMeta; replace?: boolean }): Promise<string>;
+  remove(id: string): Promise<void>;
+  /** Takes prompts back to this window: the one with `id`, or with `editable` the user's own. */
+  take(which: { id: string } | { editable: true }): Promise<TakenPrompt[]>;
+  sendNow(id: string): Promise<void>;
+  resume(): Promise<void>;
+}
 
 /** One agent's connection: its ACP client and its window's bridge methods. */
 interface AgentLink {
@@ -331,6 +349,9 @@ export class WorkerConnection {
       subagentChanged: (parentKey, subagent) => handlers.subagent?.(parentKey, subagent),
       commandsChanged: (key, commands) => {
         if (acp.isAttached(key)) handlers.commands?.(key, commands);
+      },
+      queue: (key, queue) => {
+        if (acp.isAttached(key)) handlers.queue?.(key, queue);
       }
     });
     link = { agent, rpc, acp, bridge };
@@ -572,6 +593,12 @@ export class WorkerConnection {
   }
 
   prompt(key: string, text: string, action?: ActionPromptMeta): Promise<StopReason> {
+    const { blocks, shown } = this.promptBlocks(key, text, action);
+    return this.linkOf(key).acp.prompt(key, blocks, shown);
+  }
+
+  /** What the agent gets for a message (`blocks`), and what the chat shows of it (`shown`). */
+  private promptBlocks(key: string, text: string, action?: ActionPromptMeta): { blocks: ContentBlock[]; shown: ContentBlock[] } {
     const shown = [
       {
         type: 'text' as const,
@@ -588,7 +615,46 @@ export class WorkerConnection {
     const blocks = context?.length
       ? [{ type: 'text' as const, text: context.join('\n\n'), _meta: { [SHELL_CONTEXT_META]: true } }, ...shown]
       : shown;
-    return this.linkOf(key).acp.prompt(key, blocks, shown);
+    return { blocks, shown };
+  }
+
+  /**
+   * The chat's prompt queue on the worker, which sends its prompts once a turn ends, also with no
+   * window open; undefined when its agent's connection is not open, or its worker predates it (the
+   * window then queues them itself).
+   */
+  workerQueue(key: string): ChatWorkerQueue | undefined {
+    const agent = agentOfKey(key);
+    const link = this.links.get(agent);
+    if (!link || !link.acp.isAttached(key) || !this.agentList.find((state) => state.id === agent)?.capabilities.promptQueue) return undefined;
+    const bridge = link.bridge;
+    return {
+      add: (text, options = {}) => {
+        const { blocks } = this.promptBlocks(key, text, options.action);
+        // A message the agent may take while it works (ACP steering) says so, as `steer` does.
+        const plain = options.editable && !text.trimStart().startsWith('/');
+        return bridge.queueAdd(key, blocks, {
+          text,
+          title: options.title ?? text,
+          ...(options.editable ? { editable: true } : {}),
+          ...(options.action ? { action: options.action } : {}),
+          ...(options.replace ? { replace: true } : {}),
+          ...(plain ? { steer: this.steerBlocks(text) } : {})
+        });
+      },
+      remove: (id) => bridge.queueRemove(key, id),
+      take: async (which) => {
+        const taken = await bridge.queueTake(key, which);
+        // The shell commands the prompts would have told of wait for the next one again.
+        const context = taken.flatMap((item) =>
+          item.prompt.filter((block) => block.type === 'text' && block._meta?.[SHELL_CONTEXT_META]).map((block) => (block as { text: string }).text)
+        );
+        if (context.length) this.shellContext.set(key, [...context, ...(this.shellContext.get(key) ?? [])]);
+        return taken;
+      },
+      sendNow: (id) => bridge.queueSendNow(key, id),
+      resume: () => bridge.queueResume(key)
+    };
   }
 
   /** The chat's agent takes a message while it works; see {@link steer}. */
@@ -603,10 +669,14 @@ export class WorkerConnection {
    * does not show.
    */
   steer(key: string, text: string): Promise<boolean> {
-    return this.linkOf(key).acp.steer(key, [
+    return this.linkOf(key).acp.steer(key, this.steerBlocks(text));
+  }
+
+  private steerBlocks(text: string): ContentBlock[] {
+    return [
       { type: 'text', text: STEER_NOTE, _meta: { [STEER_NOTE_META]: true } },
       { type: 'text', text }
-    ]);
+    ];
   }
 
   cancel(key: string): void {

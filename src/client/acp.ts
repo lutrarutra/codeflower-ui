@@ -46,6 +46,8 @@ import type {
   PendingPermission,
   PendingQuestion,
   QuestionAction,
+  QueuedPromptSummary,
+  QueuePaused,
   RequestingSubagent,
   TranscriptEntry
 } from '../protocol/messages.ts';
@@ -76,6 +78,8 @@ interface SessionSettings {
     'codeflower/mcpLeftOut'?: McpLeftOut[];
     /** The agent's background tasks that were running then; later ones come as AIR async task updates. */
     'codeflower/backgroundTasks'?: BackgroundTask[];
+    /** The chat's prompts queued on the worker (workers with `promptQueue`). */
+    'codeflower/queue'?: { items?: QueuedPromptSummary[]; paused?: QueuePaused };
   } | null;
 }
 
@@ -120,6 +124,8 @@ export interface AcpHandlers {
   /** Resolves when the user accepted or declined. */
   elicitUrl(request: UrlElicitation): Promise<'accept' | 'decline'>;
   elicitationComplete(elicitationId: string): void;
+  /** The chat's prompts queued on the worker, as it reports them when the chat opens here. */
+  queue?(sessionKey: string, queue: { items: QueuedPromptSummary[]; paused?: QueuePaused }): void;
 }
 
 export interface ClientIdentity {
@@ -306,6 +312,11 @@ export class AcpClient {
     // A turn an earlier connection started is still running.
     if (meta?.['codeflower/busy']) this.setRemoteBusy(key, true);
     this.setBackground(key, Array.isArray(meta?.['codeflower/backgroundTasks']) ? meta['codeflower/backgroundTasks'] : []);
+    // The prompts queued on the worker, from any window (workers with `promptQueue`).
+    const queue = meta?.['codeflower/queue'];
+    if (queue && Array.isArray(queue.items)) {
+      this.handlers.queue?.(key, { items: queue.items, ...(queue.paused ? { paused: queue.paused } : {}) });
+    }
     const transcriptEntries = meta?.['codeflower/transcriptEntries'];
     return { key, ...(typeof transcriptEntries === 'number' ? { transcriptEntries } : {}) };
   }

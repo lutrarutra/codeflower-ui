@@ -6,6 +6,7 @@
     type PendingPermission,
     type PendingQuestion,
     type QueuedPromptSummary,
+    type QueuePaused,
     type SessionStatus,
     type TranscriptEntry
   } from '../protocol/messages.ts';
@@ -56,6 +57,21 @@
 
   let chat = $state<ChatState>({ title: '', subtitle: '', live: false, busy: false });
   const folded = $derived(fold ?? chat.foldSteps ?? false);
+  /** Why the worker paused the queue: the turn before did not end normally. */
+  function pausedReason(stopReason: string | null): string {
+    switch (stopReason) {
+      case 'cancelled':
+        return 'the turn was stopped';
+      case 'refusal':
+        return 'the agent refused';
+      case 'max_tokens':
+      case 'max_turn_requests':
+        return 'the turn hit its limit';
+      default:
+        return 'the turn failed';
+    }
+  }
+
   function toggleFold(): void {
     if (onFold) onFold(!folded);
     else send({ type: 'foldSteps', fold: !folded });
@@ -81,6 +97,8 @@
   let config = $state<SessionConfigOption[]>([]);
   let usage = $state<ChatUsage>({ session: null, account: null });
   let queued = $state<QueuedPromptSummary[]>([]);
+  /** The worker stopped sending the queue after a turn that did not end normally. */
+  let queuePaused = $state<QueuePaused | undefined>(undefined);
   /** The chat's subagents, and the worker's defaults for them. */
   let subagents = $state<SubagentSummary[]>([]);
   let subagentSettings = $state<SubagentSettingsState | null>(null);
@@ -132,6 +150,7 @@
         break;
       case 'queue':
         queued = message.items;
+        queuePaused = message.paused;
         break;
       case 'draft':
         // Next to what the user is writing, never over it.
@@ -414,10 +433,23 @@
 
   {#if queued.length}
     <section class="mx-4 mb-2 flex flex-col gap-1 rounded-xl bg-sunken p-1.5 text-[0.9em]" aria-label="Queued messages" aria-live="polite">
-      <span class="px-1.5 text-[0.85em] text-muted">
-        <span class="codicon codicon-history text-[12px]!"></span>
-        {chat.busy ? 'Next, one per turn once the agent is done' : 'Next, once the session is back'}
-      </span>
+      {#if queuePaused}
+        <div class="flex items-center gap-2 px-1.5 text-[0.85em] text-muted">
+          <span class="codicon codicon-debug-pause text-[12px]!"></span>
+          <span class="min-w-0 flex-1">Paused: {pausedReason(queuePaused.stopReason)}</span>
+          <button
+            type="button"
+            class="rounded-md px-1.5 py-0.5 text-ink hover:bg-soft-line"
+            title="Send the queued messages again, one per turn"
+            onclick={() => send({ type: 'resumeQueue' })}>Resume</button
+          >
+        </div>
+      {:else}
+        <span class="px-1.5 text-[0.85em] text-muted">
+          <span class="codicon codicon-history text-[12px]!"></span>
+          {chat.busy ? 'Next, one per turn once the agent is done' : chat.live ? 'Next' : 'Next, once the session is back'}
+        </span>
+      {/if}
       {#each queued as item, index (item.id)}
         <div class="flex items-center gap-2 rounded-lg bg-card py-1 pr-1 pl-2.5 shadow-(--cf-elevation)">
           <span class="text-[0.85em] text-muted tabular-nums">{index + 1}</span>

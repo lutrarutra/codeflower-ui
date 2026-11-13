@@ -254,6 +254,11 @@ export interface QueuedPromptSummary {
   editable?: boolean;
 }
 
+/** Why a chat's queue on the worker waits: a turn ended otherwise than with end_turn. */
+export interface QueuePaused {
+  stopReason: string | null;
+}
+
 export const ACTION_PROMPT_META = 'codeflower/action';
 
 /** What the session is doing, shown on its tab and in its header. */
@@ -285,7 +290,7 @@ export type HostMessage =
   | { type: 'notice'; level: 'info' | 'error'; message: string; action?: { id: 'signIn'; label: string } }
   /** The notice no longer holds, e.g. the chat reconnected. */
   | { type: 'clearNotice' }
-  | { type: 'queue'; items: QueuedPromptSummary[] }
+  | { type: 'queue'; items: QueuedPromptSummary[]; paused?: QueuePaused }
   /** Text for the composer: a queued message to edit, or those a stop took off the queue. */
   | { type: 'draft'; text: string }
   /** A file from the sandbox the chat asked for, e.g. a figure the agent looked at; null if unavailable. */
@@ -321,6 +326,8 @@ export type WebviewMessage =
   /** Send a queued message now, as `prompt` with `now` does. */
   | { type: 'sendQueued'; id: string }
   | { type: 'editQueued'; id: string }
+  /** Go on with a queue the worker paused after a turn that did not end normally. */
+  | { type: 'resumeQueue' }
   /** Show a subagent's chat, or a subagent's parent's. */
   | { type: 'openSubagent'; key: string }
   | { type: 'openParent' }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { HostMessage } from '../src/protocol/messages.ts';
 import type { ChatActions } from '../src/web/lib/chatSession.svelte.ts';
+import type { ChatWorkerQueue } from '../src/client/workerConnection.ts';
 
 Reflect.set(globalThis, '$state', <T>(value: T) => value);
 const { ChatSession } = await import('../src/web/lib/chatSession.svelte.ts');
@@ -269,4 +270,103 @@ test('a queued message goes back to the composer to edit, and all of them on sto
   assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'two\n\nthree' });
   // Actions stay queued: the user did not write them.
   assert.deepEqual(lastOf(messages, 'queue')?.items, [{ id: 'queued-2', title: 'Checkpoint' }]);
+});
+
+/** A worker queue that records what the chat asks of it. */
+function workerQueue(options: { failAdd?: boolean } = {}) {
+  const calls: unknown[][] = [];
+  let next = 1;
+  const queue: ChatWorkerQueue = {
+    add: async (text, add = {}) => {
+      calls.push(['add', text, add]);
+      if (options.failAdd) throw new Error('The sandbox is not connected');
+      return `q-${next++}`;
+    },
+    remove: async (id) => void calls.push(['remove', id]),
+    take: async (which) => {
+      calls.push(['take', which]);
+      return 'id' in which
+        ? [{ id: which.id, title: 'edit me', text: 'edit me', prompt: [] }]
+        : [{ id: 'q-3', title: 'mine', text: 'mine', prompt: [], editable: true }];
+    },
+    sendNow: async (id) => void calls.push(['sendNow', id]),
+    resume: async () => void calls.push(['resume'])
+  };
+  return { queue, calls };
+}
+
+test('on a worker with a queue, prompts wait there and every change goes through it', async () => {
+  const worker = workerQueue();
+  const order: string[] = [];
+  const chat = new ChatSession('worker', 'session', { live: true, busy: true, actions: [checkpoint, wrapUp] }, {
+    ...actions(async () => {}, () => order.push('cancel')),
+    workerQueue: () => worker.queue
+  });
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  chat.host.send({ type: 'prompt', text: 'one' });
+  chat.host.send({ type: 'prompt', text: 'now', now: true });
+  chat.host.send({ type: 'action', id: 'checkpoint' });
+  chat.host.send({ type: 'action', id: 'wrap-up' });
+  assert.equal(chat.send('looks off'), 'queued');
+  await tick();
+  assert.deepEqual(worker.calls, [
+    ['add', 'one', { editable: true }],
+    ['add', 'now', { editable: true }],
+    ['add', 'Save progress.', { title: 'Checkpoint', action: { id: 'checkpoint', title: 'Checkpoint' }, replace: false }],
+    // An interrupting action: the worker stops the turn, not the window.
+    ['add', 'Wrap up now.', { title: 'Wrap up', action: { id: 'wrap-up', title: 'Wrap up' }, replace: true }],
+    ['add', 'looks off', { title: 'Preview feedback' }],
+    ['sendNow', 'q-2']
+  ]);
+  assert.deepEqual(order, []);
+  // Nothing waits here: the views show what the worker says, paused too.
+  assert.equal(lastOf(messages, 'queue'), undefined);
+  chat.queueChanged({ items: [{ id: 'q-1', title: 'one', editable: true }, { id: 'q-4', title: 'Wrap up' }], paused: { stopReason: 'refusal' } });
+  assert.deepEqual(lastOf(messages, 'queue'), {
+    type: 'queue',
+    items: [{ id: 'q-1', title: 'one', editable: true }, { id: 'q-4', title: 'Wrap up' }],
+    paused: { stopReason: 'refusal' }
+  });
+
+  worker.calls.length = 0;
+  chat.host.send({ type: 'editQueued', id: 'q-1' });
+  await tick();
+  assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'edit me' });
+  chat.host.send({ type: 'sendQueued', id: 'q-4' });
+  chat.host.send({ type: 'removeQueued', id: 'q-4' });
+  chat.host.send({ type: 'resumeQueue' });
+  await tick();
+  assert.deepEqual(worker.calls, [['take', { id: 'q-1' }], ['sendNow', 'q-4'], ['remove', 'q-4'], ['resume']]);
+
+  // Stop: the worker hands the user's own back before the cancel reaches it.
+  worker.calls.length = 0;
+  chat.queueChanged({ items: [{ id: 'q-3', title: 'mine', editable: true }] });
+  const take = worker.queue.take;
+  worker.queue.take = (which) => {
+    order.push('take');
+    return take(which);
+  };
+  chat.host.send({ type: 'cancel' });
+  await tick();
+  assert.deepEqual(order, ['take', 'cancel']);
+  assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'mine' });
+});
+
+test('a prompt the worker could not take waits in the window', async () => {
+  const worker = workerQueue({ failAdd: true });
+  const sent: string[] = [];
+  const chat = new ChatSession('worker', 'session', { live: true, busy: true }, {
+    ...actions(async (_chat, text) => void sent.push(text)),
+    workerQueue: () => worker.queue
+  });
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'one' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(lastOf(messages, 'queue')?.items, [{ id: 'queued-1', title: 'one', editable: true }]);
+  chat.setState({ busy: false });
+  assert.deepEqual(sent, ['one']);
 });

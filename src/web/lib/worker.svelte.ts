@@ -31,6 +31,7 @@ import {
   type SessionRecord,
   type ShowRequest,
   type UrlElicitation,
+  type WorkerQueue,
   type WorkerStatus,
   type WrapUpNotice
 } from '../../client/workerConnection.ts';
@@ -558,6 +559,7 @@ export class WebWorker {
     },
     cancelShell: (_chat, runId) => this.connection?.cancelShell(runId),
     cancel: (chat) => this.connection?.cancel(chat.key),
+    workerQueue: (chat) => this.connection?.workerQueue(chat.key),
     setConfig: async (chat, configId, value) => {
       try {
         await this.require().setConfigOption(chat.key, configId, value);
@@ -781,6 +783,7 @@ export class WebWorker {
       },
       subagent: (_parentKey: string, subagent: SubagentSummary) => this.subagentChanged(subagent),
       subagentSettings: (agent: AgentName, state: SubagentSettingsState) => this.setSubagentSettings(agent, state),
+      queue: (key: string, queue: WorkerQueue) => this.chats[key]?.queueChanged(queue),
       agentClosed: (agent: AgentName, _reason: string, code: number) => this.agentClosed(agent, code, generation),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };
