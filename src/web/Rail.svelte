@@ -3,15 +3,19 @@
   // the computer they run on, then + for a new chat (in a sandbox chosen there, or a new one). A computer that can start sandboxes shows even
   // with none. Computers that do not answer and sandboxes that stopped stay off it: the computers
   // button at the bottom (the Server view) lists them, and says that some are hidden.
+  // With the sidebar folded, the rail also reaches the chats: the sandbox in front unfolds into a
+  // numbered tile per recent chat, and in Focus the chats of the list take the top (Alt+1…9).
+  import { untrack } from 'svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import NewChatDialog from './NewChatDialog.svelte';
   import SandboxDialog from './SandboxDialog.svelte';
   import StatusDot from './lib/StatusDot.svelte';
   import type { Worker } from './lib/api.ts';
   import { app } from './lib/app.svelte.ts';
-  import { plural, statusText, workerTitle } from './lib/format.ts';
+  import { plural, statusText, WAITING_FOR, workerTitle } from './lib/format.ts';
   import type { Machine } from './lib/machines.svelte.ts';
   import { badge, ELSEWHERE_COLOR, inRail, machineColor, startState, stopped } from './lib/rail.ts';
+  import { age, PHASE_DOT } from './focus/phase.ts';
 
   let {
     canFold = false,
@@ -70,21 +74,122 @@
     app.creating = { tab: 'start', machine: key ?? (app.browsing ? app.machine(app.browsing).key : undefined) };
   }
 
-  /** The sandbox under the pointer: its name, where it runs and what it does, beside the rail. */
+  /** The sandbox or chat under the pointer: its name and what it does, beside the rail. */
   let tip = $state<{ x: number; y: number; lines: string[] } | null>(null);
-  function showTip(event: Event, worker: Worker): void {
+  function tipAt(event: Event, lines: string[]): void {
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    tip = { x: box.right + 10, y: box.top, lines };
+  }
+  function showTip(event: Event, worker: Worker): void {
     const [name, where] = workerTitle(worker);
     const count = app.attention.count(worker.id);
-    tip = {
-      x: box.right + 10,
-      y: box.top,
-      lines: [
-        name,
-        [where, app.several || worker.source === 'added' ? `on ${worker.source === 'added' ? 'its own computer' : app.machine(worker.id).name}` : ''].filter(Boolean).join(' · '),
-        count ? `${statusText(worker)} · ${count} need${count === 1 ? 's' : ''} you` : statusText(worker)
-      ]
-    };
+    tipAt(event, [
+      name,
+      [where, app.several || worker.source === 'added' ? `on ${worker.source === 'added' ? 'its own computer' : app.machine(worker.id).name}` : ''].filter(Boolean).join(' · '),
+      count ? `${statusText(worker)} · ${count} need${count === 1 ? 's' : ''} you` : statusText(worker)
+    ]);
+  }
+
+  /** A chat the folded rail offers: a tile, numbered for Alt+1…9. */
+  interface Tile {
+    id: string;
+    /** Its number, for Alt+1…9. */
+    label: string;
+    title: string;
+    /** The dot's color class, if the chat does something. */
+    dot?: string;
+    working: boolean;
+    current: boolean;
+    lines: string[];
+    open: () => void;
+    /** In Focus: the list's group, which a line separates; and the sandbox's computer's color. */
+    group?: string;
+    color?: string;
+  }
+  const TILES = 6;
+  const SESSION_DOT: Record<string, string> = { working: 'bg-cyan', waiting: 'bg-orange', done: 'bg-indigo' };
+  const SESSION_TEXT: Record<string, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Finished while you were elsewhere' };
+  const key = (index: number) => (index < 9 ? `Alt+${index + 1}` : '');
+
+  // Folded, the sidebar does not list the sandbox's chats: the rail reads them.
+  const browsed = $derived(folded && !focusing && current ? app.worker(current) : undefined);
+  const chatsKnown = (worker: Worker) => !!worker.url && worker.kind !== 'task';
+  $effect(() => {
+    const worker = browsed;
+    if (!worker || !chatsKnown(worker)) return;
+    void worker.activity?.chats.length;
+    untrack(() => void app.agent(worker.id).listSessions());
+  });
+
+  /** The sandbox in front's latest chats, the one shown among them. */
+  const chatTiles: Tile[] = $derived.by(() => {
+    const worker = browsed;
+    if (!worker || !chatsKnown(worker)) return [];
+    const agent = app.agent(worker.id);
+    let sessions = agent.sessions.slice(0, TILES);
+    const shown = app.route.worker === worker.id ? app.route.session : undefined;
+    if (shown && !sessions.some((session) => session.key === shown)) {
+      const session = agent.sessions.find((candidate) => candidate.key === shown);
+      if (session) sessions = [...sessions.slice(0, TILES - 1), session];
+    }
+    return sessions.map((session, index) => {
+      const busy = worker.activity?.chats.find((chat) => chat.key === session.key);
+      const status = agent.chats[session.key]?.status ?? busy?.state;
+      const active = status === 'working' || status === 'waiting';
+      const state = active ? status : app.attention.need(worker.id, session.key) ? 'done' : undefined;
+      const title = session.title || 'Untitled chat';
+      const updated = session.updatedAt ? `changed ${age(Date.now() - Date.parse(session.updatedAt))} ago` : '';
+      return {
+        id: session.key,
+        label: String(index + 1),
+        title,
+        dot: state && SESSION_DOT[state],
+        working: status === 'working',
+        current: app.route.view === 'chat' && session.key === shown,
+        lines: [title, [state ? SESSION_TEXT[state] : '', updated].filter(Boolean).join(' · '), key(index)],
+        open: () => (app.go({ view: 'chat', worker: worker.id, session: session.key }), onNavigate())
+      };
+    });
+  });
+  const moreChats = $derived(browsed && chatTiles.length ? app.agent(browsed.id).sessions.length - chatTiles.length : 0);
+
+  /** In Focus: its list's chats, in its order. */
+  const queue = $derived(folded && focusing ? app.focus.groups.flatMap((group) => group.chats.map((chat) => ({ chat, group }))) : []);
+  const queueTiles: Tile[] = $derived(
+    queue.slice(0, TILES + 3).map(({ chat, group }, index) => {
+      const worker = app.worker(chat.workerId);
+      const selected = app.focus.selected?.workerId === chat.workerId && app.focus.selected.key === chat.key;
+      const phase = group.id === 'done' ? 'done' : chat.phase;
+      const color = !worker ? ELSEWHERE_COLOR : worker.source === 'added' ? ELSEWHERE_COLOR : machineColor(app.machine(worker.id).key, keys);
+      return {
+        id: `${chat.workerId}/${chat.key}`,
+        label: String(index + 1),
+        title: chat.title || 'Untitled chat',
+        dot: phase === 'idle' ? undefined : PHASE_DOT[phase],
+        working: chat.phase === 'working',
+        current: selected,
+        group: group.id,
+        color,
+        lines: [
+          chat.title || 'Untitled chat',
+          [chat.sandbox, group.id === 'idle' ? '' : `${group.label.toLowerCase()} for ${age(Date.now() - chat.since)}`, chat.waitingFor ? `wants ${WAITING_FOR[chat.waitingFor]}` : '']
+            .filter(Boolean)
+            .join(' · '),
+          key(index)
+        ],
+        open: () => (app.focus.select(chat), onNavigate())
+      };
+    })
+  );
+  const moreQueue = $derived(queue.length - queueTiles.length);
+
+  function keydown(event: KeyboardEvent): void {
+    if (!folded || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const digit = /^Digit([1-9])$/.exec(event.code);
+    const tile = digit && (focusing ? queueTiles : chatTiles)[Number(digit[1]) - 1];
+    if (!tile) return;
+    event.preventDefault();
+    tile.open();
   }
 
   // The sandbox whose name, address or place in the list the user manages.
@@ -100,6 +205,57 @@
 
   const ICON = 'grid size-11 shrink-0 place-items-center rounded-xl text-muted hover:bg-card hover:text-ink';
 </script>
+
+<svelte:window onkeydown={keydown} />
+
+{#snippet tileButton(tile: Tile, index: number, ring: string, shape: string)}
+  <button
+    class="relative grid shrink-0 place-items-center {shape} {tile.current
+      ? 'bg-indigo-soft text-indigo shadow-[0_0_0_2px_var(--cf-indigo)]'
+      : 'bg-card text-ink hover:shadow-[0_0_0_1px_var(--cf-line)]'}"
+    style:box-shadow={!tile.current && tile.color ? `inset 0 0 0 1.5px ${tile.color}` : undefined}
+    aria-label="{tile.title}{tile.lines[1] ? `, ${tile.lines[1]}` : ''}"
+    aria-current={tile.current ? 'page' : undefined}
+    aria-keyshortcuts={index < 9 ? `Alt+${index + 1}` : undefined}
+    onclick={tile.open}
+    onpointerenter={(event) => tipAt(event, tile.lines)}
+    onpointerleave={() => (tip = null)}
+    onfocus={(event) => tipAt(event, tile.lines)}
+    onblur={() => (tip = null)}
+  >
+    {tile.label}
+    {#if tile.dot}
+      <span class="absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 {ring} {tile.dot}" class:animate-pulse={tile.working}></span>
+    {/if}
+  </button>
+{/snippet}
+
+{#snippet sandboxButton(worker: Worker, group: Group, selected: boolean, bed: 'sunken' | 'soft-line')}
+  {@const count = app.attention.count(worker.id)}
+  {@const [name, where] = workerTitle(worker)}
+  {@const ring = bed === 'sunken' ? 'ring-sunken' : 'ring-soft-line'}
+  <button
+    class="relative grid size-11 shrink-0 place-items-center bg-card text-[0.9em] font-bold text-ink {selected ? 'rounded-xl' : 'rounded-full hover:rounded-xl'}"
+    class:opacity-60={stopped(worker)}
+    style:box-shadow={selected ? `0 0 0 2px var(--cf-${bed}), 0 0 0 4px ${group.color}` : undefined}
+    aria-label="{name}, {where}"
+    aria-current={selected ? 'page' : undefined}
+    onclick={() => app.go({ view: 'chat', worker: worker.id })}
+    oncontextmenu={(event) => manage(event, worker)}
+    onpointerenter={(event) => showTip(event, worker)}
+    onpointerleave={() => (tip = null)}
+    onfocus={(event) => showTip(event, worker)}
+    onblur={() => (tip = null)}
+  >
+    {badge(worker)}
+    <span class="absolute -right-0.5 -bottom-0.5 flex rounded-full ring-2 {ring}"><StatusDot {worker} /></span>
+    {#if count}
+      <span class="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-indigo px-1 text-[11px] font-bold text-on-accent ring-2 {ring}"
+        >{count}</span
+      >
+    {/if}
+  </button>
+{/snippet}
 
 <div class="flex h-full w-18 shrink-0 flex-col items-center gap-1.5 border-r-[1.5px] border-line bg-soft-line py-3">
   <Tulip size={28} />
@@ -120,6 +276,20 @@
   <span class="my-1 h-[1.5px] w-8 shrink-0 bg-line"></span>
 
   <ul class="m-0 flex min-h-0 w-full flex-1 list-none flex-col items-center gap-2 overflow-y-auto p-0 pt-1.5 scrollbar-none">
+    {#if queueTiles.length}
+      <li class="flex w-16 flex-col items-center gap-1.5 pb-1" aria-label="Focus's chats">
+        {#each queueTiles as tile, index (tile.id)}
+          {#if index && tile.group !== queueTiles[index - 1]!.group}<span class="my-0.5 h-[1.5px] w-5 shrink-0 bg-line"></span>{/if}
+          {@render tileButton(tile, index, 'ring-soft-line', 'size-9 rounded-[10px] text-[0.85em] font-semibold')}
+        {/each}
+        {#if moreQueue}
+          <button class="h-6 rounded-lg px-2 text-[0.8em] font-semibold text-muted hover:text-ink" title="All of Focus's chats: show the sidebar" onclick={onToggle}
+            >+{moreQueue}</button
+          >
+        {/if}
+        <span class="mt-1 h-[1.5px] w-8 shrink-0 bg-line"></span>
+      </li>
+    {/if}
     {#each groups as group (group.key)}
       <li
         class="flex w-16 flex-col items-center gap-2 {group.labeled ? 'rounded-2xl bg-sunken px-1 pt-1.5 pb-2' : 'py-1'}"
@@ -130,29 +300,25 @@
         {/if}
         {#each group.workers as worker (worker.id)}
           {@const selected = current === worker.id}
-          {@const count = app.attention.count(worker.id)}
-          {@const [name, where] = workerTitle(worker)}
-          <button
-            class="relative grid size-11 shrink-0 place-items-center bg-card text-[0.9em] font-bold text-ink {selected ? 'rounded-xl' : 'rounded-full hover:rounded-xl'}"
-            class:opacity-60={stopped(worker)}
-            style:box-shadow={selected ? `0 0 0 2px var(--cf-${group.labeled ? 'sunken' : 'soft-line'}), 0 0 0 4px ${group.color}` : undefined}
-            aria-label="{name}, {where}"
-            aria-current={selected ? 'page' : undefined}
-            onclick={() => app.go({ view: 'chat', worker: worker.id })}
-            oncontextmenu={(event) => manage(event, worker)}
-            onpointerenter={(event) => showTip(event, worker)}
-            onpointerleave={() => (tip = null)}
-            onfocus={(event) => showTip(event, worker)}
-            onblur={() => (tip = null)}
-          >
-            {badge(worker)}
-            <span class="absolute -right-0.5 -bottom-0.5 flex rounded-full ring-2 {group.labeled ? 'ring-sunken' : 'ring-soft-line'}"><StatusDot {worker} /></span>
-            {#if count}
-              <span class="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-indigo px-1 text-[11px] font-bold text-on-accent ring-2 {group.labeled ? 'ring-sunken' : 'ring-soft-line'}"
-                >{count}</span
-              >
-            {/if}
-          </button>
+          {#if selected && chatTiles.length}
+            {@const ring = group.labeled ? 'ring-soft-line' : 'ring-sunken'}
+            <div class="-my-0.5 flex w-15 flex-col items-center gap-1.5 rounded-2xl pt-1.5 pb-2 {group.labeled ? 'bg-soft-line' : 'bg-sunken'}">
+              {@render sandboxButton(worker, group, selected, group.labeled ? 'soft-line' : 'sunken')}
+              <span class="h-[1.5px] w-6 shrink-0 bg-line"></span>
+              {#each chatTiles as tile, index (tile.id)}
+                {@render tileButton(tile, index, ring, 'size-9 rounded-[10px] text-[0.85em] font-semibold')}
+              {/each}
+              {#if moreChats > 0}
+                <button
+                  class="h-6 rounded-lg px-2 text-[0.8em] font-semibold text-muted hover:text-ink"
+                  title="All {moreChats + chatTiles.length} chats: show the sidebar"
+                  onclick={onToggle}>+{moreChats}</button
+                >
+              {/if}
+            </div>
+          {:else}
+            {@render sandboxButton(worker, group, selected, group.labeled ? 'sunken' : 'soft-line')}
+          {/if}
         {/each}
         {#if !group.workers.length && group.start}
           <button
