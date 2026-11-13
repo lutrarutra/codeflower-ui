@@ -321,7 +321,7 @@ test('on a worker with a queue, prompts wait there and every change goes through
     ['add', 'looks off', { title: 'Preview feedback' }],
     ['sendNow', 'q-2']
   ]);
-  assert.deepEqual(order, []);
+  assert.equal(order.length, 0);
   // Nothing waits here: the views show what the worker says, paused too.
   assert.equal(lastOf(messages, 'queue'), undefined);
   chat.queueChanged({ items: [{ id: 'q-1', title: 'one', editable: true }, { id: 'q-4', title: 'Wrap up' }], paused: { stopReason: 'refusal' } });
