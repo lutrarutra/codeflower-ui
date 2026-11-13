@@ -17,6 +17,8 @@
   const target = $derived(grid.target());
   let body: HTMLElement | undefined = $state();
   let strip: HTMLElement | undefined = $state();
+  /** The last press on a tab began on its close button. */
+  let pressedClose = false;
 
   $effect(() => {
     const id = group.id;
@@ -88,7 +90,13 @@
         class="group relative flex max-w-56 shrink-0 items-center rounded-t-lg border-[1.5px] border-b-0 {active
           ? 'border-soft-line bg-paper'
           : 'border-transparent text-muted hover:bg-paper/60'}"
+        onpointerdown={(event) => (pressedClose = !!(event.target as Element).closest('[data-close]'))}
         ondragstart={(event) => {
+          // A press on the close button that moves a little is a click, not a drag.
+          if (pressedClose) {
+            event.preventDefault();
+            return;
+          }
           const { workerId, local } = splitTab(tab);
           startDrag(event, workerId, local, label.label);
         }}
@@ -119,6 +127,8 @@
           {/if}
         </button>
         <button
+          data-close
+          draggable="false"
           class="mr-1 grid size-5 shrink-0 place-items-center rounded opacity-60 group-hover:opacity-100 hover:bg-soft-line pointer-coarse:size-7 pointer-coarse:opacity-100"
           aria-label="Close {label.label}"
           title="Close (middle click)"
