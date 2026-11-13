@@ -4,7 +4,8 @@
   // with none. Computers that do not answer and sandboxes that stopped stay off it: the computers
   // button at the bottom (the Server view) lists them, and says that some are hidden.
   // With the sidebar folded, the rail also reaches the chats: the sandbox in front unfolds into a
-  // numbered tile per recent chat, and in Focus the chats of the list take the top (Alt+1…9).
+  // numbered tile per chat that works, waits or finished unseen (or
+  // the latest three, with none of those), the rest behind "…", and in Focus the chats of the list take the top (Alt+1…9).
   import { untrack } from 'svelte';
   import Tulip from '../chat/lib/Tulip.svelte';
   import NewChatDialog from './NewChatDialog.svelte';
@@ -108,6 +109,8 @@
     color?: string;
   }
   const TILES = 6;
+  /** With none working, waiting or finished unseen: the latest chats the rail shows. */
+  const RECENT = 3;
   const SESSION_DOT: Record<string, string> = { working: 'bg-cyan', waiting: 'bg-orange', done: 'bg-indigo' };
   const SESSION_TEXT: Record<string, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Finished while you were elsewhere' };
   const key = (index: number) => (index < 9 ? `Alt+${index + 1}` : '');
@@ -122,37 +125,73 @@
     untrack(() => void app.agent(worker.id).listSessions());
   });
 
-  /** The sandbox in front's latest chats, the one shown among them. */
-  const chatTiles: Tile[] = $derived.by(() => {
-    const worker = browsed;
-    if (!worker || !chatsKnown(worker)) return [];
+  /** One of the sandbox in front's chats, as a tile; numbered (index) when the rail shows it. */
+  function chatTile(worker: Worker, session: { key: string; title?: string | null; updatedAt?: string | null }, index?: number): Tile & { active: boolean } {
     const agent = app.agent(worker.id);
-    let sessions = agent.sessions.slice(0, TILES);
+    const busy = worker.activity?.chats.find((chat) => chat.key === session.key);
+    const status = chatStatus(agent.chats[session.key]?.status, busy, agent.chats[session.key]?.backgroundWork);
+    const active = status === 'working' || status === 'waiting';
+    const state = active ? status : app.attention.need(worker.id, session.key) ? 'done' : undefined;
+    const title = session.title || 'Untitled chat';
+    const updated = session.updatedAt ? `changed ${age(Date.now() - Date.parse(session.updatedAt))} ago` : '';
     const shown = app.route.worker === worker.id ? app.route.session : undefined;
-    if (shown && !sessions.some((session) => session.key === shown)) {
-      const session = agent.sessions.find((candidate) => candidate.key === shown);
-      if (session) sessions = [...sessions.slice(0, TILES - 1), session];
-    }
-    return sessions.map((session, index) => {
-      const busy = worker.activity?.chats.find((chat) => chat.key === session.key);
-      const status = chatStatus(agent.chats[session.key]?.status, busy, agent.chats[session.key]?.backgroundWork);
-      const active = status === 'working' || status === 'waiting';
-      const state = active ? status : app.attention.need(worker.id, session.key) ? 'done' : undefined;
-      const title = session.title || 'Untitled chat';
-      const updated = session.updatedAt ? `changed ${age(Date.now() - Date.parse(session.updatedAt))} ago` : '';
-      return {
-        id: session.key,
-        label: String(index + 1),
-        title,
-        dot: state && SESSION_DOT[state],
-        working: status === 'working',
-        current: app.route.view === 'chat' && session.key === shown,
-        lines: [title, [state ? SESSION_TEXT[state] : '', updated].filter(Boolean).join(' · '), key(index)],
-        open: () => (app.go({ view: 'chat', worker: worker.id, session: session.key }), onNavigate())
-      };
-    });
+    return {
+      id: session.key,
+      label: index === undefined ? '' : String(index + 1),
+      title,
+      dot: state && SESSION_DOT[state],
+      working: status === 'working',
+      current: app.route.view === 'chat' && session.key === shown,
+      active: !!state,
+      lines: [title, [state ? SESSION_TEXT[state] : '', updated].filter(Boolean).join(' · '), index === undefined ? '' : key(index)],
+      open: () => (app.go({ view: 'chat', worker: worker.id, session: session.key }), onNavigate())
+    };
+  }
+
+  /**
+   * The sandbox in front's chats, split: the rail shows those that work, wait or finished unseen
+   * (or, with none of those, the latest few), and the one open; "…" lists the rest.
+   */
+  const chatSplit = $derived.by(() => {
+    const worker = browsed;
+    if (!worker || !chatsKnown(worker)) return { tiles: [] as Tile[], rest: [] as Tile[] };
+    const sessions = app.agent(worker.id).sessions;
+    const all = sessions.map((session) => chatTile(worker, session));
+    const active = all.some((tile) => tile.active);
+    const shown = (tile: Tile & { active: boolean }, index: number) => tile.current || (active ? tile.active : index < RECENT);
+    return {
+      tiles: sessions.filter((_, index) => shown(all[index]!, index)).map((session, index) => chatTile(worker, session, index)),
+      rest: all.filter((tile, index) => !shown(tile, index))
+    };
   });
-  const moreChats = $derived(browsed && chatTiles.length ? app.agent(browsed.id).sessions.length - chatTiles.length : 0);
+  const chatTiles = $derived(chatSplit.tiles);
+  const moreChats = $derived(chatSplit.rest);
+
+  /** The "…" menu of the chats the rail does not show: where it opens, beside the rail. */
+  let more = $state<{ x: number; y: number } | null>(null);
+  let moreList: HTMLElement | undefined = $state();
+  function toggleMore(event: Event): void {
+    if (more) return void (more = null);
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    more = { x: box.right + 10, y: Math.max(8, Math.min(box.top, window.innerHeight - 8 - Math.min(moreChats.length * 34 + 16, window.innerHeight * 0.6))) };
+    tip = null;
+    queueMicrotask(() => moreList?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+  }
+  function moreKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      more = null;
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const items = [...(moreList?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+  $effect(() => {
+    if (!moreChats.length) more = null;
+  });
 
   /** In Focus: its list's chats, in its order. */
   const queue = $derived(folded && focusing ? app.focus.groups.flatMap((group) => group.chats.map((chat) => ({ chat, group }))) : []);
@@ -207,7 +246,13 @@
   const ICON = 'grid size-11 shrink-0 place-items-center rounded-xl text-muted hover:bg-card hover:text-ink';
 </script>
 
-<svelte:window onkeydown={keydown} />
+<svelte:window
+  onkeydown={keydown}
+  onclick={(event) => {
+    const target = event.target as HTMLElement;
+    if (more && !moreList?.contains(target) && !target.closest('[data-more-chats]')) more = null;
+  }}
+/>
 
 {#snippet tileButton(tile: Tile, index: number, ring: string, shape: string)}
   <button
@@ -309,11 +354,15 @@
               {#each chatTiles as tile, index (tile.id)}
                 {@render tileButton(tile, index, ring, 'size-9 rounded-[10px] text-[0.85em] font-semibold')}
               {/each}
-              {#if moreChats > 0}
+              {#if moreChats.length}
                 <button
-                  class="h-6 rounded-lg px-2 text-[0.8em] font-semibold text-muted hover:text-ink"
-                  title="All {moreChats + chatTiles.length} chats: show the sidebar"
-                  onclick={onToggle}>+{moreChats}</button
+                  class="grid h-6 w-9 place-items-center rounded-lg text-muted hover:bg-card hover:text-ink aria-expanded:bg-card aria-expanded:text-ink"
+                  title="{plural(moreChats.length, 'more chat', 'more chats')}"
+                  aria-label="{plural(moreChats.length, 'more chat', 'more chats')}"
+                  aria-haspopup="menu"
+                  aria-expanded={!!more}
+                  data-more-chats
+                  onclick={toggleMore}><span class="codicon codicon-ellipsis"></span></button
                 >
               {/if}
             </div>
@@ -383,6 +432,31 @@
   >
     <strong class="truncate">{tip.lines[0]}</strong>
     {#each tip.lines.slice(1).filter(Boolean) as line, index (index)}<span class="truncate opacity-85">{line}</span>{/each}
+  </div>
+{/if}
+
+{#if more && moreChats.length}
+  <div
+    bind:this={moreList}
+    role="menu"
+    tabindex="-1"
+    aria-label="More chats"
+    class="fixed z-50 flex max-h-[60vh] w-64 flex-col overflow-y-auto rounded-xl border-[1.5px] border-line bg-card p-1 shadow-lg"
+    style:left="{more.x}px"
+    style:top="{more.y}px"
+    onkeydown={moreKeydown}
+  >
+    {#each moreChats as tile (tile.id)}
+      <button
+        role="menuitem"
+        class="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-left text-[0.9em] text-ink hover:bg-sunken focus:bg-sunken focus:outline-none"
+        title={tile.lines.slice(0, 2).filter(Boolean).join('\n')}
+        onclick={() => ((more = null), tile.open())}
+      >
+        <span class="size-2 shrink-0 rounded-full {tile.dot ?? 'bg-transparent'}" class:animate-pulse={tile.working}></span>
+        <span class="min-w-0 flex-1 truncate">{tile.title}</span>
+      </button>
+    {/each}
   </div>
 {/if}
 
