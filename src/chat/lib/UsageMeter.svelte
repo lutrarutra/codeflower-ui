@@ -46,7 +46,7 @@
 </script>
 
 {#if commands.length || background.length || subagents.length || context || tokens?.totalTokens || limits.length}
-  <div class="mx-4 -mt-2.5 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[0.78em] text-muted">
+  <div class="usage mx-4 -mt-2.5 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[0.78em] text-muted">
     <CommandsBadge {commands} />
     <BackgroundBadge work={background} />
     <SubagentBadge {subagents} />
@@ -82,6 +82,13 @@
 {/if}
 
 <style>
+  /* Centered boxes do not line up their contents: a line of text carries room
+     for descenders, so its digits ride above the codicons beside them. Trimmed
+     to cap height, each item's text centers like its icons and meters. */
+  .usage :global(.inline-flex) {
+    text-box: trim-both cap alphabetic;
+  }
+
   .meter {
     display: inline-block;
     width: 2.6rem;
