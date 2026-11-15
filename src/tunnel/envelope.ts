@@ -1,6 +1,8 @@
 // What one transport message carries: a kind byte, then data. A stream
-// carries one HTTP exchange or one WebSocket. Mirrors codeflower-app's
-// internal/tunnel/envelope.go; see the tunnel's docs/PROTOCOL.md, "Envelope".
+// carries one HTTP exchange or one WebSocket, or, multiplexed, many HTTP
+// exchanges, each message tagged with its request's ID. Mirrors
+// codeflower-app's internal/tunnel/envelope.go; see the tunnel's
+// docs/PROTOCOL.md, "Envelope".
 
 export const Kind = {
   open: 1,
@@ -73,4 +75,26 @@ export function parts(binary: boolean, data: Uint8Array): Uint8Array[] {
   }
   frames.push(frame(last, data.subarray(offset)));
   return frames;
+}
+
+/** Hello.mux and Welcome.mux: the stream is multiplexed. */
+export const MUX = 1;
+
+/** One message of a multiplexed stream: the kind, the request ID (big endian), then data. */
+export function muxFrame(kind: number, id: number, data: Uint8Array = new Uint8Array(0)): Uint8Array {
+  const message = new Uint8Array(5 + data.length);
+  message[0] = kind;
+  new DataView(message.buffer).setUint32(1, id);
+  message.set(data, 5);
+  return message;
+}
+
+export function muxJsonFrame(kind: number, id: number, value: unknown): Uint8Array {
+  return muxFrame(kind, id, encoder.encode(JSON.stringify(value)));
+}
+
+/** The request ID and data of a multiplexed message, from what follows its kind byte. */
+export function unmux(data: Uint8Array): { id: number; data: Uint8Array } {
+  if (data.length < 4) throw new Error('Message too short for a multiplexed stream');
+  return { id: new DataView(data.buffer, data.byteOffset, 4).getUint32(0), data: data.subarray(4) };
 }

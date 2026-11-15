@@ -1,15 +1,18 @@
 // The tunnel's service worker (scope /m/): serves the app's page under
 // /m/{connector}/ by fetching each request from the connector through an
-// encrypted stream. The page and its code come from the user's computer, not
-// from the tunnel. Its code is kept per computer and build, so a page loads
-// again with a single stream, for its index.html.
+// encrypted stream: one per computer, multiplexed, that every request shares
+// (large uploads get their own). The page and its code come from the user's
+// computer, not from the tunnel. Its code is kept per computer and build, so
+// a page loads again with a single request, for its index.html.
 
 /// <reference lib="webworker" />
 
 import { pairedComputers } from '../tunnel/computers.ts';
 import { appPath, connectorStream, tunnelConnectorId } from '../tunnel/connect.ts';
 import { PAGE_CACHE } from '../tunnel/keys.ts';
-import { tunnelFetch } from '../tunnel/http.ts';
+import { MUX } from '../tunnel/envelope.ts';
+import { outgoing, tunnelFetch, type Outgoing } from '../tunnel/http.ts';
+import { MuxSession, StreamClosedError } from '../tunnel/mux.ts';
 import { RefusedError } from '../tunnel/stream.ts';
 import { SAD_FLOWER_TILE_URL } from '../chat/lib/sadFlower.ts';
 
@@ -67,8 +70,66 @@ async function noteBuild(connectorId: string, response: Response): Promise<Respo
   return new Response(html, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 
+// ---- one multiplexed stream per computer ----
+
+/** Requests with a body larger than this get a stream of their own, so they do not hold up the others. */
+const OWN_STREAM_BODY = 1 << 20;
+
 /**
- * `finished` is called when the stream behind the response closes: until then
+ * Each computer's session, while its stream is open; undefined for a computer
+ * whose app is too old to multiplex (it is not asked again while this worker
+ * runs).
+ */
+const sessions = new Map<string, Promise<MuxSession | undefined>>();
+
+function session(connectorId: string): Promise<MuxSession | undefined> {
+  const known = sessions.get(connectorId);
+  if (known) return known;
+  const opening: Promise<MuxSession | undefined> = connectorStream(connectorId, { mux: MUX }).then(
+    (stream) => {
+      if (stream.welcome.mux !== MUX) {
+        stream.close();
+        return undefined;
+      }
+      stream.onClose(() => {
+        if (sessions.get(connectorId) === opening) sessions.delete(connectorId);
+      });
+      return new MuxSession(stream);
+    },
+    (error) => {
+      sessions.delete(connectorId);
+      throw error;
+    }
+  );
+  sessions.set(connectorId, opening);
+  return opening;
+}
+
+const idempotent = (request: Outgoing) => request.method === 'GET' || request.method === 'HEAD';
+
+/** The computer's response, through its session or, for large uploads and old apps, a stream of its own. */
+async function fromComputer(connectorId: string, request: Outgoing, signal: AbortSignal): Promise<Response> {
+  if (request.body.length <= OWN_STREAM_BODY) {
+    for (let attempt = 0; ; attempt++) {
+      const current = session(connectorId);
+      const mux = await current;
+      if (!mux) break;
+      try {
+        return await mux.fetch(request, signal);
+      } catch (error) {
+        // The stream dropped (the worker slept, the tunnel was deployed)
+        // before the computer answered: once more on a new one, when asking
+        // again does no harm.
+        if (!(error instanceof StreamClosedError) || error.answered || attempt > 0 || !idempotent(request)) throw error;
+        if (sessions.get(connectorId) === current) sessions.delete(connectorId);
+      }
+    }
+  }
+  return tunnelFetch(await connectorStream(connectorId), request);
+}
+
+/**
+ * `finished` is called once the whole response has arrived: until then
  * the worker must stay alive, or the browser may stop it mid-body (Firefox
  * does, once the response object is handed back).
  */
@@ -95,9 +156,8 @@ async function serve(request: Request, finished: () => void): Promise<Response> 
     }
   }
   try {
-    const stream = await connectorStream(connectorId);
-    stream.onClose(finished);
-    const response = await tunnelFetch(stream, path, request);
+    const response = await fromComputer(connectorId, await outgoing(path, request), request.signal);
+    finished();
     if (request.mode === 'navigate') return await noteBuild(connectorId, response);
     if (cacheName && response.ok) {
       const copy = response.clone();

@@ -8,6 +8,16 @@ import { unframe } from './envelope.ts';
 export interface Hello {
   pair?: string;
   device?: string;
+  /** MUX asks for a multiplexed stream for HTTP requests. */
+  mux?: number;
+}
+
+/** The connector's answer to the hello. */
+export interface Welcome {
+  v: number;
+  error?: string;
+  /** MUX: the connector agreed to a multiplexed stream. Older ones leave it out. */
+  mux?: number;
 }
 
 /** Why the connector refused this browser, from its (authenticated) answer. */
@@ -55,10 +65,12 @@ export class SecureStream {
   private closeListeners: Array<(code: number, reason: string) => void> = [];
   private queued: Array<{ kind: number; data: Uint8Array }> = [];
   closed = false;
+  readonly welcome: Welcome;
 
-  constructor(socket: WebSocket, channel: Channel) {
+  constructor(socket: WebSocket, channel: Channel, welcome: Welcome = { v: PROTOCOL }) {
     this.socket = socket;
     this.channel = channel;
+    this.welcome = welcome;
     socket.addEventListener('message', (event) => {
       if (!(event.data instanceof ArrayBuffer)) return this.close(1003, 'Unexpected text frame');
       let message;
@@ -138,7 +150,7 @@ export function openStream(options: StreamOptions): Promise<SecureStream> {
         return;
       }
       if (!(event.data instanceof ArrayBuffer)) return fail(new Error('Unexpected answer from the computer'));
-      let welcome: { v: number; error?: string };
+      let welcome: Welcome;
       let channel: Channel;
       try {
         const finished = await initiator.finish(new Uint8Array(event.data));
@@ -151,7 +163,7 @@ export function openStream(options: StreamOptions): Promise<SecureStream> {
       if (welcome.error) return fail(new RefusedError(welcome.error));
       clearTimeout(timer);
       socket.removeEventListener('message', onMessage);
-      resolve(new SecureStream(socket, channel));
+      resolve(new SecureStream(socket, channel, welcome));
     };
     socket.addEventListener('message', onMessage);
     socket.addEventListener('close', (event) => {
