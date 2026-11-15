@@ -19,6 +19,24 @@ export function choices(option: SelectOption): SessionConfigSelectOption[] {
   return groups(option).flatMap((group) => group.options);
 }
 
+/**
+ * Whether a choice leaves the setting to the agent or its provider rather
+ * than naming a level: Claude Code's and OpenCode's `default`, DSH's
+ * "Provider default" (an empty value). It is not a point on a scale.
+ */
+export function isDefaultChoice(choice: SessionConfigSelectOption): boolean {
+  return choice.value === 'default' || choice.value === '';
+}
+
+/** An effort's levels, in the agent's order, and its default choice, if any. */
+export function effortLevels(option: SelectOption): {
+  levels: SessionConfigSelectOption[];
+  byDefault: SessionConfigSelectOption | undefined;
+} {
+  const all = choices(option);
+  return { levels: all.filter((choice) => !isDefaultChoice(choice)), byDefault: all.find(isDefaultChoice) };
+}
+
 /** Longer lists (e.g. OpenCode's hundreds of models) get a search box. */
 export const SEARCH_FROM = 12;
 

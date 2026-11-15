@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { matches, SEARCH_FROM, shownGroups, type SelectOption } from '../src/chat/lib/picker.ts';
+import { effortLevels, matches, SEARCH_FROM, shownGroups, type SelectOption } from '../src/chat/lib/picker.ts';
 
 // As OpenCode lists its models: flat, provider/model values, "Provider/Name" names.
 const models: SelectOption = {
@@ -50,4 +50,70 @@ test('grouped models (as dsh lists them) keep their groups', () => {
   };
   assert.deepEqual(names(shownGroups(grouped, 'free')), [['OpenAI-compatible', ['["codeflower-openai-compat","openrouter/free"]']]]);
   assert.deepEqual(names(shownGroups(grouped, '', ['["deepseek-official","deepseek-v4-flash"]'])).map(([name]) => name), ['Pinned', 'DeepSeek', 'OpenAI-compatible']);
+});
+
+// The efforts as the agents offer them: the default first (Claude Code's
+// `default`, DSH's "Provider default" with an empty value) or last (OpenCode).
+const effort = (options: { value: string; name: string }[], currentValue: string): SelectOption => ({
+  id: 'effort',
+  name: 'Effort',
+  category: 'thought_level',
+  type: 'select',
+  currentValue,
+  options
+});
+
+test('effortLevels keeps the levels in order and sets the default apart, wherever the agent lists it', () => {
+  const claude = effortLevels(
+    effort(
+      [
+        { value: 'default', name: 'Default' },
+        { value: 'low', name: 'Low' },
+        { value: 'max', name: 'Max' }
+      ],
+      'default'
+    )
+  );
+  assert.deepEqual(claude.levels.map((level) => level.value), ['low', 'max']);
+  assert.equal(claude.byDefault?.name, 'Default');
+
+  const dsh = effortLevels(
+    effort(
+      [
+        { value: '', name: 'Provider default' },
+        { value: 'low', name: 'Low' },
+        { value: 'high', name: 'High' }
+      ],
+      ''
+    )
+  );
+  assert.deepEqual(dsh.levels.map((level) => level.value), ['low', 'high']);
+  assert.equal(dsh.byDefault?.name, 'Provider default');
+
+  const opencode = effortLevels(
+    effort(
+      [
+        { value: 'low', name: 'Low' },
+        { value: 'high', name: 'High' },
+        { value: 'default', name: 'Default' }
+      ],
+      'low'
+    )
+  );
+  assert.deepEqual(opencode.levels.map((level) => level.value), ['low', 'high']);
+  assert.equal(opencode.byDefault?.value, 'default');
+
+  // DSH's own models: Off is a level, the lowest, and there is no default.
+  const native = effortLevels(
+    effort(
+      [
+        { value: 'off', name: 'Off' },
+        { value: 'low', name: 'Low' },
+        { value: 'max', name: 'Max' }
+      ],
+      'max'
+    )
+  );
+  assert.deepEqual(native.levels.map((level) => level.value), ['off', 'low', 'max']);
+  assert.equal(native.byDefault, undefined);
 });

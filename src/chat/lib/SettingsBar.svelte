@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { SessionConfigOption } from '@agentclientprotocol/sdk';
   import { SAME, type SubagentSettings, type SubagentSettingsState } from '../../protocol/subagents.ts';
+  import EffortSlider from './EffortSlider.svelte';
   import Picker, { choices, type SelectOption } from './Picker.svelte';
+  import { effortLevels } from './picker.ts';
 
-  // The session settings the agent offers (ACP config options): mode, model,
-  // and effort get their own pickers; anything else goes under "More", with
+  // The session settings the agent offers (ACP config options): mode gets its
+  // own picker, model and effort share one (the models, and the effort's
+  // slider at the menu's foot); anything else goes under "More", with
   // the defaults of the worker's subagents where its agent takes them.
   let {
     options,
@@ -111,7 +114,7 @@
     onclick={() => setAutoApprove?.(!autoApprove)}
   >
     <span class="codicon codicon-shield"></span>
-    Auto-approve
+    <span class="wide-only cap-box">Auto-approve</span>
     <span class="rounded-full bg-soft-line px-1.5 text-[0.8em]">{autoApprove ? 'on' : 'off'}</span>
   </button>
 {/if}
@@ -121,43 +124,74 @@
   <Picker option={mode} choose={(value) => set(mode.id, value)} triggerClass={tint}>
     {#snippet trigger(current)}
       <span class="codicon codicon-{icon}"></span>
-      <span>{current?.name ?? mode.currentValue}</span>
+      <span class="wide-only cap-box">{current?.name ?? mode.currentValue}</span>
     {/snippet}
   </Picker>
 {/if}
 
+<!-- The effort's level, as bars that grow: on the model's button, and on its
+     own when the agent offers effort but no models. -->
+{#snippet bars(effort: SelectOption)}
+  {@const { levels, byDefault } = effortLevels(effort)}
+  {@const level = levels.findIndex((choice) => choice.value === effort.currentValue)}
+  <!-- On the default no level is chosen: every bar, faint. -->
+  {@const onDefault = byDefault?.value === effort.currentValue}
+  <!-- As tall as a capital: centered, like the name beside it (cap-box), on the button's middle. -->
+  <span class="inline-flex h-[0.7em] items-end gap-[2px]" aria-hidden="true">
+    {#each levels as _, index (index)}
+      <span
+        class="w-[3px] rounded-full {onDefault ? 'bg-orange/35' : level >= index ? 'bg-orange' : 'bg-soft-line'}"
+        style="height: {35 + (65 * index) / Math.max(levels.length - 1, 1)}%"
+      ></span>
+    {/each}
+  </span>
+{/snippet}
+
+<!-- The effort's slider, at the foot of the model menu. The agent sends new
+     settings when the model changes, so it shows the levels that model has,
+     and is left out for a model without any. -->
+{#snippet effortSlider()}
+  {#if isSelect(effort)}
+    <EffortSlider option={effort} choose={(value) => set(effort.id, value)} />
+  {/if}
+{/snippet}
+
 {#if isSelect(model)}
-  <Picker option={model} choose={(value) => set(model.id, value)} favorites={favoriteModels} favorite={setFavoriteModel}>
+  <!-- Model and effort in one menu: the models, and the effort's slider at its foot. -->
+  {@const effortName = isSelect(effort) ? (choices(effort).find((choice) => choice.value === effort.currentValue)?.name ?? effort.currentValue) : undefined}
+  {@const modelName = choices(model).find((choice) => choice.value === model.currentValue)?.name ?? model.currentValue}
+  <Picker
+    option={model}
+    choose={(value) => set(model.id, value)}
+    favorites={favoriteModels}
+    favorite={setFavoriteModel}
+    label="{model.name}: {modelName}{isSelect(effort) ? ` · ${effort.name}: ${effortName}` : ''}"
+    footer={isSelect(effort) ? effortSlider : undefined}
+  >
     {#snippet trigger(current)}
       <span class="codicon codicon-hubot"></span>
       <!-- "Default (recommended)" names its model in the description, e.g. "Opus 5.5". -->
-      <span class="max-w-36 truncate">
-        {current?.value === 'default' && current.description ? current.description : (current?.name ?? model.currentValue)}
+      <span class="inline-flex items-center gap-1.5">
+        <span class="model-name cap-box max-w-36 truncate">
+          {current?.value === 'default' && current.description ? current.description : (current?.name ?? model.currentValue)}
+        </span>
+        {#if isSelect(effort)}{@render bars(effort)}{/if}
       </span>
     {/snippet}
   </Picker>
-{/if}
-
-{#if isSelect(effort)}
-  {@const levels = choices(effort).filter((choice) => choice.value !== 'default')}
-  {@const level = levels.findIndex((choice) => choice.value === effort.currentValue)}
+{:else if isSelect(effort)}
   <Picker option={effort} choose={(value) => set(effort.id, value)}>
     {#snippet trigger(current)}
-      <span class="flex h-3 items-end gap-[2px]" aria-hidden="true">
-        {#each levels as _, index (index)}
-          <span
-            class="w-[3px] rounded-full {level >= index ? 'bg-orange' : 'bg-soft-line'}"
-            style="height: {35 + (65 * index) / Math.max(levels.length - 1, 1)}%"
-          ></span>
-        {/each}
+      <span class="inline-flex items-center gap-1.5">
+        {@render bars(effort)}
+        <span class="wide-only cap-box">{current?.name ?? effort.currentValue}</span>
       </span>
-      <span>{current?.name ?? effort.currentValue}</span>
     {/snippet}
   </Picker>
 {/if}
 
 {#if extras.length || subagentRows.length}
-  <div class="relative" bind:this={more}>
+  <div class="anchor relative" bind:this={more}>
     <button
       type="button"
       class="chip"
@@ -180,7 +214,7 @@
         role="dialog"
         aria-label="More settings"
         tabindex="-1"
-        class="card absolute bottom-full left-0 z-20 mb-2 flex w-72 flex-col gap-1 p-1.5"
+        class="card absolute bottom-full left-0 z-20 mb-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-1 p-1.5"
         onkeydown={(event) => event.key === 'Escape' && (moreOpen = false)}
       >
         <div class="eyebrow px-2 pt-1 pb-1 text-indigo">More settings</div>

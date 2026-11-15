@@ -108,10 +108,44 @@ textarea {
   outline-offset: 2px;
 }
 
+/* A ring only for the keyboard: VS Code's webviews ring every focused input
+   (`input:focus`), a slider clicked with the mouse too. Text fields match
+   :focus-visible however they are focused, so they keep theirs. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* The composer card shows focus itself. */
 textarea:focus,
 textarea:focus-visible {
   outline: none;
+}
+
+/* Menus: a thin rounded thumb, no track, no arrows. Chromium (and VS Code's
+   webviews) draw it from these rules; setting the standard properties there
+   would bring its arrows back, so only browsers without them get those. */
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thin-scroll::-webkit-scrollbar-button {
+  display: none;
+}
+
+.thin-scroll::-webkit-scrollbar-thumb {
+  border: none;
+  background: color-mix(in srgb, var(--cf-muted) 40%, transparent);
+}
+
+.thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--cf-muted);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--cf-muted) 40%, transparent) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -225,6 +259,8 @@ textarea:focus-visible {
   font-size: 0.85em;
   font-weight: 600;
   line-height: 1.5;
+  /* Its height with a line of text, also when that text is trimmed (cap-box). */
+  min-height: calc(1.5em + 0.2rem + 3px);
   background: var(--cf-card);
   color: var(--cf-ink);
   cursor: pointer;
@@ -233,6 +269,20 @@ textarea:focus-visible {
 
 /* Codicons are 16px glyphs; in a chip they match its smaller text and sit on
    no line box of their own, so the flex row centres the glyph itself. */
+/* Text trimmed to its capitals, so that centering it centers the letters
+   (a line's box has room for descenders below them), as beside an icon or
+   the effort's bars. The chip keeps its height (min-height above). */
+.cap-box {
+  text-box: trim-both cap alphabetic;
+}
+
+/* Cut to its width (truncate) but not to the trimmed height: descenders and
+   accents still show. */
+.cap-box.truncate {
+  overflow: clip;
+  overflow-clip-margin: 0.35em;
+}
+
 .chip .codicon {
   font-size: 13px;
   line-height: 1;
