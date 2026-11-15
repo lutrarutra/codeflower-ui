@@ -1,6 +1,7 @@
 <script lang="ts">
   import AgentLinkDialog from './AgentLinkDialog.svelte';
   import ChatView from './ChatView.svelte';
+  import FocusToggle from './focus/FocusToggle.svelte';
   import FocusView from './focus/FocusView.svelte';
   import QuitDialog from './QuitDialog.svelte';
   import QuittingBanner from './QuittingBanner.svelte';
@@ -199,6 +200,9 @@
         <span class="shrink-0 font-display font-medium">code flower</span>
         {#if sandbox}
           <span class="min-w-0 truncate text-[0.85em] text-muted" title={sandbox.join(' · ')}>{sandbox.filter(Boolean).join(' · ')}</span>
+        {/if}
+        {#if app.route.view === 'focus' && app.focus.selected && app.focus.narrow}
+          <FocusToggle />
         {/if}
       </header>
       {#if app.quit?.quitting}

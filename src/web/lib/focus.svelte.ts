@@ -56,6 +56,10 @@ export class Focus {
   selected = $state<ChatRef | null>(null);
   /** The file the pane beside the chat shows, by the chat's tab. */
   showing = $state<Record<string, string>>({});
+  /** The view is too narrow for the chat and the pane side by side: one shows at a time. */
+  narrow = $state(false);
+  /** Narrow: the chat or the pane, whichever shows. */
+  front = $state<'chat' | 'pane'>('chat');
   private pins = $state<string[]>(loadPins());
   private readonly owner: FocusOwner;
   /** Each chat's phase as last seen and since when, by tab. */

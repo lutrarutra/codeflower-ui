@@ -76,6 +76,13 @@
     app.creating = { tab: 'start', machine: key ?? (app.browsing ? app.machine(app.browsing).key : undefined) };
   }
 
+  /** Out of Focus into the editor: Focus's chat opens there in front of its group, else the chats as they were. */
+  function toEditor(): void {
+    const chat = app.focus.selected;
+    app.go(chat ? { view: 'chat', worker: chat.workerId, session: chat.key } : { view: 'chat' });
+    onNavigate();
+  }
+
   /** The sandbox or chat under the pointer: its name and what it does, beside the rail. */
   let tip = $state<{ x: number; y: number; lines: string[] } | null>(null);
   function tipAt(event: Event, lines: string[]): void {
@@ -305,20 +312,31 @@
 
 <div class="flex h-full w-18 shrink-0 flex-col items-center gap-1.5 border-r-[1.5px] border-line bg-soft-line py-3">
   <Tulip size={28} />
-  <button
-    class="relative mt-2 grid size-11 shrink-0 place-items-center rounded-xl {focusing ? 'bg-indigo text-on-accent' : 'bg-card text-ink hover:shadow-[0_0_0_1px_var(--cf-line)]'}"
-    aria-label={needs ? `Focus: ${needs} ${needs === 1 ? 'chat needs' : 'chats need'} you` : 'Focus'}
-    aria-pressed={focusing}
-    title="Focus: the chats of every sandbox, those that need you first"
-    onclick={() => app.go({ view: 'focus' })}
-  >
-    <span class="codicon codicon-pulse text-[18px]!"></span>
-    {#if needs}
-      <span class="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-indigo px-1 text-[11px] font-bold text-on-accent ring-2 ring-soft-line"
-        >{needs}</span
-      >
-    {/if}
-  </button>
+  {#if focusing}
+    <!-- In Focus, the same place leads back to the editor, with Focus's chat in front. -->
+    <button
+      class="relative mt-2 grid size-11 shrink-0 place-items-center rounded-xl bg-card text-ink hover:shadow-[0_0_0_1px_var(--cf-line)]"
+      aria-label="Editor"
+      title="Editor: the chat in Focus, with the tabs of the sandboxes"
+      onclick={toEditor}
+    >
+      <span class="codicon codicon-layout text-[18px]!"></span>
+    </button>
+  {:else}
+    <button
+      class="relative mt-2 grid size-11 shrink-0 place-items-center rounded-xl bg-card text-ink hover:shadow-[0_0_0_1px_var(--cf-line)]"
+      aria-label={needs ? `Focus: ${needs} ${needs === 1 ? 'chat needs' : 'chats need'} you` : 'Focus'}
+      title="Focus: the chats of every sandbox, those that need you first"
+      onclick={() => app.go({ view: 'focus' })}
+    >
+      <span class="codicon codicon-pulse text-[18px]!"></span>
+      {#if needs}
+        <span class="absolute -top-1.5 -right-1.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-indigo px-1 text-[11px] font-bold text-on-accent ring-2 ring-soft-line"
+          >{needs}</span
+        >
+      {/if}
+    </button>
+  {/if}
   <span class="my-1 h-[1.5px] w-8 shrink-0 bg-line"></span>
 
   <ul class="m-0 flex min-h-0 w-full flex-1 list-none flex-col items-center gap-2 overflow-y-auto p-0 pt-1.5 scrollbar-none">

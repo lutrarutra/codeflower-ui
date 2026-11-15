@@ -50,8 +50,12 @@
   let main: HTMLElement | undefined = $state();
   let resizing = $state(false);
   const narrow = $derived(width > 0 && width < 720);
-  /** Narrow: the chat or the pane, one at a time. */
-  let front = $state<'chat' | 'pane'>('chat');
+  /** Narrow: the chat or the pane, one at a time; on a phone, the toggle in the page's top bar picks. */
+  const front = $derived(app.focus.front);
+  $effect(() => {
+    app.focus.narrow = narrow;
+    return () => (app.focus.narrow = false);
+  });
 
   // The chat's browser takes the pane while the agent waits for the user in it, or the user has it.
   const browser = $derived(selected && agent ? agent.browsers[selected.key] : undefined);
@@ -60,7 +64,7 @@
     if (!browser?.handoff || browser.yours) return;
     untrack(() => {
       pane = true;
-      if (narrow) front = 'pane';
+      if (narrow) app.focus.front = 'pane';
     });
   });
 
@@ -157,11 +161,12 @@
     {/if}
 
     {#if narrow}
-      <div class="flex gap-1 border-b-[1.5px] border-soft-line px-2 py-1.5" role="tablist" aria-label="Show">
-        <button role="tab" class="chip" aria-selected={front === 'chat'} aria-expanded={front === 'chat'} onclick={() => (front = 'chat')}>
+      <!-- On a phone, the page's top bar holds the toggle (FocusToggle). -->
+      <div class="flex gap-1 border-b-[1.5px] border-soft-line px-2 py-1.5 max-[799px]:hidden" role="tablist" aria-label="Show">
+        <button role="tab" class="chip" aria-selected={front === 'chat'} aria-expanded={front === 'chat'} onclick={() => (app.focus.front = 'chat')}>
           <span class="codicon codicon-comment-discussion"></span>Chat
         </button>
-        <button role="tab" class="chip" aria-selected={front === 'pane'} aria-expanded={front === 'pane'} onclick={() => (front = 'pane')}>
+        <button role="tab" class="chip" aria-selected={front === 'pane'} aria-expanded={front === 'pane'} onclick={() => (app.focus.front = 'pane')}>
           {#if paneBrowser}
             <span class="codicon codicon-globe"></span>Browser
           {:else}
@@ -220,7 +225,7 @@
                 <BrowserTab workerId={selected.workerId} chatKey={selected.key} visible />
               {/await}
             {:else}
-              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (front = 'chat')} />
+              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (app.focus.front = 'chat')} />
             {/if}
           {/key}
         </div>
