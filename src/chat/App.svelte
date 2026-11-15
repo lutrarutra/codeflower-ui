@@ -512,7 +512,7 @@
     </div>
   {:else}
   <form
-    class="card relative mx-4 mb-4 flex max-[640px]:mx-2 max-[640px]:mb-2 flex-col gap-1 px-3 pt-2 pb-2 {shellMode ? 'border-teal!' : 'focus-within:border-indigo'}"
+    class="composer card relative mx-4 mb-4 flex max-[640px]:mx-2 max-[640px]:mb-2 flex-col gap-1 px-3 pt-2 pb-2 {shellMode ? 'border-teal!' : 'focus-within:border-indigo'}"
     onsubmit={(event) => {
       event.preventDefault();
       submit();
@@ -599,9 +599,10 @@
           type="button"
           class="pill pill-pink pill-small"
           title={queued.some((item) => item.editable) ? 'Stop the turn; your queued messages go back into the message box' : 'Stop the turn'}
+          aria-label="Stop"
           onclick={() => send({ type: 'cancel' })}
         >
-          <span class="codicon codicon-debug-stop"></span> Stop
+          <span class="codicon codicon-debug-stop"></span><span class="wide-only">Stop</span>
         </button>
         {#if draft.trim()}
           <button type="button" class="pill pill-small" title={sendNowHint} disabled={!chat.live} onclick={() => submit(true)}>
@@ -611,6 +612,7 @@
       {/if}
       <button
         type="submit"
+        aria-label={shellMode ? 'Run' : chat.busy ? 'Queue' : 'Send'}
         class="pill pill-small {shellMode ? 'pill-teal' : 'pill-primary'}"
         title={shellMode
           ? 'Run in the sandbox (Enter)'
@@ -619,9 +621,9 @@
             : `Enter to send · Shift+Enter for a new line${config.length ? ' · Shift+Tab to change mode' : ''}`}
         disabled={!chat.live || !draft.trim()}
       >
-        {#if shellMode}Run <span class="codicon codicon-play"></span>
-        {:else if chat.busy}Queue <span class="codicon codicon-list-ordered"></span>
-        {:else}Send <span class="codicon codicon-arrow-up"></span>{/if}
+        {#if shellMode}<span class="wide-only">Run</span> <span class="codicon codicon-play"></span>
+        {:else if chat.busy}<span class="wide-only">Queue</span> <span class="codicon codicon-list-ordered"></span>
+        {:else}<span class="wide-only">Send</span> <span class="codicon codicon-arrow-up"></span>{/if}
       </button>
     </div>
   </form>

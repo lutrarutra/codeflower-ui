@@ -248,6 +248,37 @@ textarea:focus-visible {
   }
 }
 
+/* A narrow composer (a phone, a narrow side panel) keeps its controls on one
+   line, so that it does not grow and shrink as the turn starts and ends (Send
+   becomes Stop and Queue): they show their icons, their names in their titles,
+   and their menus open from the composer's edge instead of from the button. */
+.composer {
+  container: composer / inline-size;
+}
+
+@container composer (max-width: 420px) {
+  .wide-only {
+    display: none;
+  }
+
+  .model-name {
+    max-width: 5rem;
+  }
+
+  .anchor {
+    position: static;
+  }
+}
+
+/* Narrower still (a phone): the model's button shows its robot and effort
+   bars, the name in its title and menu, so the controls keep to one line
+   while the turn's Stop and Queue are there too. */
+@container composer (max-width: 380px) {
+  .model-name {
+    display: none;
+  }
+}
+
 /* A small selector button in the composer's settings row. */
 .chip {
   display: inline-flex;

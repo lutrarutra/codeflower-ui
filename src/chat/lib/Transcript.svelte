@@ -194,13 +194,13 @@
 {#snippet row(item: ChatItem, previous: ChatItem | undefined)}
   {#if item.kind === 'user'}
     <div
-      class="bubble-user max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
+      class="bubble-user wrap-anywhere max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
     >
       {item.text}
     </div>
   {:else if item.kind === 'action'}
     <details
-      class="bubble-user group max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
+      class="bubble-user group wrap-anywhere max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
     >
       <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
         <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>

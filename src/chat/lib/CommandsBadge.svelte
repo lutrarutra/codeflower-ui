@@ -48,7 +48,7 @@
 
 <!-- Only while one runs; centered on the footer's line as its other items are. -->
 {#if running.length}
-  <div class="relative flex items-center" bind:this={root}>
+  <div class="flex items-center" bind:this={root}>
     <button
       type="button"
       class="inline-flex items-center gap-1 rounded-full border-none bg-transparent px-1 py-0 leading-none text-inherit hover:text-ink"
@@ -59,7 +59,7 @@
       onclick={() => (open = !open)}
       onkeydown={(event) => event.key === 'Escape' && (open = false)}
     >
-      <span class="codicon codicon-run-all"></span>
+      <span class="codicon codicon-terminal"></span>
       {running.length}
     </button>
     {#if open}
@@ -67,7 +67,7 @@
         role="dialog"
         aria-label="Commands"
         tabindex="-1"
-        class="card absolute bottom-full left-0 z-20 mb-2 flex max-h-96 w-80 flex-col gap-0.5 overflow-y-auto p-1.5 text-[1.25em] text-ink"
+        class="card absolute bottom-full right-0 z-20 mb-2 flex max-h-96 w-80 max-w-[calc(100vw-2rem)] flex-col gap-0.5 overflow-y-auto p-1.5 text-[1.25em] text-ink"
         onkeydown={(event) => event.key === 'Escape' && (open = false)}
       >
         <div class="eyebrow px-2 pt-1 pb-1 text-violet">Commands</div>
