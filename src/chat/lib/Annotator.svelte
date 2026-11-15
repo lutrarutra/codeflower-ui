@@ -69,6 +69,9 @@
     hovered = null;
   }
   const boxes: Record<number, HTMLTextAreaElement | undefined> = $state({});
+  // The comments float over the figure, which keeps the whole space: open
+  // from their button, and by themselves when a part is marked.
+  let commentsOpen = $state(false);
   let nextKey = Math.max(0, ...notes.map((note) => note.key)) + 1;
 
   // The view: the figure's scale (1 is its own size) and where its corner is.
@@ -81,9 +84,13 @@
   const gone = (element: FeedbackElement) => isSvg && present !== null && !present.has(element.id);
   const written = $derived(notes.filter((note) => note.comment.trim()));
   const canSend = $derived(sendable && (written.length > 0 || general.trim().length > 0));
+  /** Comments drafted, the general one too: the button counts them. */
+  const drafted = $derived(notes.length + (general.trim() ? 1 : 0));
+  const howToMark = $derived(isSvg ? 'Click an element or drag over an area' : 'Drag over an area');
 
   async function focusNote(key: number): Promise<void> {
     active = key;
+    commentsOpen = true;
     await tick();
     boxes[key]?.focus();
   }
@@ -459,7 +466,9 @@
   onkeydown={(event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      onclose();
+      // The comments first, then the figure.
+      if (commentsOpen) commentsOpen = false;
+      else onclose();
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       send();
@@ -471,13 +480,9 @@
   <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5 max-[640px]:flex-wrap max-[640px]:gap-2 max-[640px]:px-3">
     <div class="min-w-0 flex-1 max-[640px]:basis-[calc(100%-3rem)]">
       <h2 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">{title}</h2>
-      <p class="m-0 truncate text-[0.8em] text-muted" title={subtitle}>
-        {subtitle ? `${subtitle} · ` : ''}{mode === 'move'
-          ? 'Switch to Select to comment on a part'
-          : isSvg
-            ? 'Click an element or drag over an area to comment on it'
-            : 'Drag over an area to comment on it'}
-      </p>
+      {#if subtitle}
+        <p class="m-0 truncate text-[0.8em] text-muted" title={subtitle}>{subtitle}</p>
+      {/if}
     </div>
     <div
       class="flex shrink-0 rounded-full border-[1.5px] border-soft-line bg-code p-0.5 text-[0.8em] font-semibold"
@@ -527,63 +532,99 @@
     </button>
   </header>
 
-  <div class="flex min-h-0 flex-1 flex-col md:flex-row">
-    <div class="relative min-h-[40vh] flex-1 bg-sunken">
-      <div bind:this={host}></div>
-      <p class="pointer-events-none absolute bottom-2 left-1/2 m-0 -translate-x-1/2 rounded-full bg-card/90 px-3 py-0.5 text-[0.75em] whitespace-nowrap text-muted">
-        {mode === 'move'
-          ? 'Drag to move · pinch or Ctrl+scroll to zoom'
-          : `Drag to select · ${isSvg ? 'click an element · ' : ''}two fingers or Space+drag to move`}
-      </p>
-    </div>
-    <aside
-      class="flex max-h-[45vh] w-full shrink-0 flex-col gap-2 overflow-auto border-t-[1.5px] border-soft-line p-3 md:max-h-none md:w-80 md:border-t-0 md:border-l-[1.5px]"
+  <div class="relative min-h-0 flex-1 bg-sunken">
+    <div bind:this={host}></div>
+    <!-- What the pointer does now, and how to comment: the one place it is said. -->
+    <p
+      class="pointer-events-none absolute bottom-3 left-3 m-0 max-w-[calc(100%-10rem)] rounded-2xl bg-card/90 px-3 py-1 text-[0.75em] text-muted"
     >
-      {#each notes as note, index (note.key)}
-        <div class="card flex flex-col gap-1 px-2.5 py-2 {note.key === active ? 'border-indigo!' : ''}">
-          <div class="flex items-center gap-2 text-[0.8em]">
-            <span class="grid size-[18px] shrink-0 place-items-center rounded-full bg-indigo text-[11px] font-bold text-on-accent">{index + 1}</span>
-            <span class="min-w-0 flex-1 truncate font-mono" title={annotationTarget(note)}>
-              {#each note.elements ?? [] as element, position (element.id)}
-                {#if position}, {/if}<span class={gone(element) ? 'text-muted line-through' : ''} title={gone(element) ? 'The figure no longer has this element' : undefined}
-                  >{elementName(element)}</span
-                >
-              {/each}
-              {#if note.region}{note.elements?.length ? ' · ' : ''}area{/if}
-            </span>
-            <button
-              type="button"
-              class="codicon codicon-trash cursor-pointer border-none bg-transparent p-0 text-muted hover:text-ink"
-              aria-label="Delete comment {index + 1}"
-              onclick={() => removeNote(note.key)}
-            ></button>
-          </div>
-          <textarea
-            rows="2"
-            class="min-h-[2.8em] resize-y rounded-md border-none bg-transparent p-0.5 outline-none placeholder:text-muted"
-            placeholder="What should change here?"
-            bind:this={boxes[note.key]}
-            bind:value={note.comment}
-            onfocus={() => (active = note.key)}
-          ></textarea>
-        </div>
+      {#if mode === 'move'}
+        Drag to move · pinch or Ctrl+scroll to zoom · <strong class="text-ink">Select</strong> (V) to comment on a part
       {:else}
-        <p class="m-0 px-1 py-2 text-[0.9em] text-muted">
-          {isSvg ? 'Click an element of the figure, or drag over an area,' : 'Drag over an area of the figure'} to comment on it.
-        </p>
-      {/each}
-      <label class="mt-auto flex flex-col gap-1 pt-2 text-[0.8em] text-muted">
-        General comment
-        <textarea
-          rows="3"
-          class="card resize-y px-2.5 py-2 text-[1.25em] text-ink outline-none placeholder:text-muted focus:border-indigo"
-          placeholder="Anything about the whole figure"
-          bind:value={general}
-        ></textarea>
-      </label>
-      {#if !sendable}
-        <p class="m-0 text-[0.8em] text-muted">{sendHint}</p>
+        <strong class="text-ink">{howToMark}</strong> to comment on it · two fingers or Space+drag to move
       {/if}
-    </aside>
+    </p>
+
+    {#if commentsOpen}
+      <section
+        class="card absolute right-3 bottom-16 z-10 flex max-h-[calc(100%-5.5rem)] w-96 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden"
+        aria-label="Comments"
+      >
+        <div class="flex shrink-0 items-center gap-2 px-3 pt-2.5 pb-1.5">
+          <span class="eyebrow flex-1 text-indigo">Comments</span>
+          <button class="chip px-1.5!" title="Hide the comments; they are kept (Esc)" aria-label="Hide the comments" onclick={() => (commentsOpen = false)}>
+            <span class="codicon codicon-chevron-down"></span>
+          </button>
+        </div>
+        <div class="thin-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3">
+          {#each notes as note, index (note.key)}
+            <div class="flex flex-col gap-1 rounded-xl border-[1.5px] bg-paper px-2.5 py-2 {note.key === active ? 'border-indigo' : 'border-soft-line'}">
+              <div class="flex items-center gap-2 text-[0.8em]">
+                <span class="grid size-[18px] shrink-0 place-items-center rounded-full bg-indigo text-[11px] font-bold text-on-accent">{index + 1}</span>
+                <span class="min-w-0 flex-1 truncate font-mono" title={annotationTarget(note)}>
+                  {#each note.elements ?? [] as element, position (element.id)}
+                    {#if position}, {/if}<span class={gone(element) ? 'text-muted line-through' : ''} title={gone(element) ? 'The figure no longer has this element' : undefined}
+                      >{elementName(element)}</span
+                    >
+                  {/each}
+                  {#if note.region}{note.elements?.length ? ' · ' : ''}area{/if}
+                </span>
+                <button
+                  type="button"
+                  class="codicon codicon-trash cursor-pointer border-none bg-transparent p-0 text-muted hover:text-ink"
+                  aria-label="Delete comment {index + 1}"
+                  onclick={() => removeNote(note.key)}
+                ></button>
+              </div>
+              <textarea
+                rows="2"
+                class="min-h-[2.8em] resize-y rounded-md border-none bg-transparent p-0.5 outline-none placeholder:text-muted"
+                placeholder="What should change here?"
+                bind:this={boxes[note.key]}
+                bind:value={note.comment}
+                onfocus={() => (active = note.key)}
+              ></textarea>
+            </div>
+          {:else}
+            <div class="flex items-center gap-2 rounded-xl bg-code px-2.5 py-2 text-[0.85em] text-muted">
+              <span class="min-w-0 flex-1">
+                {mode === 'select' ? `${howToMark} of the figure to comment on it.` : 'To comment on a part, select it in the figure.'}
+              </span>
+              {#if mode === 'move'}
+                <button class="chip shrink-0" title="Select a part to comment on (V)" onclick={() => setMode('select')}>
+                  <span class="codicon codicon-inspect text-[12px]!"></span> Select a part
+                </button>
+              {/if}
+            </div>
+          {/each}
+          <label class="flex flex-col gap-1 pt-1 text-[0.8em] text-muted">
+            General comment
+            <textarea
+              rows="3"
+              class="resize-y rounded-xl border-[1.5px] border-soft-line bg-paper px-2.5 py-2 text-[1.25em] text-ink outline-none placeholder:text-muted focus:border-indigo"
+              placeholder="Anything about the whole figure"
+              bind:value={general}
+            ></textarea>
+          </label>
+          {#if !sendable}
+            <p class="m-0 text-[0.8em] text-muted">{sendHint}</p>
+          {/if}
+        </div>
+      </section>
+    {/if}
+
+    <button
+      class="pill pill-small absolute right-3 bottom-3 z-10 shadow-md {commentsOpen ? 'pill-primary' : 'bg-card!'}"
+      aria-expanded={commentsOpen}
+      aria-label={drafted ? `Comments (${drafted})` : 'Comments'}
+      title={commentsOpen ? 'Hide the comments (Esc)' : 'Show the comments'}
+      onclick={() => (commentsOpen = !commentsOpen)}
+    >
+      <span class="codicon codicon-comment"></span>
+      Comments
+      {#if drafted}
+        <span class="grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[11px] font-bold {commentsOpen ? 'bg-card text-indigo' : 'bg-indigo text-on-accent'}">{drafted}</span>
+      {/if}
+    </button>
   </div>
 </div>
