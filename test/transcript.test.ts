@@ -153,6 +153,24 @@ test('keeps what the user did and a stopped turn in sight, and pages that start 
   );
 });
 
+test('a failed call that ended the turn shows, once the turn is over', () => {
+  const failing = [
+    prompt('/compact'),
+    thought('Compacting'),
+    update({ sessionUpdate: 'tool_call', toolCallId: 'c', title: 'Compact conversation', kind: 'think', status: 'failed' })
+  ];
+  // While the turn runs, the agent may still recover from it.
+  assert.deepEqual(parts(foldTurns(buildItems(failing))[0]!), [['thought', 'tool']]);
+  const [turn] = foldTurns(buildItems([...failing, { t: at(5), kind: 'turn_end', stopReason: 'end_turn' }]));
+  assert.deepEqual(parts(turn!), [['thought'], 'tool']);
+  assert.equal(turn!.steps, 1);
+  // One the agent went on from stays folded.
+  const [recovered] = foldTurns(
+    buildItems([...failing, chunk('Compaction failed: the session limit is hit.'), { t: at(5), kind: 'turn_end', stopReason: 'end_turn' }])
+  );
+  assert.deepEqual(parts(recovered!), [['thought', 'tool'], 'Compaction failed: the session limit is hit.']);
+});
+
 test('output after a turn ended, with no new prompt, belongs to that turn', () => {
   const [turn] = foldTurns(
     buildItems([

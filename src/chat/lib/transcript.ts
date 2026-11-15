@@ -448,8 +448,9 @@ export interface Turn {
   prompt: Extract<ChatItem, { kind: 'user' | 'action' }> | null;
   /**
    * Everything after the prompt, in order. The agent's messages, files shown to
-   * the user, their own commands and a turn that stopped show; what lies between
-   * them (thinking, tool calls, plans, subagents, answered requests) folds.
+   * the user, their own commands, a turn that stopped and a failed call that
+   * ended the turn show; what lies between them (thinking, tool calls, plans,
+   * subagents, answered requests) folds.
    */
   parts: TurnPart[];
   /** How many steps folded, over all of the turn's parts. */
@@ -470,25 +471,30 @@ export function foldTurns(items: ChatItem[]): Turn[] {
   const turns: Turn[] = [];
   let work: ChatItem[] = [];
   let prompt: Turn['prompt'] = null;
-  const close = () => {
+  const close = (over: boolean) => {
     if (!prompt && !work.length) return;
+    // A step that failed and ended the turn is what the user needs to see, e.g.
+    // a command that hit a limit. While the turn runs, the agent may still recover.
+    const final = work.at(-1);
+    const failed = over && final?.kind === 'tool' && final.status === 'failed' ? final : undefined;
     const parts: TurnPart[] = [];
     for (const item of work) {
       const last = parts.at(-1);
-      if (SHOWN.has(item.kind)) parts.push({ kind: 'item', item });
+      if (SHOWN.has(item.kind) || item === failed) parts.push({ kind: 'item', item });
       else if (last?.kind === 'steps') last.steps.push(item);
       else parts.push({ kind: 'steps', id: item.id, steps: [item] });
     }
-    turns.push({ id: prompt?.id ?? 'start', prompt, parts, steps: work.filter((item) => !SHOWN.has(item.kind)).length, work });
+    const steps = work.filter((item) => !SHOWN.has(item.kind) && item !== failed).length;
+    turns.push({ id: prompt?.id ?? 'start', prompt, parts, steps, work });
   };
   for (const item of items) {
     if (item.kind === 'user' || item.kind === 'action') {
-      close();
+      close(true);
       prompt = item;
       work = [];
     } else work.push(item);
   }
-  close();
+  close(prompt?.ended != null);
   return turns;
 }
 

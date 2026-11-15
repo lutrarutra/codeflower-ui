@@ -191,7 +191,7 @@
   };
 </script>
 
-{#snippet row(item: ChatItem, previous: ChatItem | undefined)}
+{#snippet row(item: ChatItem, previous: ChatItem | undefined, open = false)}
   {#if item.kind === 'user'}
     <div
       class="bubble-user wrap-anywhere max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
@@ -224,7 +224,7 @@
   {:else if item.kind === 'tool'}
     {@const [icon, tile] = toolIcon[item.toolKind] ?? ['tools', 'bg-yellow-soft']}
     {@const took = elapsed(item.started, item.ended)}
-    <details class="group rounded-xl border-[1.5px] border-soft-line bg-card">
+    <details class="group rounded-xl border-[1.5px] border-soft-line bg-card" {open}>
       <summary class="flex cursor-pointer list-none items-center gap-2.5 px-2.5 py-1.5 select-none">
         <span class="grid size-6 shrink-0 place-items-center rounded-lg border-[1.5px] border-line {tile}">
           <span class="codicon codicon-{icon} text-[13px]!"></span>
@@ -454,7 +454,8 @@
       {#if turn.prompt}{@render row(turn.prompt, undefined)}{/if}
       {#each turn.parts as part (part.kind === 'item' ? part.item.id : `steps-${part.id}`)}
         {#if part.kind === 'item'}
-          {@render row(part.item, undefined)}
+          <!-- A call outside the fold failed and ended the turn: what went wrong shows. -->
+          {@render row(part.item, undefined, part.item.kind === 'tool')}
         {:else}
           <!-- Full width, so the steps inside lay out as in the chat. -->
           <details class="group min-w-0 text-muted">
