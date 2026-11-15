@@ -148,7 +148,7 @@
           <button
             class="pill pill-small"
             disabled={openingShell}
-            title="A shell in the sandbox's workspace, in a tab; it runs on when the page goes, until you close its tab"
+            title="A shell in the sandbox's workspace, in the panel below the chats (Ctrl+`); it runs on when the page goes, until you close its tab"
             onclick={() => openShell(browsed)}><span class="codicon codicon-terminal"></span>{openingShell ? 'Opening…' : 'Terminal'}</button
           >
         {/if}

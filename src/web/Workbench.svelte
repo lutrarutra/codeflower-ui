@@ -143,7 +143,12 @@
     }
     const worker = app.worker(workerId);
     if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
-    if (terminalIdOf(local)) return { icon: 'terminal', label: 'Terminal', title: named(workerId, 'A shell in the sandbox; closing the tab ends it') };
+    const terminalId = terminalIdOf(local);
+    if (terminalId) {
+      // Numbered as the sidebar numbers the sandbox's shells.
+      const index = agent.shells.findIndex((shell) => shell.terminalId === terminalId);
+      return { icon: 'terminal', label: index < 0 ? 'Terminal' : `Terminal ${index + 1}`, title: named(workerId, 'A shell in the sandbox; closing the tab ends it') };
+    }
     const commandId = commandIdOf(local);
     if (commandId) {
       const command = agent.commands[commandId];

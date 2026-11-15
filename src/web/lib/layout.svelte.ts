@@ -135,6 +135,30 @@ export class Layout {
     if (focus || !this.group(this.focused)) this.focus(group.id);
   }
 
+  /**
+   * Adds a tab in a new group across the whole grid's foot, `share` percent
+   * high, as VS Code opens its panel; it is a group like any other after that.
+   */
+  placeAtBottom(tab: string, share = 30, focus = true): void {
+    if (this.has(tab)) this.close(tab);
+    const group = emptyGroup([tab]);
+    const root = $state.snapshot(this.root) as LayoutNode;
+    if (root.kind === 'group' && !root.tabs.length) {
+      root.tabs.push(tab);
+      root.active = tab;
+      this.root = root;
+      this.focus(root.id);
+      return;
+    }
+    if (root.kind === 'split' && root.direction === 'column') {
+      const scale = (100 - share) / 100;
+      this.root = { ...root, children: [...root.children, group], sizes: [...root.sizes.map((size) => size * scale), share] };
+    } else {
+      this.root = { kind: 'split', id: newId('split'), direction: 'column', children: [root, group], sizes: [100 - share, share] };
+    }
+    if (focus || !this.group(this.focused)) this.focus(group.id);
+  }
+
   /** Takes a tab out; its group shows its neighbour, or closes when it was the last one. */
   close(tab: string): void {
     const group = this.groupOf(tab);

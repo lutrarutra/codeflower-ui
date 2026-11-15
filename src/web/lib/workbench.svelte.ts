@@ -2,7 +2,7 @@
 // as tabs in one grid of groups (see layout.svelte.ts). A tab names its
 // sandbox and what it shows there (`<sandbox>/chat:<key>`). The workbench
 // decides where a tab opens when the user did not drop it somewhere: chats
-// where the chats are, files and terminals beside them. The grid is
+// where the chats are, files beside them, terminals in a panel at the foot. The grid is
 // remembered without the file previews, which need their sandbox to load.
 import { Layout, type Placement } from './layout.svelte.ts';
 import { INTERACTIVE } from './previews.svelte.ts';
@@ -12,6 +12,7 @@ export const OVERVIEW = '#overview';
 const CHAT = 'chat:';
 const TERMINAL = 'terminal:';
 const COMMAND = 'command:';
+const BROWSER = 'browser:';
 
 /** The grid's tab for what a sandbox shows (a chat, its folders, a file). */
 export const tabOf = (workerId: string, local: string) => `${encodeURIComponent(workerId)}/${local}`;
@@ -29,10 +30,18 @@ export const terminalIdOf = (local: string) => (local.startsWith(TERMINAL) ? loc
 export const commandTab = (commandId: string) => `${COMMAND}${commandId}`;
 /** The agent's command a tab watches, by what it shows in its sandbox. */
 export const commandIdOf = (local: string) => (local.startsWith(COMMAND) ? local.slice(COMMAND.length) : undefined);
+export const browserTab = (key: string) => `${BROWSER}${key}`;
+/** The chat whose browser a tab shows, by what it shows in its sandbox. */
+export const browserKeyOf = (local: string) => (local.startsWith(BROWSER) ? local.slice(BROWSER.length) : undefined);
 /** Chats and the overview are the page's own; other tabs show files, or terminals. */
 const isPage = (tab: string) => {
   const { local } = splitTab(tab);
   return local.startsWith(CHAT) || local === OVERVIEW;
+};
+/** A shell's tab or a watched command's: they open in the panel. */
+const isTerminal = (tab: string) => {
+  const { local } = splitTab(tab);
+  return local.startsWith(TERMINAL) || local.startsWith(COMMAND);
 };
 /** What opens again from a saved grid: the page's own tabs, and terminals, which run on in their sandboxes. */
 const isKept = (tab: string) => isPage(tab) || splitTab(tab).local.startsWith(TERMINAL);
@@ -105,9 +114,10 @@ export class Workbench {
       this.layout.place(tab, { group: preview.id, index: preview.tabs.indexOf(previewTab!) + 1 }, false);
       return;
     }
-    const groups = this.layout.byRecency();
-    const files = groups.find((group) => group.tabs.some((other) => !isPage(other)));
-    const focused = groups[0]!;
+    // Not into the terminals' panel: files go with files, else beside the chat in front.
+    const groups = this.layout.byRecency().filter((group) => !group.tabs.length || !group.tabs.every(isTerminal));
+    const files = groups.find((group) => group.tabs.some((other) => !isPage(other) && !isTerminal(other)));
+    const focused = groups[0] ?? this.layout.byRecency()[0]!;
     const placement: Placement = files
       ? { group: files.id }
       : focused.active && isPage(focused.active)
@@ -116,23 +126,60 @@ export class Workbench {
     this.layout.place(tab, placement, false);
   }
 
-  /** Opens a shell's tab, in front: beside the chat in front, else in the focused group. */
+  /**
+   * Opens a chat's browser where files open (beside the chat). `front`: in
+   * front and focused, as when the agent asks the user to take it over.
+   */
+  openBrowser(workerId: string, key: string, front: boolean): void {
+    const local = browserTab(key);
+    const tab = tabOf(workerId, local);
+    if (!this.layout.has(tab)) this.openFile(workerId, local);
+    if (front) {
+      this.layout.activate(tab);
+      this.focusChanged();
+    }
+  }
+
+  /** Opens a shell's tab, in front, in the panel at the foot of the grid. */
   openTerminal(workerId: string, terminalId: string): void {
-    this.openBeside(tabOf(workerId, terminalTab(terminalId)));
+    this.openInPanel(tabOf(workerId, terminalTab(terminalId)));
   }
 
-  /** A command an agent runs, watched in a tab beside the chats. */
+  /** A command an agent runs, watched in a tab in the panel at the foot of the grid. */
   openCommand(workerId: string, commandId: string): void {
-    this.openBeside(tabOf(workerId, commandTab(commandId)));
+    this.openInPanel(tabOf(workerId, commandTab(commandId)));
   }
 
-  private openBeside(tab: string): void {
+  /**
+   * Terminals open as VS Code opens them: in a panel across the foot of the
+   * grid, made on first use. The panel is an ordinary group: its tabs can be
+   * dragged anywhere, and others into it. New terminals go to a group of
+   * terminals only (the panel, wherever it was moved), the latest one, else
+   * to a new panel: one dragged in among chats stays there alone.
+   */
+  private openInPanel(tab: string): void {
     if (this.layout.has(tab)) this.layout.activate(tab);
     else {
-      const focused = this.layout.byRecency()[0]!;
-      this.layout.place(tab, focused.active && isPage(focused.active) ? { group: focused.id, side: 'right' } : { group: focused.id });
+      const panel = this.layout.byRecency().find((group) => group.tabs.length > 0 && group.tabs.every(isTerminal));
+      if (panel) this.layout.place(tab, { group: panel.id });
+      else this.layout.placeAtBottom(tab);
     }
     this.focusChanged();
+  }
+
+  /** The tab in front of the focused group, if any. */
+  focusedTab(): string | undefined {
+    return this.layout.group(this.layout.focused)?.active ?? undefined;
+  }
+
+  /** The latest terminal tab, shells and watched commands alike. */
+  latestTerminal(): string | undefined {
+    for (const group of this.layout.byRecency()) {
+      if (group.active && isTerminal(group.active)) return group.active;
+      const tab = group.tabs.findLast(isTerminal);
+      if (tab) return tab;
+    }
+    return undefined;
   }
 
   /** Puts a tab where the user dropped it. */

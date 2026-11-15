@@ -107,10 +107,27 @@
   }
 
   function keydown(event: KeyboardEvent): void {
+    // As in VS Code: Ctrl+` shows the terminals (the latest, else a new one), Ctrl+Shift+` opens a new one.
+    if (event.code === 'Backquote' && event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      terminal(event.shiftKey);
+      return;
+    }
     if (event.key.toLowerCase() !== 'b' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
     event.preventDefault();
     if (wide) toggle();
     else drawer = !drawer;
+  }
+
+  /** The latest terminal in front, or a new shell in the sandbox the user works in. */
+  function terminal(fresh: boolean): void {
+    const latest = fresh ? undefined : app.workbench.latestTerminal();
+    if (latest) {
+      app.workbench.activate(latest);
+      return;
+    }
+    const workerId = app.workbench.focusedWorker() ?? app.workbench.focusedChat()?.workerId;
+    if (workerId) app.openShell(workerId).catch((error: unknown) => console.warn('No terminal:', error));
   }
 </script>
 
