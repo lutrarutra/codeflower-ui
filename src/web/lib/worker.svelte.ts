@@ -14,6 +14,7 @@ import {
 } from '../../protocol/messages.ts';
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { AgentCommand } from '../../protocol/commands.ts';
+import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
   agentOfKey,
@@ -58,6 +59,10 @@ export interface WorkerEvents {
   openChat(worker: WebWorker, key: string): void;
   /** A command a chat's agent runs, watched read-only in a tab. */
   openCommand(worker: WebWorker, chat: ChatSession, commandId: string): void;
+  /** A shell in the sandbox, from a chat's header. */
+  openShell(worker: WebWorker, chat: ChatSession): Promise<void>;
+  /** The chat's browser, from its header. */
+  openBrowser(worker: WebWorker, chat: ChatSession): void;
   /** The agent should sign in, e.g. a chat of it cannot start without. */
   signIn(worker: WebWorker, agent: AgentName): void;
   elicitUrl(worker: WebWorker, request: UrlElicitation, agent?: AgentName): Promise<'accept' | 'decline'>;
@@ -65,6 +70,8 @@ export interface WorkerEvents {
   terminalOutput(terminalId: string, data: string, replayed: boolean): void;
   terminalExit(terminalId: string, exitCode: number): void;
   wrapUp(worker: WebWorker, notice: WrapUpNotice): void;
+  /** A chat's browser changed (`previous`: as it was; none when first heard of). */
+  browser(worker: WebWorker, browser: BrowserState, previous: BrowserState | undefined): void;
 }
 
 export class WebWorker {
@@ -96,6 +103,12 @@ export class WebWorker {
   subagents = $state<Record<string, SubagentSummary>>({});
   /** The defaults of each agent's subagents, by agent; missing for agents without them in code flower. */
   private subagentSettings: Record<AgentName, SubagentSettingsState> = {};
+  /** The chats' browsers (codeflower-browser), by chat key. */
+  browsers = $state<Record<string, BrowserState>>({});
+  /** The views showing each chat's browser (a tab, Focus's pane), which get its frames. */
+  private readonly browserViews = new Map<string, Set<(frame: BrowserFrame) => void>>();
+  /** How many views watch each chat's browser: the sandbox stops sending frames when none does. */
+  private readonly browserWatchers = new Map<string, number>();
   /** The terminal notice each chat shows, so it is posted once and cleared when the terminal goes. */
   private readonly terminalNotices = new Map<string, string>();
   connection: WorkerConnection | undefined;
@@ -169,6 +182,10 @@ export class WebWorker {
         this.machine.openTransport(this.path(agent ? `/acp?agent=${encodeURIComponent(agent)}` : '/acp'));
       connection = await WorkerConnection.connect(open, this.handlers(++this.generation), CLIENT);
       const actions = await connection.actions();
+      // Views watch again over the new connection.
+      this.browserWatchers.clear();
+      const browsers = await connection.browsers().catch(() => undefined);
+      for (const browser of browsers?.browsers ?? []) this.browserChanged(browser);
       this.connection = connection;
       this.availableActions = actions;
       this.agents = connection.agents;
@@ -286,7 +303,7 @@ export class WebWorker {
     }
     await this.applyRememberedMode(key);
     chat.post({ type: 'config', options: connection.config(key) });
-    chat.setState({ live: true, steer: connection.canSteer(key) });
+    chat.setState({ live: true, steer: connection.canSteer(key), shells: connection.shellTerminals });
     this.noticeMcp(chat, connection.mcpNotice(key));
     void this.refresh();
     return key;
@@ -366,7 +383,7 @@ export class WebWorker {
     const chat = new ChatSession(
       this.id,
       key,
-      { title, ...this.presentation(key), actions: this.availableActions },
+      { title, ...this.presentation(key), actions: this.availableActions, browser: this.chatBrowser(key) },
       this.actions
     );
     this.chats[key] = chat;
@@ -412,7 +429,8 @@ export class WebWorker {
         live: true,
         busy: activity.busy,
         background: activity.background,
-        steer: connection.canSteer(chat.key)
+        steer: connection.canSteer(chat.key),
+        shells: connection.shellTerminals
       });
       this.noticeMcp(chat, connection.mcpNotice(chat.key));
       this.noticeTerminal(chat);
@@ -586,6 +604,8 @@ export class WebWorker {
     signIn: (chat) => this.events.signIn(this, agentOfKey(chat.key)),
     openSubagent: (_chat, key) => this.events.openChat(this, key),
     openCommand: (chat, commandId) => this.events.openCommand(this, chat, commandId),
+    openShell: (chat) => this.events.openShell(this, chat),
+    openBrowser: (chat) => this.events.openBrowser(this, chat),
     openParent: (chat) => {
       if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
     },
@@ -757,6 +777,55 @@ export class WebWorker {
     this.retry = undefined;
   }
 
+  /** What the chat's header shows of its browser. */
+  private chatBrowser(key: string): ChatState['browser'] {
+    const browser = this.browsers[key];
+    return browser?.running ? { running: true, needsYou: Boolean(browser.handoff && !browser.yours), yours: browser.yours === true } : undefined;
+  }
+
+  private browserChanged(browser: BrowserState): void {
+    const previous = this.browsers[browser.key];
+    this.browsers[browser.key] = browser;
+    this.chats[browser.key]?.setState({ browser: this.chatBrowser(browser.key) });
+    this.events.browser(this, browser, previous);
+  }
+
+  /** What a view of a chat's browser asks of the sandbox; none while it is not connected. */
+  browserHost(key: string): BrowserHost | undefined {
+    const connection = this.connection;
+    if (!connection) return undefined;
+    const calls = connection.browser(key);
+    let watching = false;
+    return {
+      ...calls,
+      // Several views of one browser share this window's watch.
+      watch: async (options) => {
+        if (!watching) this.browserWatchers.set(key, (this.browserWatchers.get(key) ?? 0) + 1);
+        watching = true;
+        await calls.watch(options);
+      },
+      unwatch: async () => {
+        if (!watching) return;
+        watching = false;
+        const left = (this.browserWatchers.get(key) ?? 1) - 1;
+        if (left > 0) this.browserWatchers.set(key, left);
+        else {
+          this.browserWatchers.delete(key);
+          await calls.unwatch();
+        }
+      },
+      frames: (listener) => {
+        let views = this.browserViews.get(key);
+        if (!views) this.browserViews.set(key, (views = new Set()));
+        views.add(listener);
+        return () => {
+          views.delete(listener);
+          if (!views.size && this.browserViews.get(key) === views) this.browserViews.delete(key);
+        };
+      }
+    };
+  }
+
   private handlers(generation: number) {
     return {
       entry: (key: string, entry: TranscriptEntry) => this.entry(key, entry),
@@ -784,6 +853,13 @@ export class WebWorker {
       subagent: (_parentKey: string, subagent: SubagentSummary) => this.subagentChanged(subagent),
       subagentSettings: (agent: AgentName, state: SubagentSettingsState) => this.setSubagentSettings(agent, state),
       queue: (key: string, queue: WorkerQueue) => this.chats[key]?.queueChanged(queue),
+      browser: (browser: BrowserState) => this.browserChanged(browser),
+      browserFrame: (frame: BrowserFrame) => {
+        const views = this.browserViews.get(frame.key);
+        // A frame nobody shows is answered all the same, or the next would never come.
+        if (views?.size) for (const view of views) view(frame);
+        else void this.connection?.browser(frame.key).ack(frame.frameId).catch(() => undefined);
+      },
       agentClosed: (agent: AgentName, _reason: string, code: number) => this.agentClosed(agent, code, generation),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };

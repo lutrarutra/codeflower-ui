@@ -53,6 +53,17 @@
   /** Narrow: the chat or the pane, one at a time. */
   let front = $state<'chat' | 'pane'>('chat');
 
+  // The chat's browser takes the pane while the agent waits for the user in it, or the user has it.
+  const browser = $derived(selected && agent ? agent.browsers[selected.key] : undefined);
+  const paneBrowser = $derived(Boolean(browser?.running && (browser.handoff || browser.yours)));
+  $effect(() => {
+    if (!browser?.handoff || browser.yours) return;
+    untrack(() => {
+      pane = true;
+      if (narrow) front = 'pane';
+    });
+  });
+
   function stored(key: string, fallback: number): number {
     try {
       const value = Number(localStorage.getItem(key) ?? NaN);
@@ -151,7 +162,11 @@
           <span class="codicon codicon-comment-discussion"></span>Chat
         </button>
         <button role="tab" class="chip" aria-selected={front === 'pane'} aria-expanded={front === 'pane'} onclick={() => (front = 'pane')}>
-          <span class="codicon codicon-preview"></span>Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}
+          {#if paneBrowser}
+            <span class="codicon codicon-globe"></span>Browser
+          {:else}
+            <span class="codicon codicon-preview"></span>Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}
+          {/if}
         </button>
       </div>
     {/if}
@@ -200,7 +215,13 @@
       {#if narrow ? front === 'pane' : pane}
         <div class="min-w-0 flex-1">
           {#key selected.workerId + '/' + selected.key}
-            <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (front = 'chat')} />
+            {#if paneBrowser}
+              {#await import('../BrowserTab.svelte') then { default: BrowserTab }}
+                <BrowserTab workerId={selected.workerId} chatKey={selected.key} visible />
+              {/await}
+            {:else}
+              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (front = 'chat')} />
+            {/if}
           {/key}
         </div>
       {/if}

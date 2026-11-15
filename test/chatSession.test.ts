@@ -48,6 +48,8 @@ function actions(
     openParent: () => {},
     stopSubagent: async () => {},
     openCommand: () => {},
+    openShell: async () => {},
+    openBrowser: () => {},
     setSubagentSettings: async () => {},
     restartAgent: async () => {}
   };

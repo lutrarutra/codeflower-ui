@@ -71,7 +71,8 @@ export interface ChatActivity {
   key: string;
   title: string;
   state: 'working' | 'waiting';
-  waitingFor?: 'plan' | 'permission' | 'question';
+  /** browser: the agent handed its browser to the user (codeflower-browser handoff). */
+  waitingFor?: 'plan' | 'permission' | 'question' | 'browser';
   /** False for a chat with no turn running: it works on a background command or subagent, or one of those waits. */
   turn?: boolean;
 }

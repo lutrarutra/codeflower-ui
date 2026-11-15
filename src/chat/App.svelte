@@ -362,6 +362,31 @@
         choose={(id) => send({ type: 'action', id })}
       />
     {/if}
+    {#if chat.browser?.running}
+      <!-- The chat's browser (codeflower-browser): watch it, or take it over; marked when the agent needs the user in it. -->
+      <button
+        type="button"
+        class={chat.browser.needsYou ? 'chip shrink-0 border-orange! text-orange!' : 'link shrink-0'}
+        title={chat.browser.needsYou ? 'The agent needs you in its browser' : "Show the chat's browser"}
+        aria-label={chat.browser.needsYou ? 'The agent needs you in its browser' : "Show the chat's browser"}
+        onclick={() => send({ type: 'openBrowser' })}
+      >
+        <span class="codicon codicon-globe"></span>{#if chat.browser.needsYou}Needs you{/if}
+      </button>
+    {/if}
+    {#if chat.shells}
+      <!-- A shell in the chat's sandbox, where the window keeps terminals (a panel at the foot). -->
+      <button
+        type="button"
+        class="link shrink-0"
+        title="Open a terminal in the sandbox's workspace"
+        aria-label="Open a terminal"
+        disabled={!chat.live}
+        onclick={() => send({ type: 'openShell' })}
+      >
+        <span class="codicon codicon-terminal"></span>
+      </button>
+    {/if}
     <button
       type="button"
       class="link shrink-0"

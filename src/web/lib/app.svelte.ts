@@ -15,7 +15,7 @@ import { TerminalViews } from './terminalViews.ts';
 import { Attention } from './attention.svelte.ts';
 import { Focus } from './focus.svelte.ts';
 import { INTERACTIVE } from './previews.svelte.ts';
-import { Workbench, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
+import { Workbench, browserKeyOf, browserTab, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'focus' | 'server';
@@ -105,6 +105,8 @@ class AppState {
   /** The latest wrap-up a sandbox announced, by sandbox. */
   wrapUps = $state<Record<string, WrapUpNotice>>({});
 
+  /** Browser tabs the user closed: they open again only when the agent asks for the user. */
+  private readonly closedBrowsers = new Set<string>();
   /** The agents of the sandboxes, by sandbox; each connects when a chat on it opens. */
   private readonly agents = new Map<string, WebWorker>();
   private readonly events: WorkerEvents = {
@@ -117,6 +119,17 @@ class AppState {
       if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });
       this.workbench.openCommand(worker.id, commandId);
     },
+    // In the terminals' panel below the chats; Focus shows only chats, so the grid comes back.
+    openShell: async (worker, chat) => {
+      if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });
+      await this.openShell(worker.id);
+    },
+    // From the chat's header: beside the chat, in front; Focus shows the chat's browser in its pane only while it needs the user.
+    openBrowser: (worker, chat) => {
+      if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });
+      this.closedBrowsers.delete(tabOf(worker.id, browserTab(chat.key)));
+      this.workbench.openBrowser(worker.id, chat.key, true);
+    },
     signIn: (worker, agent) => void this.signIn.start(worker, agent),
     elicitUrl: (worker, request, agent) => this.signIn.elicitUrl(worker, request, agent),
     elicitationComplete: (worker, elicitationId) => this.signIn.elicitationComplete(worker, elicitationId),
@@ -124,6 +137,16 @@ class AppState {
     terminalExit: (terminalId, exitCode) => this.terminals.exit(terminalId, exitCode),
     wrapUp: (worker, notice) => {
       this.wrapUps[worker.id] = notice;
+    },
+    // A chat's browser opens beside the chat when it starts, if the chat is in the grid; when the
+    // agent asks the user to take it over, in front, wherever the chat is.
+    browser: (worker, browser, previous) => {
+      if (browser.handoff && browser.handoff.at !== previous?.handoff?.at) {
+        this.closedBrowsers.delete(tabOf(worker.id, browserTab(browser.key)));
+        this.workbench.openBrowser(worker.id, browser.key, true);
+      } else if (browser.running && !previous?.running && this.workbench.layout.has(tabOf(worker.id, chatTab(browser.key)))) {
+        this.workbench.openBrowser(worker.id, browser.key, false);
+      }
     }
   };
   /** Part of the page's code could not load from the head (it stopped answering). */
@@ -186,7 +209,7 @@ class AppState {
   constructor() {
     this.workbench.mayClose = (tab) => {
       const { workerId, local } = splitTab(tab);
-      return !!chatKeyOf(local) || !!terminalIdOf(local) || !!commandIdOf(local) || this.previews.mayClose(workerId, local);
+      return !!chatKeyOf(local) || !!terminalIdOf(local) || !!commandIdOf(local) || !!browserKeyOf(local) || this.previews.mayClose(workerId, local);
     };
     this.workbench.onClose = (tab) => {
       const { workerId, local } = splitTab(tab);
@@ -194,11 +217,19 @@ class AppState {
       // Closing a shell's tab ends the shell; leaving the page or losing the connection does not.
       if (terminalId) void this.agents.get(workerId)?.connection?.closeTerminal(terminalId).catch(() => undefined);
       // A command's tab stops watching it as it goes; the command runs on.
+      // A browser's tab only stops showing it: the browser stays the chat's, and its tab does not open by itself again.
+      else if (browserKeyOf(local)) this.closedBrowsers.add(tab);
       else if (!chatKeyOf(local) && !commandIdOf(local)) this.previews.closed(workerId, local);
     };
     this.workbench.onChatFocus = (chat) => {
       this.follow(chat);
       if (!chat) return;
+      // A chat whose browser runs shows it beside it.
+      const browser = this.agents.get(chat.workerId)?.browsers[chat.key];
+      const browserTabOf = tabOf(chat.workerId, browserTab(chat.key));
+      if (browser?.running && !this.workbench.layout.has(browserTabOf) && !this.closedBrowsers.has(browserTabOf)) {
+        this.workbench.openBrowser(chat.workerId, chat.key, false);
+      }
       this.wake(chat.workerId);
       this.agents.get(chat.workerId)?.refreshUsage(agentOfKey(chat.key));
     };

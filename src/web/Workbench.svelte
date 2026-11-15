@@ -16,7 +16,7 @@
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
   import { INTERACTIVE } from './lib/previews.svelte.ts';
-  import { chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
+  import { browserKeyOf, chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
   import { commandTitle } from '../protocol/commands.ts';
   import ReportFrame from './ReportFrame.svelte';
   import { displayPath } from './lib/report.ts';
@@ -99,7 +99,7 @@
   $effect(() => {
     for (const tab of layout.tabs()) {
       const { workerId, local } = splitTab(tab);
-      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local) || commandIdOf(local)) continue;
+      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local) || commandIdOf(local) || browserKeyOf(local)) continue;
       if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
     }
   });
@@ -156,6 +156,17 @@
         icon: 'eye',
         label: command ? commandTitle(command, 32) : 'Command',
         title: named(workerId, `${command?.command ?? 'A command the agent runs'} (read-only; closing the tab only stops watching it)`)
+      };
+    }
+    const browserKey = browserKeyOf(local);
+    if (browserKey) {
+      const browser = agent.browsers[browserKey];
+      const chat = agent.chats[browserKey]?.state.title || agent.sessions.find((session) => session.key === browserKey)?.title || 'a chat';
+      return {
+        icon: 'globe',
+        label: browser?.title && browser.title !== 'about:blank' ? browser.title : 'Browser',
+        title: named(workerId, `The browser of ${chat}${browser?.url ? `: ${browser.url}` : ''}`),
+        ...(browser?.handoff && !browser.yours ? { status: 'waiting' as const } : {})
       };
     }
     const preview = app.previews.find(workerId, local);
@@ -302,6 +313,10 @@
     <!-- xterm.js loads with the first terminal. -->
     {#await import('./ShellTerminal.svelte') then { default: ShellTerminal }}
       <ShellTerminal {workerId} terminalId={terminalIdOf(local)!} />
+    {/await}
+  {:else if browserKeyOf(local)}
+    {#await import('./BrowserTab.svelte') then { default: BrowserTab }}
+      <BrowserTab {workerId} chatKey={browserKeyOf(local)!} visible={layout.groupOf(tab)?.active === tab} />
     {/await}
   {:else if commandIdOf(local)}
     {@const commandId = commandIdOf(local)!}

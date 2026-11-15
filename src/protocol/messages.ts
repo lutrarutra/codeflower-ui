@@ -227,6 +227,13 @@ export interface ChatState {
   commands?: AgentCommand[];
   /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
   subagent?: SubagentSummary & { parentTitle?: string };
+  /** The chat's sandbox opens shells for the user: the header's terminal button (`openShell`). */
+  shells?: boolean;
+  /**
+   * The chat's browser (codeflower-browser), while it runs: the header's browser button
+   * (`openBrowser`). `needsYou`: the agent handed it to the user; `yours`: this window controls it.
+   */
+  browser?: { running: boolean; needsYou?: boolean; yours?: boolean };
   /** The chat shows only each turn's prompt and final message, its steps folded (VS Code keeps the choice). */
   foldSteps?: boolean;
   /** The models the user pinned for this chat's agent, listed first in the model picker (VS Code keeps them). */
@@ -334,6 +341,10 @@ export type WebviewMessage =
   | { type: 'stopSubagent'; key: string }
   /** Show a command the agent runs, its output so far and the rest as it comes (read-only). */
   | { type: 'openCommand'; commandId: string }
+  /** Open a shell in the chat's sandbox, where the window keeps its terminals (`shells`). */
+  | { type: 'openShell' }
+  /** Show the chat's browser (`browser`). */
+  | { type: 'openBrowser' }
   | { type: 'subagentSettings'; settings: Partial<SubagentSettings> }
   /** Restart the agent so settings it reads at start apply. */
   | { type: 'restartAgent' };

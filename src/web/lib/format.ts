@@ -77,7 +77,7 @@ export const REACH_TEXT: Record<Reach, string> = {
   newer: 'Runs a newer code flower than this page: open it from that computer'
 };
 
-export const WAITING_FOR: Record<string, string> = { plan: 'plan approval', permission: 'permission', question: 'an answer' };
+export const WAITING_FOR: Record<string, string> = { plan: 'plan approval', permission: 'permission', question: 'an answer', browser: 'you in its browser' };
 
 export const plural = (count: number, noun: string, nouns = `${noun}s`) => `${count} ${count === 1 ? noun : nouns}`;
 

@@ -4,7 +4,7 @@
   import { fly } from 'svelte/transition';
   import { app } from './lib/app.svelte.ts';
 
-  const WAITING_FOR = { plan: 'approve a plan', permission: 'allow a tool', question: 'answer a question' } as const;
+  const WAITING_FOR = { plan: 'approve a plan', permission: 'allow a tool', question: 'answer a question', browser: 'take over its browser' } as const;
 </script>
 
 {#if app.attention.toasts.length}

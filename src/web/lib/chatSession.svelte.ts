@@ -48,6 +48,10 @@ export interface ChatActions {
   stopSubagent(chat: ChatSession, key: string): Promise<void>;
   /** A command the chat's agent runs, watched read-only in a tab of its own. */
   openCommand(chat: ChatSession, commandId: string): void;
+  /** A shell in the chat's sandbox, in the terminals' panel. */
+  /** Shows the chat's browser beside it. */
+  openBrowser(chat: ChatSession): void;
+  openShell(chat: ChatSession): Promise<void>;
   setSubagentSettings(chat: ChatSession, settings: Partial<SubagentSettings>): Promise<void>;
   restartAgent(chat: ChatSession): Promise<void>;
 }
@@ -337,6 +341,12 @@ export class ChatSession {
         break;
       case 'openCommand':
         this.actions.openCommand(this, message.commandId);
+        break;
+      case 'openShell':
+        await this.failing('Could not open a terminal', this.actions.openShell(this));
+        break;
+      case 'openBrowser':
+        this.actions.openBrowser(this);
         break;
       case 'subagentSettings':
         await this.failing('Could not change the subagent settings', this.actions.setSubagentSettings(this, message.settings));

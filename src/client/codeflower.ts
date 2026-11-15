@@ -14,6 +14,7 @@ import type {
   TranscriptEntry
 } from '../protocol/messages.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
+import type { BrowserFrame, BrowserInputEvent, BrowserNavigation, BrowserState } from '../protocol/browser.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import { RpcError, isMethodNotFound, type RpcConnection } from './rpc.ts';
@@ -252,7 +253,7 @@ export interface SessionRecord {
 /** What the worker's agents are doing, sent by the worker whenever it changes. */
 export interface WorkerActivity {
   /** `turn`: whether a turn runs (a chat can wait for the user without one); older workers leave it out. */
-  chats: { key: string; state: 'working' | 'waiting'; waitingFor?: 'plan' | 'permission' | 'question'; turn?: boolean }[];
+  chats: { key: string; state: 'working' | 'waiting'; waitingFor?: 'plan' | 'permission' | 'question' | 'browser'; turn?: boolean }[];
   working: number;
   waiting: number;
 }
@@ -412,6 +413,10 @@ export interface CodeflowerHandlers {
   subagentSettingsChanged?(agent: AgentName, state: SubagentSettingsState): void;
   /** A chat's queue on the worker changed, from any window or a turn's end. */
   queue?(key: string, queue: WorkerQueue): void;
+  /** A chat's browser changed: started or stopped, a page, a tab, a dialog, who controls it, a handoff. */
+  browserChanged?(browser: BrowserState): void;
+  /** A frame of a browser this window watches; `browserAck` it for the next. */
+  browserFrame?(frame: BrowserFrame): void;
 }
 
 /** A notification about one agent carries its name. */
@@ -486,6 +491,11 @@ export class CodeflowerExtensions {
       const { key, items, paused } = params as { key?: string } & Partial<WorkerQueue>;
       if (typeof key === 'string' && Array.isArray(items)) handlers.queue?.(key, { items, ...(paused ? { paused } : {}) });
     });
+    rpc.on('_codeflower/browser/changed', (params) => {
+      const { browser } = params as { browser?: BrowserState };
+      if (browser && typeof browser.key === 'string') handlers.browserChanged?.(browser);
+    });
+    rpc.on('_codeflower/browser/frame', (params) => handlers.browserFrame?.(params as BrowserFrame));
     rpc.on('_codeflower/terminal/changed', (params) => {
       const { terminals } = params as { terminals?: (ChatTerminal | ShellTerminal)[] };
       if (!Array.isArray(terminals)) return;
@@ -546,6 +556,57 @@ export class CodeflowerExtensions {
 
   usage(): Promise<WorkerUsage> {
     return this.rpc.request<WorkerUsage>('_codeflower/usage', this.named({}));
+  }
+
+  // ---- the chats' browsers (codeflower-browser) ----
+
+  /** The chats' browsers, and whether the sandbox has one to run; undefined from an older sandbox. */
+  async browsers(): Promise<{ available: boolean; browsers: BrowserState[] } | undefined> {
+    try {
+      return await this.rpc.request<{ available: boolean; browsers: BrowserState[] }>('_codeflower/browser/list', {});
+    } catch (error) {
+      if (isMethodNotFound(error)) return undefined;
+      throw error;
+    }
+  }
+
+  /** Frames of the chat's browser start coming (`browserFrame`). */
+  async browserWatch(key: string, options: { maxWidth?: number; maxHeight?: number; quality?: number } = {}): Promise<void> {
+    await this.rpc.request('_codeflower/browser/watch', { key, ...options });
+  }
+
+  async browserUnwatch(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/browser/unwatch', { key });
+  }
+
+  async browserAck(key: string, frameId: number): Promise<void> {
+    await this.rpc.request('_codeflower/browser/ack', { key, frameId });
+  }
+
+  /** Takes the browser over from the agent (and other windows), or lets it go. */
+  async browserControl(key: string, take: boolean): Promise<void> {
+    await this.rpc.request('_codeflower/browser/control', { key, take });
+  }
+
+  async browserInput(key: string, events: BrowserInputEvent[]): Promise<void> {
+    await this.rpc.request('_codeflower/browser/input', { key, events });
+  }
+
+  async browserNavigate(key: string, action: BrowserNavigation, url?: string): Promise<void> {
+    await this.rpc.request('_codeflower/browser/navigate', { key, action, ...(url !== undefined ? { url } : {}) });
+  }
+
+  async browserDialog(key: string, accept: boolean, promptText?: string): Promise<void> {
+    await this.rpc.request('_codeflower/browser/dialog', { key, accept, ...(promptText !== undefined ? { promptText } : {}) });
+  }
+
+  async browserSelectTab(key: string, targetId: string): Promise<void> {
+    await this.rpc.request('_codeflower/browser/selectTab', { key, targetId });
+  }
+
+  /** The user is done: the agent gets the browser back, and a message with `note` if it asked for them. */
+  async browserHandBack(key: string, note?: string): Promise<void> {
+    await this.rpc.request('_codeflower/browser/handBack', { key, ...(note ? { note } : {}) });
   }
 
   /** Undefined when no bridge answers or when its image predates chat actions. */

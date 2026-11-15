@@ -31,6 +31,7 @@ import {
 } from '../protocol/messages.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
+import type { BrowserFrame, BrowserHost, BrowserState } from '../protocol/browser.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
 import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
 import {
@@ -155,6 +156,10 @@ export interface WorkerHandlers {
   subagentSettings?(agent: AgentName, state: SubagentSettingsState): void;
   /** A chat's prompts queued on the worker: when it opens here, and when they change from any window. */
   queue?(sessionKey: string, queue: WorkerQueue): void;
+  /** A chat's browser changed (codeflower-browser): it started or stopped, its page, who controls it, a handoff. */
+  browser?(browser: BrowserState): void;
+  /** A frame of a chat's browser this window watches. */
+  browserFrame?(frame: BrowserFrame): void;
   /** An agent's connection ended, e.g. it restarted (1011): its chats are detached. */
   agentClosed?(agent: AgentName, reason: string, code: number): void;
   /** The connection to the sandbox ended. */
@@ -246,7 +251,9 @@ export class WorkerConnection {
       },
       terminals: (terminals) => handlers.terminals?.(terminals),
       shells: (shells) => handlers.shells?.(shells),
-      subagentSettingsChanged: (agent, state) => handlers.subagentSettings?.(agent, state)
+      subagentSettingsChanged: (agent, state) => handlers.subagentSettings?.(agent, state),
+      browserChanged: (browser) => handlers.browser?.(browser),
+      browserFrame: (frame) => handlers.browserFrame?.(frame)
     });
     // The agents' connections go with it; one that is closing for the same reason says so first.
     control.onClose((reason, code) => {
@@ -726,6 +733,27 @@ export class WorkerConnection {
   }
 
   // ---- sign-in ----
+
+  /** The chats' browsers (codeflower-browser); undefined from a sandbox without them. */
+  browsers(): Promise<{ available: boolean; browsers: BrowserState[] } | undefined> {
+    return this.bridge.browsers();
+  }
+
+  /** A chat's browser, on the sandbox's own connection (frames come to the `browserFrame` handler). */
+  browser(key: string): Omit<BrowserHost, 'frames'> {
+    const bridge = this.bridge;
+    return {
+      watch: (options) => bridge.browserWatch(key, options),
+      unwatch: () => bridge.browserUnwatch(key),
+      ack: (frameId) => bridge.browserAck(key, frameId),
+      control: (take) => bridge.browserControl(key, take),
+      input: (events) => bridge.browserInput(key, events),
+      navigate: (action, url) => bridge.browserNavigate(key, action, url),
+      dialog: (accept, promptText) => bridge.browserDialog(key, accept, promptText),
+      selectTab: (targetId) => bridge.browserSelectTab(key, targetId),
+      handBack: (note) => bridge.browserHandBack(key, note)
+    };
+  }
 
   /** ACP sign-in handled by the agent, e.g. Codex's API key or device code. */
   async authenticate(agent: AgentName, methodId: string, meta?: Record<string, unknown>): Promise<unknown> {
