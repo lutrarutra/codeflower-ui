@@ -225,7 +225,7 @@
                 <BrowserTab workerId={selected.workerId} chatKey={selected.key} visible />
               {/await}
             {:else}
-              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} onDraft={() => (app.focus.front = 'chat')} />
+              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} />
             {/if}
           {/key}
         </div>

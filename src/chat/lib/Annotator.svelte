@@ -27,7 +27,8 @@
     sendable,
     sendHint,
     onsend,
-    onclose
+    onclose,
+    ondownload
   }: {
     title: string;
     /** Where the figure is, e.g. its place in a report. */
@@ -42,6 +43,8 @@
     sendHint: string;
     onsend: (text: string, annotations: FeedbackAnnotation[]) => void;
     onclose: () => void;
+    /** Saves a copy of the figure on this machine; no button without it. */
+    ondownload?: () => void;
   } = $props();
 
   // Dragging less than this is a click.
@@ -518,6 +521,11 @@
         <span class="codicon codicon-screen-normal"></span> Fit
       </button>
     </div>
+    {#if ondownload}
+      <button class="chip shrink-0" title="Save a copy on this machine" aria-label="Download" onclick={ondownload}>
+        <span class="codicon codicon-cloud-download"></span>
+      </button>
+    {/if}
     <button
       class="pill pill-primary pill-small shrink-0"
       disabled={!canSend}

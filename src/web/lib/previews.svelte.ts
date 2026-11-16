@@ -1,7 +1,7 @@
 // Tabs that show files from a sandbox: the figures, reports and tables the
 // agent shows with `codeflower-show`, or paths clicked in the chat. Each tab
 // follows its file and sends the user's feedback to the chat it came from; an
-// HTML report can also open with its scripts running. Where the tabs are is the
+// HTML report can also show with its scripts running. Where the tabs are is the
 // sandbox's workbench's business (see workbench.svelte.ts).
 import { untrack } from 'svelte';
 import type { PreviewHost } from '../../chat/lib/host.ts';
@@ -10,12 +10,11 @@ import { isFileConflict } from '../../client/codeflower.ts';
 import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
 import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
-import { basename, displayPath, isStorytellerReport, resolvePath } from './report.ts';
+import { isStorytellerReport } from '../../chat/lib/report.ts';
+import { basename, displayPath, resolvePath } from './report.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
 const POLL_MS = 2_000;
-/** Appended to a preview's id for its interactive tab. */
-export const INTERACTIVE = '#interactive';
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -29,8 +28,6 @@ export interface PreviewOwner {
   visible(workerId: string, tab: string): boolean;
   /** Opens a file's tab, or brings it to the front. */
   open(workerId: string, tab: string): void;
-  /** Takes the tab away, e.g. an interactive report whose preview closed. */
-  remove(workerId: string, tab: string): void;
   showChat(workerId: string, key: string): void;
   /**
    * The sandbox's network is isolated: its reports' scripts do not run unless
@@ -46,7 +43,7 @@ export class Preview {
   chatKey = $state<string | undefined>();
   data = $state<string | null>(null);
   error = $state<string | null>(null);
-  /** The report's tab with its scripts running is open. */
+  /** The HTML file shows with its scripts running. */
   interactive = $state(false);
   /** The user's edits in the tab are not saved. */
   dirty = $state(false);
@@ -85,7 +82,7 @@ export class Preview {
     return this.file.path;
   }
 
-  /** The report's HTML, for its interactive tab. */
+  /** The file's HTML, when it is an HTML file. */
   readonly html = $derived(this.data && this.file.mimeType === 'text/html' ? decodeText(this.data) : '');
 
   private readonly state = $derived.by((): PreviewState => {
@@ -98,7 +95,8 @@ export class Preview {
       title: this.title,
       message: this.messageFor === this.file.mtimeMs ? this.message : null,
       chat: chat ? { title: chat.state.title, busy: chat.state.busy } : this.chatKey ? { title: 'the chat', busy: false } : null,
-      live: agent?.state === 'connected'
+      live: agent?.state === 'connected',
+      interactive: this.interactive
     };
   });
 
@@ -145,7 +143,7 @@ export class Preview {
         if (this.wantsInteractive) {
           this.wantsInteractive = false;
           // Charts, explorers and comments only work with the scripts running; the
-          // static preview stays in its own tab with the feedback box.
+          // tab's switch shows the static page.
           if (isStorytellerReport(this.html) && !this.owner.page.isolated(this.workerId)) this.owner.openInteractive(this);
         }
         if (this.noteShown) {
@@ -172,18 +170,6 @@ export class Preview {
     } catch (error) {
       this.error ??= describe(error);
     }
-  }
-
-  /** Settings chosen in the report, or comments for the agent: into the feedback box, for the user to send. */
-  draft(text: string): void {
-    this.owner.activate(this.workerId, this.id);
-    this.post({ type: 'draft', text });
-  }
-
-  /** Why feedback cannot go to the chat now, or '' when it can. */
-  get feedbackBlocked(): string {
-    if (!this.chatKey) return 'Open a chat on this worker to send comments to its agent.';
-    return this.owner.page.agent(this.workerId)?.state === 'connected' ? '' : 'The worker is not connected.';
   }
 
   /** Sends the user's feedback on the file (or one of its figures) to the chat it came from. */
@@ -274,7 +260,14 @@ export class Preview {
         if (this.chatKey) this.owner.page.showChat(this.workerId, this.chatKey);
         break;
       case 'interactive':
-        this.owner.openInteractive(this, { asked: true });
+        if (message.on) this.owner.openInteractive(this, { asked: true });
+        else this.interactive = false;
+        break;
+      case 'reportComments':
+        this.saveComments(message.json);
+        break;
+      case 'download':
+        void this.downloadBeside(message.path);
         break;
     }
   }
@@ -311,7 +304,7 @@ export class Previews {
 
   /** Closing the tab loses the user's edits: asks first. */
   mayClose(workerId: string, tab: string): boolean {
-    const preview = tab.endsWith(INTERACTIVE) ? undefined : this.find(workerId, tab);
+    const preview = this.find(workerId, tab);
     return !preview?.dirty || confirm(`${preview.title} has edits that are not saved. Close it anyway?`);
   }
 
@@ -320,11 +313,11 @@ export class Previews {
   }
 
   find(workerId: string, id: string): Preview | undefined {
-    return this.items.find((preview) => preview.workerId === workerId && preview.id === id.replace(INTERACTIVE, ''));
+    return this.items.find((preview) => preview.workerId === workerId && preview.id === id);
   }
 
   inFront(preview: Preview): boolean {
-    return this.page.visible(preview.workerId, preview.id) || this.page.visible(preview.workerId, preview.id + INTERACTIVE);
+    return this.page.visible(preview.workerId, preview.id);
   }
 
   activate(workerId: string, tab: string): void {
@@ -383,20 +376,14 @@ export class Previews {
       if (!run) return;
     }
     preview.interactive = true;
-    this.activate(preview.workerId, preview.id + INTERACTIVE);
   }
 
-  /** The user closed a file's tab; closing a preview closes its interactive tab too. */
+  /** The user closed a file's tab. */
   closed(workerId: string, tab: string): void {
     const preview = this.find(workerId, tab);
     if (!preview) return;
-    if (tab.endsWith(INTERACTIVE)) {
-      preview.interactive = false;
-      return;
-    }
     preview.close();
     this.items = this.items.filter((item) => item !== preview);
-    if (preview.interactive) this.page.remove(workerId, preview.id + INTERACTIVE);
   }
 
   /** The sandbox is gone: its previews go too. */

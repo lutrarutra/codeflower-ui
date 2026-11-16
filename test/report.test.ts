@@ -1,13 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  displayPath,
-  interactiveHtml,
-  isStorytellerReport,
-  printableHtml,
-  reportMessage,
-  resolvePath
-} from '../src/web/lib/report.ts';
+import { interactiveHtml, isStorytellerReport, printableHtml, reportMessage } from '../src/chat/lib/report.ts';
+import { displayPath, resolvePath } from '../src/web/lib/report.ts';
 
 test('resolves paths a file refers to against its folder', () => {
   assert.equal(resolvePath('/data/output/report/index.md', 'figures/a.png'), '/data/output/report/figures/a.png');

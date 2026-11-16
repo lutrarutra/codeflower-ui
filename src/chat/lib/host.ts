@@ -33,15 +33,28 @@ export function chatHost(): ChatHost {
   return host;
 }
 
+/** Whether a message came from a frame inside this page, e.g. an interactive report: never the host. */
+function fromFrameInside(source: MessageEventSource | null): boolean {
+  // A frame's parent can be read across origins.
+  let frame = source as Window | null;
+  while (frame && 'parent' in frame && frame.parent !== frame) {
+    if (frame.parent === window) return true;
+    frame = frame.parent;
+  }
+  return false;
+}
+
 /**
  * A host reached with postMessage, as a VS Code webview reaches its extension:
- * messages arrive as the window's message events.
+ * messages arrive as the window's message events, among those of the page's own frames.
  */
 export function postMessageHost<Outgoing, Incoming>(post: (message: Outgoing) => void): Host<Outgoing, Incoming> {
   return {
     send: post,
     listen(listener) {
-      const receive = (event: MessageEvent<Incoming>) => listener(event.data);
+      const receive = (event: MessageEvent<Incoming>) => {
+        if (!fromFrameInside(event.source)) listener(event.data);
+      };
       window.addEventListener('message', receive);
       return () => window.removeEventListener('message', receive);
     }

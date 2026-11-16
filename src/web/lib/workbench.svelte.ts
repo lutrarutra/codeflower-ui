@@ -5,7 +5,6 @@
 // where the chats are, files beside them, terminals in a panel at the foot. The grid is
 // remembered without the file previews, which need their sandbox to load.
 import { Layout, type Placement } from './layout.svelte.ts';
-import { INTERACTIVE } from './previews.svelte.ts';
 
 /** A sandbox's overview: its chats, sign-in and connection. */
 export const OVERVIEW = '#overview';
@@ -105,13 +104,6 @@ export class Workbench {
     const tab = tabOf(workerId, local);
     if (this.layout.has(tab)) {
       this.layout.activate(tab, false);
-      return;
-    }
-    // An interactive report opens next to its preview.
-    const previewTab = tab.endsWith(INTERACTIVE) ? tab.slice(0, -INTERACTIVE.length) : undefined;
-    const preview = previewTab ? this.layout.groupOf(previewTab) : undefined;
-    if (preview) {
-      this.layout.place(tab, { group: preview.id, index: preview.tabs.indexOf(previewTab!) + 1 }, false);
       return;
     }
     // Not into the terminals' panel: files go with files, else beside the chat in front.

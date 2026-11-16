@@ -7,10 +7,12 @@
   import HtmlReport, { type ReportFigure } from './lib/HtmlReport.svelte';
   import Markdown from './lib/Markdown.svelte';
   import type { PreviewHost } from './lib/host.ts';
+  import ReportFrame, { type ReportFrameKind } from './lib/ReportFrame.svelte';
+  import type { ReportMessage } from './lib/report.ts';
   // Loaded with the first file shown as text: chats alone do not need the editor.
   const loadEditor = () => import('./lib/editor/CodeEditor.svelte');
 
-  let { host }: { host: PreviewHost } = $props();
+  let { host, reportFrame = 'app' }: { host: PreviewHost; reportFrame?: ReportFrameKind } = $props();
   const sendPreview: PreviewHost['send'] = (message) => host.send(message);
 
   // A file from the sandbox: a figure, report or table the agent showed.
@@ -99,9 +101,27 @@
         sent = message.queued ? 'queued' : 'sent';
         setTimeout(() => (sent = null), 6000);
         break;
-      case 'draft':
+    }
+  }
+
+  /** What the interactive report asks: its text goes to the feedback box, for the user to send. */
+  function fromReport(message: ReportMessage): void {
+    switch (message.type) {
+      case 'send':
         draft = draft.trim() ? `${draft.trim()}\n\n${message.text}` : message.text;
         feedbackBox?.focus();
+        break;
+      case 'figure':
+        annotate(figureKey(message.figure), { figure: message.figure, mimeType: message.mimeType, data: message.data });
+        break;
+      case 'comments':
+        sendPreview({ type: 'reportComments', json: message.json });
+        break;
+      case 'print':
+        sendPreview({ type: 'print' });
+        break;
+      case 'download':
+        sendPreview({ type: 'download', path: message.path });
         break;
     }
   }
@@ -139,6 +159,28 @@
   });
 
   const editing = $derived(text !== null && (kind === 'text' || kind === 'json' || (rendered && source)));
+  /** An HTML file shows with its scripts running; the host says so, e.g. a storyteller report by itself. */
+  const interactive = $derived(kind === 'html' && text !== null && !source && !!preview?.interactive && !preview.error);
+  /**
+   * The report's frame, once it ran: it stays while the static page or the source show, so its
+   * charts and explorer settings are as they were when it comes back.
+   */
+  let ran = $state(false);
+  $effect(() => {
+    if (interactive) ran = true;
+  });
+  /** How an HTML file shows: with its scripts, as a static page, or its source. */
+  const HTML_MODES = [
+    { value: 'interactive', icon: 'play', label: 'Interactive', title: 'Run the report with its scripts: charts, explorers and comments (no network access)' },
+    { value: 'static', icon: 'preview', label: 'Static', title: 'Show the report as a page, without running its scripts' },
+    { value: 'code', icon: 'code', label: 'Code', title: 'Show and edit the source' }
+  ] as const;
+  const htmlMode = $derived(source ? 'code' : interactive ? 'interactive' : 'static');
+
+  function showHtml(mode: 'interactive' | 'static' | 'code'): void {
+    source = mode === 'code';
+    if (mode !== 'code' && (mode === 'interactive') !== !!preview?.interactive) sendPreview({ type: 'interactive', on: mode === 'interactive' });
+  }
   // Text that is not UTF-8 would be damaged by a save: it can be looked at only.
   const readOnlyReason = $derived(
     !preview?.live
@@ -267,17 +309,30 @@
           <span class="codicon codicon-refresh text-[11px]!"></span> updated
         </span>
       {/if}
-      {#if kind === 'html'}
-        <button
-          class="chip shrink-0"
-          title="Open the report with its interactive charts, in its own tab (no network access)"
-          disabled={!preview.data}
-          onclick={() => sendPreview({ type: 'interactive' })}
+      {#if kind === 'html' && text !== null}
+        <!-- With its scripts, as a static page, or the source in the editor; edits must be saved or undone before switching back. -->
+        <div
+          class="flex shrink-0 rounded-full border-[1.5px] border-soft-line bg-code p-0.5 text-[0.8em] font-semibold"
+          role="radiogroup"
+          aria-label="Show the report"
         >
-          <span class="codicon codicon-play"></span> Open interactive
-        </button>
-      {/if}
-      {#if rendered && text !== null}
+          {#each HTML_MODES as mode (mode.value)}
+            <button
+              role="radio"
+              aria-checked={htmlMode === mode.value}
+              class="flex items-center gap-1 rounded-full border-none px-2 py-0.5 {htmlMode === mode.value
+                ? 'bg-card text-ink shadow-sm'
+                : 'bg-transparent text-muted hover:text-ink'} disabled:cursor-not-allowed disabled:opacity-60"
+              title={mode.value !== 'code' && dirty ? 'Save or undo your edits first' : mode.title}
+              disabled={mode.value !== 'code' && dirty}
+              onclick={() => showHtml(mode.value)}
+            >
+              <span class="codicon codicon-{mode.icon} text-[12px]!"></span>
+              {mode.label}
+            </button>
+          {/each}
+        </div>
+      {:else if rendered && text !== null}
         <!-- Rendered or the source in the editor; edits must be saved or undone before switching back. -->
         <div
           class="flex shrink-0 rounded-full border-[1.5px] border-soft-line bg-code p-0.5 text-[0.8em] font-semibold"
@@ -345,10 +400,16 @@
 
     <!-- The editor fills the section edge to edge, as in VS Code; other views keep their margins. -->
     <section
-      class="min-h-0 flex-1 {editing && text !== null && preview.data && !preview.error
+      class="relative min-h-0 flex-1 {(editing || interactive) && text !== null && preview.data && !preview.error
         ? 'mb-3 overflow-hidden border-b-[1.5px] border-soft-line'
         : 'overflow-auto px-4 py-3'}"
     >
+      {#if ran && text !== null}
+        <!-- Behind the static page or the source it keeps its size, so its charts need not lay out again. -->
+        <div class="absolute inset-0 {interactive ? 'z-1' : 'invisible'}" inert={!interactive}>
+          <ReportFrame html={text} title="{preview.title} (interactive)" kind={reportFrame} onMessage={fromReport} />
+        </div>
+      {/if}
       {#if preview.error}
         <ErrorState title="Cannot show this file" detail={preview.error} />
       {:else if !preview.data}
@@ -402,6 +463,8 @@
         <article class="card mx-auto max-w-3xl px-6 py-5">
           <Markdown {text} {asset} openFile={(path) => sendPreview({ type: 'openFile', path })} />
         </article>
+      {:else if interactive}
+        <!-- The report's frame above fills the section. -->
       {:else if kind === 'html'}
         {#if pending.some(([key]) => key !== 'file')}
           <div class="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.85em] text-muted">
@@ -516,6 +579,7 @@
           {sendHint}
           onsend={sendAnnotations}
           onclose={closeAnnotator}
+          ondownload={annotating === 'file' ? () => sendPreview({ type: 'save' }) : undefined}
         />
       {/key}
     {/if}

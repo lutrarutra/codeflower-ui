@@ -372,6 +372,8 @@ export interface PreviewState {
   chat: { title: string; busy: boolean } | null;
   /** The worker is connected and the file is watched for changes. */
   live: boolean;
+  /** An HTML file shows with its scripts running (a report's charts, explorers and comments). */
+  interactive?: boolean;
 }
 
 export type PreviewHostMessage =
@@ -379,8 +381,6 @@ export type PreviewHostMessage =
   /** A file a report refers to (e.g. an image in Markdown), as a data URL. */
   | { type: 'asset'; path: string; dataUrl: string | null }
   | { type: 'feedbackSent'; queued: boolean }
-  /** Text for the feedback box (from the interactive report), for the user to send. */
-  | { type: 'draft'; text: string }
   /** The user's edits were saved; `file` is the new version. */
   | { type: 'written'; file: SandboxFile }
   /** Not saved; `conflict` when the file changed in the sandbox since it was opened. */
@@ -423,8 +423,14 @@ export interface FeedbackAnnotation {
 
 export type PreviewWebviewMessage =
   | { type: 'ready' }
-  /** Open the HTML file with its scripts running, in its own tab. */
-  | { type: 'interactive' }
+  /** Show the HTML file with its scripts running (`on`), or as a static page. */
+  | { type: 'interactive'; on: boolean }
+  /** The comments the user left on the interactive report (JSON), to save into it. */
+  | { type: 'reportComments'; json: string }
+  /** Print the interactive report, which a webview cannot: the host prints a copy elsewhere. */
+  | { type: 'print' }
+  /** Save a file beside the report (a deck's .pptx), named relative to it. */
+  | { type: 'download'; path: string }
   | { type: 'feedback'; text: string; annotations?: FeedbackAnnotation[]; figure?: FeedbackFigure }
   | { type: 'asset'; path: string }
   | { type: 'openFile'; path: string }

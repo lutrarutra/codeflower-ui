@@ -1,26 +1,22 @@
 <script lang="ts">
   // Beside the chat in Focus: what its agent showed the user (`codeflower-show`) and the files
   // clicked in it, one at a time, the latest in front. A file that went behind stays open, hidden,
-  // so an interactive report keeps its state; the header steps back and forth through them.
+  // so an interactive report keeps its state; the header steps back and forth through them. Each
+  // shows as in a tab, with its own feedback box and, for a report, its switch to run the scripts.
   import { untrack } from 'svelte';
   import PreviewView from '../../chat/Preview.svelte';
   import { app } from '../lib/app.svelte.ts';
   import { basename, displayPath } from '../lib/report.ts';
   import { chatTab, tabOf } from '../lib/workbench.svelte.ts';
-  import ReportFrame from '../ReportFrame.svelte';
-  import { feedbackText } from '../../chat/lib/feedback.ts';
 
   let {
     workerId,
     chatKey,
-    onCollapse,
-    onDraft
+    onCollapse
   }: {
     workerId: string;
     chatKey: string;
     onCollapse?: () => void;
-    /** Text from a report went into the chat's composer, e.g. to bring the chat to the front. */
-    onDraft?: () => void;
   } = $props();
 
   const agent = $derived(app.agent(workerId));
@@ -65,17 +61,6 @@
     untrack(() => void app.previews.openPath(agent, file, chatKey));
   });
 
-  /**
-   * Settings or comments a report sends: into the composer of the chat beside it. The preview's
-   * own feedback box is not on screen here, so `Preview.draft` would leave them nowhere.
-   */
-  function draft(file: string, text: string): void {
-    if (!chat) return;
-    // Says which report, as the feedback box does when it sends.
-    chat.post({ type: 'draft', text: feedbackText(displayPath(file), 'the code flower app', text) });
-    onDraft?.();
-  }
-
   function pick(file: string): void {
     app.focus.showing[tab] = file;
   }
@@ -102,16 +87,6 @@
     {:else}
       <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
     {/if}
-    {#if preview?.html}
-      <button
-        class="chip shrink-0"
-        aria-pressed={preview.interactive}
-        title={preview.interactive ? 'Show the report as a page, without running its scripts' : 'Run the report with its scripts'}
-        onclick={() => (preview.interactive ? (preview.interactive = false) : app.previews.openInteractive(preview))}
-      >
-        <span class="codicon codicon-{preview.interactive ? 'code' : 'play'}"></span>{preview.interactive ? 'Static' : 'Interactive'}
-      </button>
-    {/if}
     {#if onCollapse}
       <button class="grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-card hover:text-ink" title="Hide the pane" aria-label="Hide the pane" onclick={onCollapse}>
         <span class="codicon codicon-layout-sidebar-right-off"></span>
@@ -124,24 +99,7 @@
       {@const one = app.previews.find(workerId, file)}
       {#if one}
         <div class="absolute inset-0 {file === path ? '' : 'invisible'}" inert={file !== path}>
-          {#if one.interactive && one.html}
-            <ReportFrame
-              html={one.html}
-              title="{one.title} (interactive)"
-              figures={{
-                path: displayPath(one.file.path),
-                blocked: one.feedbackBlocked,
-                send: (text, annotations, figure) => void one.sendFeedback(text, annotations, figure)
-              }}
-              onMessage={(message) => {
-                if (message.type === 'send') draft(file, message.text);
-                else if (message.type === 'comments') one.saveComments(message.json);
-                else if (message.type === 'download') void one.downloadBeside(message.path);
-              }}
-            />
-          {:else}
-            {#key one}<PreviewView host={one.host} />{/key}
-          {/if}
+          {#key one}<PreviewView host={one.host} />{/key}
         </div>
       {/if}
     {/each}

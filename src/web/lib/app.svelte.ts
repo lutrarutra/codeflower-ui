@@ -14,7 +14,6 @@ import { SignIn } from './signIn.svelte.ts';
 import { TerminalViews } from './terminalViews.ts';
 import { Attention } from './attention.svelte.ts';
 import { Focus } from './focus.svelte.ts';
-import { INTERACTIVE } from './previews.svelte.ts';
 import { Workbench, browserKeyOf, browserTab, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
@@ -170,7 +169,6 @@ class AppState {
     agent: (id) => this.agents.get(id),
     visible: (id, tab) => this.shows(tabOf(id, tab)),
     open: (id, tab) => this.workbench.openFile(id, tab),
-    remove: (id, tab) => this.workbench.remove(tabOf(id, tab)),
     showChat: (worker, session) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker, session }),
     // The app names the allowlist of a sandbox it isolated.
     isolated: (id) => Boolean(this.worker(id)?.allowlist)
@@ -398,7 +396,7 @@ class AppState {
     if (this.route.view === 'focus') {
       const chat = this.focus.selected;
       const file = this.focus.shownTab();
-      return (!!chat && tab === tabOf(chat.workerId, chatTab(chat.key))) || (!!file && (tab === file || tab === file + INTERACTIVE));
+      return (!!chat && tab === tabOf(chat.workerId, chatTab(chat.key))) || (!!file && tab === file);
     }
     return this.route.view === 'chat' && this.workbench.layout.visible(tab);
   }

@@ -15,11 +15,8 @@
   import { favoriteModels, setFavoriteModel } from './lib/favoriteModels.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
-  import { INTERACTIVE } from './lib/previews.svelte.ts';
   import { browserKeyOf, chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
   import { commandTitle } from '../protocol/commands.ts';
-  import ReportFrame from './ReportFrame.svelte';
-  import { displayPath } from './lib/report.ts';
   import WorkerOverview from './WorkerOverview.svelte';
   import { workerTitle } from './lib/format.ts';
 
@@ -170,10 +167,9 @@
       };
     }
     const preview = app.previews.find(workerId, local);
-    const interactive = local.endsWith(INTERACTIVE);
     return {
-      icon: interactive ? 'play' : preview ? kindIcon[fileKind(preview.file.mimeType)] : 'file',
-      label: `${preview?.title ?? local}${interactive ? ' (interactive)' : preview?.dirty ? ' ●' : ''}`,
+      icon: preview ? kindIcon[fileKind(preview.file.mimeType)] : 'file',
+      label: `${preview?.title ?? local}${preview?.dirty ? ' ●' : ''}`,
       title: named(workerId, preview?.file.path ?? local)
     };
   }
@@ -325,22 +321,7 @@
     {/await}
   {:else}
     {@const preview = app.previews.find(workerId, local)}
-    {#if preview && local.endsWith(INTERACTIVE)}
-      <ReportFrame
-        html={preview.html}
-        title="{preview.title} (interactive)"
-        figures={{
-          path: displayPath(preview.file.path),
-          blocked: preview.feedbackBlocked,
-          send: (text, annotations, figure) => void preview.sendFeedback(text, annotations, figure)
-        }}
-        onMessage={(message) => {
-          if (message.type === 'send') preview.draft(message.text);
-          else if (message.type === 'comments') preview.saveComments(message.json);
-          else if (message.type === 'download') void preview.downloadBeside(message.path);
-        }}
-      />
-    {:else if preview}
+    {#if preview}
       <PreviewView host={preview.host} />
     {/if}
   {/if}
