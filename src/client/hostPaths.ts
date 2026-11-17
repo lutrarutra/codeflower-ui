@@ -7,8 +7,8 @@ import type { WorkerStatus } from './codeflower.ts';
 const STATE = '/codeflower-state';
 
 // With --env-dir these come from another folder, which the status does not
-// report; env/exports is the project's own again.
-const ELSEWHERE = [`${STATE}/env`, `${STATE}/cache`];
+// report (EnvPaths in codeflower-app); env/exports is the project's own again.
+const ELSEWHERE = ['env', 'cache', 'browser', 'thumbnails', 'home/.cache'].map((name) => `${STATE}/${name}`);
 const OWN = `${STATE}/env/exports`;
 
 const within = (path: string, root: string) => path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`);

@@ -32,6 +32,10 @@ test('a path in no folder from the host has no host path', () => {
 test('the environment and caches may be elsewhere, except the exports', () => {
   assert.equal(hostPath(status, '/codeflower-state/env/bin/python'), null);
   assert.equal(hostPath(status, '/codeflower-state/cache/uv'), null);
+  assert.equal(hostPath(status, '/codeflower-state/browser/bundles'), null);
+  assert.equal(hostPath(status, '/codeflower-state/thumbnails/a.webp'), null);
+  assert.equal(hostPath(status, '/codeflower-state/home/.cache/huggingface'), null);
+  assert.equal(hostPath(status, '/codeflower-state/home/.gitconfig'), '/Users/ana/codeflower/projects/p/home/.gitconfig');
   assert.equal(hostPath(status, '/codeflower-state/env/exports/r.yaml'), '/Users/ana/codeflower/projects/p/env/exports/r.yaml');
   assert.equal(hostPath(status, '/codeflower-state/environment'), '/Users/ana/codeflower/projects/p/environment');
 });
