@@ -276,3 +276,69 @@ test('lists the files shown to the user once each, the latest first', () => {
   );
   assert.deepEqual(shownFiles([]), []);
 });
+
+const stamps = (items: ChatItem[]) =>
+  items.flatMap((item) => ((item.kind === 'assistant' || item.kind === 'stop') && item.stamp ? [[describe([item])[0], item.stamp]] : []));
+const end = (seconds: number, stopReason = 'end_turn'): TranscriptEntry => ({ t: at(seconds), kind: 'turn_end', stopReason: stopReason as 'end_turn' });
+const said = (text: string, seconds: number, messageId?: string): TranscriptEntry => ({ ...chunk(text, messageId), t: at(seconds) });
+
+test("stamps the turn's last message with when it ended and how long it ran", () => {
+  const items = buildItems([
+    prompt('Cluster the data', 10),
+    said('Reading it first.', 11, 'm1'),
+    tool('a', 'read data.csv'),
+    said('Found 3 clusters.', 70, 'm2'),
+    end(75)
+  ]);
+  assert.deepEqual(stamps(items), [['Found 3 clusters.', { at: 75_000, took: 65_000 }]]);
+  assert.equal(items.find((item) => item.kind === 'assistant')?.at, 11_000);
+});
+
+test('a message sent while the agent worked joins its turn, which both prompts end with', () => {
+  const items = buildItems([
+    prompt('Refactor the parser', 0),
+    tool('a', 'edit parser.ts'),
+    prompt('also keep the old API', 180),
+    said('Done, the old API stays.', 290),
+    end(300),
+    prompt('Thanks', 400),
+    said('You are welcome.', 401),
+    end(402)
+  ]);
+  assert.deepEqual(
+    items.flatMap((item) => (item.kind === 'user' ? [[item.text, item.started, item.ended]] : [])),
+    [
+      ['Refactor the parser', 0, 300_000],
+      ['also keep the old API', 180_000, 300_000],
+      ['Thanks', 400_000, 402_000]
+    ]
+  );
+  assert.deepEqual(stamps(items), [
+    ['Done, the old API stays.', { at: 300_000, took: 300_000 }],
+    ['You are welcome.', { at: 402_000, took: 2_000 }]
+  ]);
+});
+
+test('a stopped turn stamps its stop, and a turn with no message stamps nothing', () => {
+  const stopped = buildItems([prompt('Run it', 0), tool('a', 'sleep 99'), end(9, 'cancelled')]);
+  assert.deepEqual(stamps(stopped), [['stop', { at: 9_000, took: 9_000 }]]);
+  assert.deepEqual(stamps(buildItems([prompt('Run it', 0), tool('a', 'sleep 1'), end(2)])), []);
+});
+
+test("work the agent did on its own, and a page that starts mid-turn, stamp no duration", () => {
+  const items = buildItems([
+    said('Halfway there.', 5),
+    end(6),
+    said('The subagents finished.', 50),
+    end(51)
+  ]);
+  assert.deepEqual(stamps(items), [
+    ['Halfway there.', { at: 6_000, took: null }],
+    ['The subagents finished.', { at: 51_000, took: null }]
+  ]);
+});
+
+test('the stamp stays on the copy of a message sent twice that shows', () => {
+  const items = buildItems([prompt('/context', 0), said('Some long output of the context command here', 1, 'a'), said('Some long output of the context command here', 1, 'b'), end(2)]);
+  assert.deepEqual(stamps(items), [['Some long output of the context command here', { at: 2_000, took: 2_000 }]]);
+});

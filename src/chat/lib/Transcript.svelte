@@ -8,7 +8,7 @@
   import Elapsed from './Elapsed.svelte';
   import type { SubagentFeatures, SubagentSummary } from '../../protocol/subagents.ts';
   import SubagentCard from './SubagentCard.svelte';
-  import { duration } from './time.ts';
+  import { clock, day, duration, fullTime, sameDay } from './time.ts';
   import Skeleton from './Skeleton.svelte';
   import Thumbnail from './Thumbnail.svelte';
   import { isImage } from './files.ts';
@@ -53,6 +53,17 @@
   const summaries = $derived(new Map(subagents.map((subagent) => [subagent.sessionId, subagent])));
   const items = $derived(buildItems(entries, start));
   const turns = $derived(fold ? foldTurns(items) : []);
+  // A line with the day above the first prompt of each day; none above a chat that began today.
+  const days = $derived.by(() => {
+    const labels = new Map<string, string>();
+    let previous: number = Date.now();
+    for (const item of items) {
+      if ((item.kind !== 'user' && item.kind !== 'action') || item.started === null) continue;
+      if (!sameDay(item.started, previous)) labels.set(item.id, day(item.started));
+      previous = item.started;
+    }
+    return labels;
+  });
   let container: HTMLElement | undefined = $state();
 
   // Follow the output while the user is at the bottom: whatever makes the
@@ -189,25 +200,49 @@
   };
 </script>
 
+<!-- A muted time: when the user sent a prompt, or when the agent's turn ended and how long it ran. -->
+{#snippet stamp(at: number, took: number | null = null)}
+  {@const ran = took !== null && took >= 1000 ? duration(took) : null}
+  <span
+    class="px-1 text-[0.72em] text-muted tabular-nums opacity-70 select-none"
+    title={ran ? `Ended ${fullTime(at)}, after ${ran}` : fullTime(at)}
+  >
+    {clock(at)}{ran ? ` · ${ran}` : ''}
+  </span>
+{/snippet}
+
 {#snippet row(item: ChatItem, previous: ChatItem | undefined, open = false)}
-  {#if item.kind === 'user'}
-    <div
-      class="bubble-user wrap-anywhere max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
-    >
-      {item.text}
+  {#if (item.kind === 'user' || item.kind === 'action') && days.has(item.id)}
+    <div class="flex items-center gap-3 py-1 text-[0.72em] text-muted opacity-70 select-none" role="separator">
+      <span class="h-px flex-1 bg-soft-line"></span>{days.get(item.id)}<span class="h-px flex-1 bg-soft-line"></span>
     </div>
-  {:else if item.kind === 'action'}
-    <details
-      class="bubble-user group wrap-anywhere max-w-[85%] self-end max-[640px]:max-w-[92%] rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
-    >
-      <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
-        <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
-        {item.title}
-      </summary>
-      <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
-    </details>
+  {/if}
+  {#if item.kind === 'user' || item.kind === 'action'}
+    <div class="flex max-w-[85%] flex-col items-end gap-0.5 self-end max-[640px]:max-w-[92%]">
+      {#if item.kind === 'user'}
+        <div
+          class="bubble-user wrap-anywhere max-w-full rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 whitespace-pre-wrap text-on-accent shadow-(--cf-elevation)"
+        >
+          {item.text}
+        </div>
+      {:else}
+        <details
+          class="bubble-user group wrap-anywhere max-w-full rounded-[18px] rounded-br-md bg-indigo px-3.5 py-2 text-on-accent shadow-(--cf-elevation)"
+        >
+          <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none">
+            <span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>
+            {item.title}
+          </summary>
+          <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
+        </details>
+      {/if}
+      {#if item.started !== null}{@render stamp(item.started)}{/if}
+    </div>
   {:else if item.kind === 'assistant'}
-    <div class="max-w-[95%]"><Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} /></div>
+    <div class="max-w-[95%]">
+      <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />
+      {#if item.stamp}<div class="-mt-1">{@render stamp(item.stamp.at, item.stamp.took)}</div>{/if}
+    </div>
   {:else if item.kind === 'thought'}
     <details class="group self-start text-muted">
       <summary
@@ -398,9 +433,12 @@
       <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />
     </div>
   {:else if item.kind === 'stop'}
-    <div class="flex items-center gap-1.5 self-start rounded-full bg-pink-soft px-2.5 py-0.5 text-[0.85em]">
-      <span class="codicon codicon-debug-stop text-pink"></span>
-      Turn ended: {item.reason}
+    <div class="flex items-center gap-1.5 self-start">
+      <div class="flex items-center gap-1.5 rounded-full bg-pink-soft px-2.5 py-0.5 text-[0.85em]">
+        <span class="codicon codicon-debug-stop text-pink"></span>
+        Turn ended: {item.reason}
+      </div>
+      {#if item.stamp}{@render stamp(item.stamp.at, item.stamp.took)}{/if}
     </div>
   {/if}
 {/snippet}
@@ -446,9 +484,6 @@
       {@const last = index === turns.length - 1}
       <!-- The turn runs: what it found is not known yet. -->
       {@const running = busy && last && (turn.prompt?.ended ?? null) === null}
-      {@const took = turn.prompt?.started != null && turn.prompt.ended != null ? turn.prompt.ended - turn.prompt.started : null}
-      <!-- The time the turn took only labels its steps when they fold into one row. -->
-      {@const single = turn.parts.filter((part) => part.kind === 'steps').length === 1}
       {#if turn.prompt}{@render row(turn.prompt, undefined)}{/if}
       {#each turn.parts as part (part.kind === 'item' ? part.item.id : `steps-${part.id}`)}
         {#if part.kind === 'item'}
@@ -461,7 +496,7 @@
               class="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-soft-line px-2.5 py-0.5 text-[0.85em] select-none hover:text-ink"
             >
               <span class="codicon codicon-checklist"></span>
-              {single && took !== null && took >= 1000 ? `Worked ${duration(took)} · ` : ''}{part.steps.length}
+              {part.steps.length}
               {part.steps.length === 1 ? 'step' : 'steps'}
               <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
             </summary>

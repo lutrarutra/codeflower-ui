@@ -17,10 +17,20 @@ interface TurnTimes {
   ended: number | null;
 }
 
+/**
+ * When the agent's turn ended and how long it ran (ms), on the turn's last
+ * message: the one time the chat shows for the agent. `took` is null when the
+ * turn's prompt is not known, e.g. for work the agent did on its own.
+ */
+export interface TurnStamp {
+  at: number;
+  took: number | null;
+}
+
 export type ChatItem =
   | ({ kind: 'user'; id: string; text: string } & TurnTimes)
   | ({ kind: 'action'; id: string; title: string; text: string } & TurnTimes)
-  | { kind: 'assistant'; id: string; text: string; messageId?: string | null }
+  | { kind: 'assistant'; id: string; text: string; messageId?: string | null; at: number | null; stamp?: TurnStamp }
   | { kind: 'thought'; id: string; text: string }
   | {
       kind: 'tool';
@@ -42,7 +52,7 @@ export type ChatItem =
     }
   | { kind: 'plan'; id: string; entries: PlanEntry[] }
   | { kind: 'permission'; id: string; title: string; outcome: string | null; options?: PermissionOption[] }
-  | { kind: 'stop'; id: string; reason: string }
+  | { kind: 'stop'; id: string; reason: string; stamp?: TurnStamp }
   | { kind: 'shell'; id: string; runId: string; command: string; output: string; exitCode: number | null; timedOut: boolean }
   | { kind: 'question'; id: string; message: string; fields: FormField[]; answers: QuestionAnswer[] | null; skipped: boolean }
   | { kind: 'show'; id: string; files: string[]; message: string | null }
@@ -227,7 +237,10 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   const tools = new Map<string, Extract<ChatItem, { kind: 'tool' }>>();
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
   let pendingQuestion: Extract<ChatItem, { kind: 'question' }> | undefined;
-  let prompted: Extract<ChatItem, { kind: 'user' | 'action' }> | undefined;
+  // The prompts of the agent's current turn: the first, and any sent while it worked.
+  let prompted: Extract<ChatItem, { kind: 'user' | 'action' }>[] = [];
+  // Where the current turn's items start.
+  let turnStart = 0;
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
   const subagents = new Map<string, Extract<ChatItem, { kind: 'subagent' }>>();
 
@@ -243,18 +256,29 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           const text = prompt.map(blockText).join('\n');
           const action = promptAction(prompt);
           const times = { started: time(entry.t), ended: null };
-          prompted = action ? { kind: 'action', id, title: action.title, text, ...times } : { kind: 'user', id, text, ...times };
-          items.push(prompted);
+          const item: (typeof prompted)[number] = action
+            ? { kind: 'action', id, title: action.title, text, ...times }
+            : { kind: 'user', id, text, ...times };
+          prompted.push(item);
+          items.push(item);
         }
         break;
-      case 'turn_end':
+      case 'turn_end': {
+        const ended = time(entry.t);
         // A call the agent never finished, e.g. one the user stopped, ran until the turn ended.
-        for (const tool of tools.values()) tool.ended ??= time(entry.t);
-        if (prompted) prompted.ended ??= time(entry.t);
+        for (const tool of tools.values()) tool.ended ??= ended;
+        // A message sent while the agent worked joined its turn, which ends for both.
+        for (const prompt of prompted) prompt.ended ??= ended;
         if (entry.stopReason && entry.stopReason !== 'end_turn') {
           items.push({ kind: 'stop', id, reason: entry.stopReason.replace(/_/g, ' ') });
         }
+        const first = prompted[0]?.started ?? null;
+        const stamped = items.slice(turnStart).findLast((item) => item.kind === 'assistant' || item.kind === 'stop');
+        if (stamped && ended !== null) stamped.stamp = { at: ended, took: first === null ? null : ended - first };
+        prompted = [];
+        turnStart = items.length;
         break;
+      }
       case 'permission': {
         pendingPermission = {
           kind: 'permission',
@@ -370,13 +394,13 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           case 'agent_message_chunk': {
             const text = blockText(update.content);
             const messageId = update.messageId;
-            // Chunks of one message join; a new message id starts a new one.
-            if (last?.kind === 'assistant' && (!messageId || !last.messageId || last.messageId === messageId)) {
+            // Chunks of one message join; a new message id, or a new turn, starts a new one.
+            if (last?.kind === 'assistant' && items.length > turnStart && (!messageId || !last.messageId || last.messageId === messageId)) {
               // Claude Code sends the output of some local commands (e.g. `/context`) twice.
               if (text.length > 40 && text.trim() === last.text.trim()) break;
               last.text += text;
               last.messageId ??= messageId;
-            } else items.push({ kind: 'assistant', id, text, messageId });
+            } else items.push({ kind: 'assistant', id, text, messageId, at: time(entry.t) });
             break;
           }
           case 'agent_thought_chunk': {
@@ -431,7 +455,10 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   // The same, when the two copies came with different message ids.
   return items.filter((item, index) => {
     const previous = items[index - 1];
-    return !(item.kind === 'assistant' && previous?.kind === 'assistant' && previous.text.trim() === item.text.trim());
+    const copy = item.kind === 'assistant' && previous?.kind === 'assistant' && previous.text.trim() === item.text.trim();
+    // The turn's stamp stays on the copy that shows.
+    if (copy && item.stamp) previous.stamp = item.stamp;
+    return !copy;
   });
 }
 
