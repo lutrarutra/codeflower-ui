@@ -94,3 +94,8 @@ export function looksLikeFile(text: string): boolean {
 export function isLocalHref(href: string): boolean {
   return !!href && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('#') && !href.startsWith('//');
 }
+
+/** Whether a path names an image the views can show as a thumbnail; microscopy TIFFs too, which the worker draws as browsers cannot. */
+export function isImage(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg|tiff?|btf|lsm|stk|svs|scn|qptiff)$/i.test(path);
+}

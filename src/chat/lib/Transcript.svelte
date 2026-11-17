@@ -11,14 +11,12 @@
   import { duration } from './time.ts';
   import Skeleton from './Skeleton.svelte';
   import Thumbnail from './Thumbnail.svelte';
+  import { isImage } from './files.ts';
   import OfflineState from './OfflineState.svelte';
   import Tulip from './Tulip.svelte';
 
   /** Tool output that is a unified diff, e.g. from `git diff`. */
   const looksLikeDiff = (text: string) => /^@@ .* @@/m.test(text) && /^[+-]/m.test(text);
-
-  // Microscopy TIFFs too: the worker draws them, as browsers cannot.
-  const isImage = (path: string) => /\.(png|jpe?g|gif|webp|svg|tiff?|btf|lsm|stk|svs|scn|qptiff)$/i.test(path);
 
   const host = chatHost();
   const send: ChatHost['send'] = (message) => host.send(message);

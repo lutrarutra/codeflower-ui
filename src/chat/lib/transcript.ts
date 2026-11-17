@@ -523,3 +523,26 @@ export function activity(work: ChatItem[]): string | null {
       return null;
   }
 }
+
+/** A file the agent showed the user, for the header's list. */
+export interface ShownFile {
+  path: string;
+  /** What the agent said when it last showed it. */
+  message: string | null;
+}
+
+/**
+ * The files the agent showed the user in these entries (in transcript order:
+ * the page's `context`, then the page), each once, the latest shown first.
+ */
+export function shownFiles(entries: readonly TranscriptEntry[]): ShownFile[] {
+  const files = new Map<string, ShownFile>();
+  for (const entry of entries) {
+    if (entry.kind !== 'show') continue;
+    for (const path of entry.files) {
+      files.delete(path);
+      files.set(path, { path, message: entry.message ?? null });
+    }
+  }
+  return [...files.values()].reverse();
+}

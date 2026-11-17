@@ -17,10 +17,11 @@
   import CommandMenu from './lib/CommandMenu.svelte';
   import AgentIcon from './lib/AgentIcon.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
+  import ShownFilesMenu from './lib/ShownFilesMenu.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
   import { provideSandboxFiles, SandboxFiles } from './lib/sandboxFiles.svelte.ts';
   import PermissionPrompt from './lib/PermissionPrompt.svelte';
-  import { withKnownToolCall } from './lib/transcript.ts';
+  import { shownFiles, withKnownToolCall } from './lib/transcript.ts';
   import QuestionCard from './lib/QuestionCard.svelte';
   import SettingsBar from './lib/SettingsBar.svelte';
   import Transcript from './lib/Transcript.svelte';
@@ -88,6 +89,8 @@
   let context = $state<TranscriptEntry[]>([]);
   /** The host sent the transcript; until then it is loading, not empty. */
   let transcriptLoaded = $state(false);
+  /** The files the agent showed the user in this chat, also before the loaded page. */
+  const shown = $derived(shownFiles([...context, ...entries]));
   let permission = $state<PendingPermission | null>(null);
   let question = $state<PendingQuestion | null>(null);
   let notice = $state<Extract<HostMessage, { type: 'notice' }> | null>(null);
@@ -325,6 +328,9 @@
 
   // "Claude Code · 127.0.0.1:7710": the agent, then where it runs.
   const [agentLabel, location] = $derived(chat.subtitle.split(' · '));
+  /** The header's icon buttons: the box of the Tools button, so their icons line up. */
+  const iconButton =
+    'grid size-7 shrink-0 place-items-center rounded-lg border-none bg-transparent text-muted hover:bg-sunken hover:text-ink disabled:opacity-50';
 </script>
 
 <main class="flex h-full flex-col">
@@ -362,11 +368,14 @@
         choose={(id) => send({ type: 'action', id })}
       />
     {/if}
+    {#if shown.length}
+      <ShownFilesMenu files={shown} open={(path) => send({ type: 'openFile', path })} />
+    {/if}
     {#if chat.browser?.running}
       <!-- The chat's browser (codeflower-browser): watch it, or take it over; marked when the agent needs the user in it. -->
       <button
         type="button"
-        class={chat.browser.needsYou ? 'chip shrink-0 border-orange! text-orange!' : 'link shrink-0'}
+        class={chat.browser.needsYou ? 'chip shrink-0 border-orange! text-orange!' : iconButton}
         title={chat.browser.needsYou ? 'The agent needs you in its browser' : "Show the chat's browser"}
         aria-label={chat.browser.needsYou ? 'The agent needs you in its browser' : "Show the chat's browser"}
         onclick={() => send({ type: 'openBrowser' })}
@@ -378,7 +387,7 @@
       <!-- A shell in the chat's sandbox, where the window keeps terminals (a panel at the foot). -->
       <button
         type="button"
-        class="link shrink-0"
+        class={iconButton}
         title="Open a terminal in the sandbox's workspace"
         aria-label="Open a terminal"
         disabled={!chat.live}
@@ -389,7 +398,7 @@
     {/if}
     <button
       type="button"
-      class="link shrink-0"
+      class={iconButton}
       title={folded ? 'Show every step' : 'Show only the messages'}
       aria-label={folded ? 'Show every step' : 'Show only the messages'}
       aria-pressed={!folded}
@@ -398,7 +407,7 @@
       <span class="codicon {folded ? 'codicon-eye-closed' : 'codicon-eye'}"></span>
     </button>
     {#if onFocus}
-      <button type="button" class="link shrink-0" title="Open in Focus" aria-label="Open in Focus" onclick={onFocus}>
+      <button type="button" class={iconButton} title="Open in Focus" aria-label="Open in Focus" onclick={onFocus}>
         <span class="codicon codicon-pulse"></span>
       </button>
     {/if}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionUpdate, ToolCallUpdate } from '@agentclientprotocol/sdk';
 import { STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
-import { activity, buildItems, foldTurns, withKnownToolCall, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
+import { activity, buildItems, foldTurns, shownFiles, withKnownToolCall, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
 const chunk = (text: string, messageId?: string) =>
@@ -257,4 +257,22 @@ test("shows a command's output streamed on its tool call (Codex's terminal _meta
   assert.equal(tool.exitCode, 2);
   // The terminal content is the output, not a detail of its own.
   assert.deepEqual(tool.details, []);
+});
+
+test('lists the files shown to the user once each, the latest first', () => {
+  const show = (files: string[], message?: string): TranscriptEntry => ({ t: '', kind: 'show', files, ...(message ? { message } : {}) });
+  assert.deepEqual(
+    shownFiles([
+      show(['a.png', 'b.csv'], 'First look'),
+      { t: '', kind: 'prompt', prompt: [{ type: 'text', text: 'again' }] },
+      show(['c.md']),
+      show(['a.png'], 'Redrawn')
+    ]),
+    [
+      { path: 'a.png', message: 'Redrawn' },
+      { path: 'c.md', message: null },
+      { path: 'b.csv', message: 'First look' }
+    ]
+  );
+  assert.deepEqual(shownFiles([]), []);
 });
