@@ -7,11 +7,11 @@
   import type { AuthMethod } from '@agentclientprotocol/sdk';
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
-  import { Terminal } from '@xterm/xterm';
   import '@xterm/xterm/css/xterm.css';
   import { onMount } from 'svelte';
   import { app } from './lib/app.svelte.ts';
   import { isWebLink, signInPage } from './lib/authMethods.ts';
+  import { createTerminal, drawWithWebgl } from './lib/xterm.ts';
   import type { AgentName } from '../protocol/messages.ts';
   import type { WebWorker } from './lib/worker.svelte.ts';
 
@@ -55,17 +55,13 @@
 
   onMount(() => {
     const connection = worker.connection;
-    const terminal = new Terminal({
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-      fontSize: 13,
-      cursorBlink: true,
-      theme: { background: '#1e1e1e', foreground: '#e4e4e4' }
-    });
+    const terminal = createTerminal({ cursorBlink: true });
     fit = new FitAddon();
     terminal.loadAddon(fit);
     // A link the terminal shows opens in a new tab when clicked.
     terminal.loadAddon(new WebLinksAddon((_event, uri) => isWebLink(uri) && window.open(uri, '_blank', 'noopener')));
     terminal.open(element);
+    drawWithWebgl(terminal);
     fit.fit();
     terminal.focus();
     terminal.write('Starting the sign-in inside the sandbox…\r\n');
@@ -167,4 +163,7 @@
   </button>
 {/if}
 
-<div bind:this={element} class="h-[22rem] w-full overflow-hidden rounded-lg bg-[#1e1e1e] p-2" class:hidden={!showTerminal}></div>
+<!-- The padding is around the element the terminal fits: fitted, it counts that element's whole height and width. -->
+<div class="h-[22rem] w-full rounded-lg bg-[#1e1e1e] p-2" class:hidden={!showTerminal}>
+  <div bind:this={element} class="h-full w-full overflow-hidden"></div>
+</div>

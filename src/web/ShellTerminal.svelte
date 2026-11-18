@@ -7,12 +7,13 @@
   // typed into it, and closing the tab only stops watching it.
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
-  import { Terminal } from '@xterm/xterm';
+  import type { Terminal } from '@xterm/xterm';
   import '@xterm/xterm/css/xterm.css';
   import { onMount, untrack } from 'svelte';
   import type { WorkerConnection } from '../client/workerConnection.ts';
   import { app } from './lib/app.svelte.ts';
   import { isWebLink } from './lib/authMethods.ts';
+  import { createTerminal, drawWithWebgl } from './lib/xterm.ts';
 
   let {
     workerId,
@@ -50,22 +51,21 @@
   });
 
   onMount(() => {
-    const shell = new Terminal({
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-      fontSize: 13,
+    const shell = createTerminal({
       cursorBlink: !command,
       // A command's output has bare line feeds; it reads nothing typed.
       convertEol: command,
       disableStdin: command,
       scrollback: command ? 10000 : 5000,
       // A command's tab has no cursor: nothing is typed there.
-      theme: { background: '#1e1e1e', foreground: '#e4e4e4', ...(command ? { cursor: '#1e1e1e', cursorAccent: '#1e1e1e' } : {}) }
+      theme: command ? { cursor: '#1e1e1e', cursorAccent: '#1e1e1e' } : {}
     });
     fit = new FitAddon();
     shell.loadAddon(fit);
     // A link the shell prints opens in a new tab when clicked.
     shell.loadAddon(new WebLinksAddon((_event, uri) => isWebLink(uri) && window.open(uri, '_blank', 'noopener')));
     shell.open(element);
+    drawWithWebgl(shell);
     fit.fit();
 
     const unregister = app.terminals.attach(terminalId, {
@@ -116,5 +116,8 @@
       {agent.state === 'connecting' ? 'Connecting to the sandbox…' : `Not connected to the sandbox: the ${what} runs on there.`}
     </p>
   {/if}
-  <div bind:this={element} class="min-h-0 flex-1 overflow-hidden p-2"></div>
+  <!-- The padding is around the element the terminal fits: fitted, it counts that element's whole height and width. -->
+  <div class="flex min-h-0 flex-1 flex-col p-2">
+    <div bind:this={element} class="min-h-0 flex-1 overflow-hidden"></div>
+  </div>
 </div>
