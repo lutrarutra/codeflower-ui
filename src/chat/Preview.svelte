@@ -460,7 +460,7 @@
           </p>
         {/if}
       {:else if kind === 'markdown' && text !== null}
-        <article class="card mx-auto max-w-3xl px-6 py-5">
+        <article class="card mx-auto max-w-5xl px-6 py-5">
           <Markdown {text} {asset} openFile={(path) => sendPreview({ type: 'openFile', path })} />
         </article>
       {:else if interactive}

@@ -403,26 +403,33 @@
         <span class="eyebrow mt-[1px] shrink-0 text-teal">Shown to you</span>
         {#if item.message}<span class="text-muted">· {item.message}</span>{/if}
       </div>
-      <div class="flex flex-wrap gap-2">
-        {#each item.files as path (path)}
-          {@const name = path.split('/').pop()}
-          {#if isImage(path)}
+      <!-- Images as equal tiles, as many to a row as fit; the other files as chips under them, each its own height. -->
+      {#if item.files.some(isImage)}
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-2">
+          {#each item.files.filter(isImage) as path (path)}
+            {@const name = path.split('/').pop()}
             <button
-              class="flex max-w-full flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
+              class="flex min-w-0 flex-col overflow-hidden rounded-lg border-[1.5px] border-soft-line bg-white p-0 text-left hover:border-indigo"
               title="Open {path}"
               onclick={() => send({ type: 'openFile', path })}
             >
-              <Thumbnail {path} key="{item.id}|{path}" height={192} alt={name ?? path} />
-              <span class="bg-card px-2 py-0.5 font-mono text-[0.75em] text-muted">{name}</span>
+              <Thumbnail {path} key="{item.id}|{path}" height={160} alt={name ?? path} />
+              <span class="truncate border-t-[1.5px] border-soft-line bg-card px-2 py-0.5 font-mono text-[0.75em] text-muted">{name}</span>
             </button>
-          {:else}
-            <button class="chip" title="Open {path}" onclick={() => send({ type: 'openFile', path })}>
-              <span class="codicon codicon-file"></span>
-              <span class="font-mono">{name}</span>
+          {/each}
+        </div>
+      {/if}
+      {#if !item.files.every(isImage)}
+        <div class="flex flex-wrap items-start gap-2">
+          {#each item.files.filter((path) => !isImage(path)) as path (path)}
+            {@const name = path.split('/').pop()}
+            <button class="chip max-w-full min-w-0" title="Open {path}" onclick={() => send({ type: 'openFile', path })}>
+              <span class="codicon codicon-file shrink-0"></span>
+              <span class="min-w-0 truncate font-mono">{name}</span>
             </button>
-          {/if}
-        {/each}
-      </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {:else if item.kind === 'subagent'}
     <SubagentCard {item} summary={summaries.get(item.sessionId)} features={subagentFeatures} />

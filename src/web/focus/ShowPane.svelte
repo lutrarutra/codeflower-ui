@@ -73,23 +73,26 @@
 </script>
 
 <section class="flex h-full min-h-0 flex-col" aria-label="Shown by the agent">
+  <!-- The arrows keep the two ends, wherever the buttons between them come and go, so they stay under the pointer. -->
   <header class="flex items-center gap-1.5 border-b-[1.5px] border-soft-line px-2 py-1.5">
-    <span class="codicon codicon-preview shrink-0 text-muted"></span>
     {#if files.length > 1}
       <button class="grid size-6 shrink-0 place-items-center rounded-md text-muted not-disabled:hover:bg-card not-disabled:hover:text-ink disabled:opacity-40" title="The file shown before" aria-label="The file shown before" disabled={index <= 0} onclick={() => move(-1)}>
         <span class="codicon codicon-chevron-left"></span>
       </button>
-      <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
-      <button class="grid size-6 shrink-0 place-items-center rounded-md text-muted not-disabled:hover:bg-card not-disabled:hover:text-ink disabled:opacity-40" title="The file shown after" aria-label="The file shown after" disabled={index < 0 || index >= files.length - 1} onclick={() => move(1)}>
-        <span class="codicon codicon-chevron-right"></span>
-      </button>
+    {/if}
+    <span class="codicon codicon-preview shrink-0 text-muted"></span>
+    <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
+    {#if files.length > 1}
       <span class="shrink-0 text-[0.8em] text-muted tabular-nums">{index + 1}/{files.length}</span>
-    {:else}
-      <span class="min-w-0 flex-1 truncate text-[0.9em] font-semibold" title={path ? displayPath(path) : undefined}>{path ? basename(path) : 'Shown'}</span>
     {/if}
     {#if onCollapse}
       <button class="grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-card hover:text-ink" title="Hide the pane" aria-label="Hide the pane" onclick={onCollapse}>
         <span class="codicon codicon-layout-sidebar-right-off"></span>
+      </button>
+    {/if}
+    {#if files.length > 1}
+      <button class="grid size-6 shrink-0 place-items-center rounded-md text-muted not-disabled:hover:bg-card not-disabled:hover:text-ink disabled:opacity-40" title="The file shown after" aria-label="The file shown after" disabled={index < 0 || index >= files.length - 1} onclick={() => move(1)}>
+        <span class="codicon codicon-chevron-right"></span>
       </button>
     {/if}
   </header>
