@@ -4,6 +4,7 @@ import test from 'node:test';
 import { agentPresentation, STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { sessionKey } from '../src/client/sessionKey.ts';
 import { TAKEN_OVER, WorkerConnection, mcpNotice, type WorkerHandlers } from '../src/client/workerConnection.ts';
+import type { ShowRequest } from '../src/client/codeflower.ts';
 import { FakeAgent, agentState, tick } from './fakeAgent.ts';
 
 function recorder() {
@@ -387,6 +388,41 @@ test('shows the prompts, answers and shell commands of other windows on a bridge
     entries.slice(-3).map(([, entry]) => entry.kind),
     ['shell', 'shell_output', 'shell_end']
   );
+});
+
+test('lists the files the worker noted in a chat, without recording them again', async () => {
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'claude', agentLabel: 'Claude Code', signedIn: true }),
+    initialize: () => ({ protocolVersion: 1, _meta: { 'codeflower/multiClient': true } }),
+    'session/new': () => ({ sessionId: 'one' }),
+    '_codeflower/sessions/record': () => ({})
+  });
+  const { entries, handlers } = recorder();
+  const shows: ShowRequest[] = [];
+  handlers.show = (request) => shows.push(request);
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const key = await connection.newSession('claude');
+  const records = () => agent.received.filter((message) => message.method === '_codeflower/sessions/record').length;
+
+  // Another window opened them: the chat here lists them.
+  agent.notify('_codeflower/shown', { key, sessionId: 'one', files: ['/workspace/a.png'], message: 'Look' });
+  // A chat this window does not have open is left alone.
+  agent.notify('_codeflower/shown', { key: 'claude-other', sessionId: 'other', files: ['/workspace/b.png'] });
+  await tick();
+  assert.deepEqual(entries.map(([at, entry]) => [at, entry.kind, (entry as { files?: string[] }).files]), [[key, 'show', ['/workspace/a.png']]]);
+
+  // The worker names the chat by key, also another agent's.
+  const file = { path: '/workspace/c.png', name: 'c.png', mimeType: 'image/png', size: 1, mtimeMs: 1 };
+  agent.notify('_codeflower/show', { files: [file], key: 'codex-two', noted: true });
+  await tick();
+  assert.equal(shows.at(-1)?.sessionKey, 'codex-two');
+
+  // Noted by the worker: listed here, not recorded again; older workers: recorded.
+  await connection.recordShow(key, ['/workspace/c.png'], undefined, true);
+  assert.equal(records(), 0);
+  assert.equal(entries.length, 2);
+  await connection.recordShow(key, ['/workspace/c.png']);
+  assert.equal(records(), 1);
 });
 
 test('echoes its own prompt itself on an older bridge', async () => {

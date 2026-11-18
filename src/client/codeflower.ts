@@ -339,8 +339,20 @@ export interface ShowRequest {
   message?: string;
   /** The chat the files belong to, e.g. the one asking to approve a plan; else the window picks one. */
   sessionId?: string;
+  /** The chat's key, also when it is another agent's than the connection's (newer bridges). */
+  key?: string;
+  /** The worker noted the files in the chat itself (newer bridges): the window does not record them. */
+  noted?: boolean;
   /** Its key, which `WorkerConnection` adds. */
   sessionKey?: string;
+}
+
+/** Files the agent showed in a chat open here, which another window opened (`_codeflower/shown`). */
+export interface ShownNotice {
+  key: string;
+  sessionId: string;
+  files: string[];
+  message?: string;
 }
 
 /**
@@ -389,6 +401,8 @@ export interface CodeflowerHandlers {
   shellEnded(run: { sessionId: string; runId: string; exitCode: number; timedOut: boolean }): void;
   /** The agent ran `codeflower-show`: the user should see these files. */
   show(request: ShowRequest): void;
+  /** Another window opened files the agent showed in a chat open here; the worker noted them in it. */
+  shown?(notice: ShownNotice): void;
   activity(activity: WorkerActivity): void;
   /** Token counts, cost, or the login's quota of `agent` changed. */
   usage(agent: AgentName, usage: WorkerUsage): void;
@@ -459,6 +473,7 @@ export class CodeflowerExtensions {
       handlers.shellEnded(params as { sessionId: string; runId: string; exitCode: number; timedOut: boolean })
     );
     rpc.on('_codeflower/show', (params) => handlers.show(params as ShowRequest));
+    rpc.on('_codeflower/shown', (params) => handlers.shown?.(params as ShownNotice));
     rpc.on('_codeflower/activity', (params) => handlers.activity(params as WorkerActivity));
     rpc.on('_codeflower/usage', (params) => {
       const { agent, ...usage } = params as ForAgent<WorkerUsage>;

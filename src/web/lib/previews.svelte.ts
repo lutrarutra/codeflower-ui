@@ -173,9 +173,11 @@ export class Preview {
   }
 
   /** Sends the user's feedback on the file (or one of its figures) to the chat it came from. */
-  sendFeedback(text: string, annotations?: unknown, figure?: unknown): 'sent' | 'queued' | undefined {
-    const chat = this.chatKey ? this.owner.page.agent(this.workerId)?.chats[this.chatKey] : undefined;
-    if (!chat) return undefined;
+  async sendFeedback(text: string, annotations?: unknown, figure?: unknown): Promise<'sent' | 'queued' | undefined> {
+    const agent = this.owner.page.agent(this.workerId);
+    if (!agent || !this.chatKey) return undefined;
+    // A chat the agent showed the file in, not open here (yet): open it.
+    const chat = agent.chats[this.chatKey] ?? (await agent.open(this.chatKey));
     return chat.send(
       feedbackText(displayPath(this.file.path), 'the code flower app', text, feedbackAnnotations(annotations), feedbackFigure(figure))
     );
@@ -218,7 +220,7 @@ export class Preview {
         });
         break;
       case 'feedback': {
-        const outcome = this.sendFeedback(message.text, message.annotations, message.figure);
+        const outcome = await this.sendFeedback(message.text, message.annotations, message.figure);
         if (outcome) this.post({ type: 'feedbackSent', queued: outcome === 'queued' });
         break;
       }
@@ -326,18 +328,20 @@ export class Previews {
 
   /** The agent ran `codeflower-show`, or asks to approve a plan in a chat. */
   show(worker: WebWorker, request: ShowRequest): void {
-    const chat = (request.sessionKey ? worker.chats[request.sessionKey] : undefined) ?? worker.chatFor();
-    if (chat)
+    // The chat the worker names, also one not open here; else one open here.
+    const chatKey = request.sessionKey ?? worker.chatFor()?.key;
+    if (chatKey)
       void worker.connection
         ?.recordShow(
-          chat.key,
+          chatKey,
           request.files.map((file) => file.path),
-          request.message
+          request.message,
+          request.noted === true
         )
         .catch(() => undefined);
     for (const file of request.files) {
       this.open(worker.id, file, {
-        chatKey: chat?.key,
+        chatKey,
         message: request.message ?? null,
         ...(request.title && request.files.length === 1 ? { title: request.title } : {})
       });

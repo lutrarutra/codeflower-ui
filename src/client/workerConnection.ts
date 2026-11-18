@@ -50,6 +50,7 @@ import {
   type FileTransfers,
   type SessionRecord,
   type ShowRequest,
+  type ShownNotice,
   type TranscriptPage,
   type UploadTarget,
   type UploadedFile,
@@ -231,7 +232,7 @@ export class WorkerConnection {
     this.handlers = handlers;
     this.client = client;
     // A chat's `!command` output goes to its agent's windows only.
-    const { shellOutput: _, shellStarted: __, shellEnded: ___, ...shared } = this.sharedHandlers();
+    const { shellOutput: _, shellStarted: __, shellEnded: ___, shown: ____, ...shared } = this.sharedHandlers();
     this.bridge = new CodeflowerExtensions(control, {
       ...shared,
       shellOutput: () => undefined,
@@ -311,7 +312,14 @@ export class WorkerConnection {
       },
       show: (request: ShowRequest) => {
         const current = link?.();
-        handlers.show(current && request.sessionId ? { ...request, sessionKey: sessionKey(current.agent, request.sessionId) } : request);
+        const key = request.key ?? (current && request.sessionId ? sessionKey(current.agent, request.sessionId) : undefined);
+        handlers.show(key ? { ...request, sessionKey: key } : request);
+      },
+      // The worker noted them in the chat; another window opened them.
+      shown: ({ key, files, message }: ShownNotice) => {
+        const current = link?.();
+        if (!current || typeof key !== 'string' || !Array.isArray(files) || !current.acp.isAttached(key)) return;
+        handlers.entry(key, { t: now(), kind: 'show', files, ...(message ? { message } : {}) });
       },
       terminalOutput: (terminalId: string, data: string, replayed?: boolean) => handlers.terminalOutput(terminalId, data, replayed),
       terminalExit: (terminalId: string, exitCode: number) => handlers.terminalExit(terminalId, exitCode)
@@ -504,14 +512,17 @@ export class WorkerConnection {
     return this.bridge.saveReportComments(path, comments);
   }
 
-  /** Notes in the session's history which files the agent showed the user. */
-  async recordShow(key: string, files: string[], message?: string): Promise<void> {
+  /**
+   * Notes in the session's history which files the agent showed the user. `noted`: the worker did already, so the
+   * chat here only shows them.
+   */
+  async recordShow(key: string, files: string[], message?: string, noted = false): Promise<void> {
     const link = this.links.get(agentOfKey(key));
     const sessionId = link?.acp.sessionId(key);
     if (!link || !sessionId) return;
     const entry = { kind: 'show' as const, files, ...(message ? { message } : {}) };
     this.handlers.entry(key, { t: now(), ...entry });
-    await link.bridge.record(sessionId, entry);
+    if (!noted) await link.bridge.record(sessionId, entry);
   }
 
   listDirectory(path: string): Promise<DirectoryListing> {
