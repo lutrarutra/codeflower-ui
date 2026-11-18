@@ -67,6 +67,8 @@ export const draggedTab = () => (dragging.workerId !== null && dragging.tab !== 
 
 export class Workbench {
   readonly layout: Layout;
+  /** The grid shows only the focused group (a narrow window), set by its view. */
+  narrow = false;
   /** Asked before the user closes a tab, e.g. one with edits that are not saved. */
   mayClose: (tab: string) => boolean = () => true;
   /** Tabs the user closed: what they show is let go, e.g. a preview. */
@@ -98,12 +100,16 @@ export class Workbench {
 
   /**
    * Opens a sandbox's file tab without taking the focus from the chat: next to
-   * the files already open, else beside the chat in front.
+   * the files already open, else beside the chat in front. `reveal`: the user
+   * asked to see it; a narrow grid shows only the focused group, so there its
+   * group takes the focus.
    */
-  openFile(workerId: string, local: string): void {
+  openFile(workerId: string, local: string, reveal = false): void {
     const tab = tabOf(workerId, local);
+    const focus = reveal && this.narrow;
     if (this.layout.has(tab)) {
-      this.layout.activate(tab, false);
+      this.layout.activate(tab, focus);
+      if (focus) this.focusChanged();
       return;
     }
     // Not into the terminals' panel: files go with files, else beside the chat in front.
@@ -115,7 +121,8 @@ export class Workbench {
       : focused.active && isPage(focused.active)
         ? { group: focused.id, side: 'right' }
         : { group: focused.id };
-    this.layout.place(tab, placement, false);
+    this.layout.place(tab, placement, focus);
+    if (focus) this.focusChanged();
   }
 
   /**

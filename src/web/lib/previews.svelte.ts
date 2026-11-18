@@ -26,8 +26,12 @@ export interface PreviewOwner {
   agent(workerId: string): WebWorker | undefined;
   /** The tab is in front of its group, on the page in front. */
   visible(workerId: string, tab: string): boolean;
-  /** Opens a file's tab, or brings it to the front. */
-  open(workerId: string, tab: string): void;
+  /**
+   * Opens a file's tab, or brings it to the front. `reveal`: the user asked to
+   * see it (a click), so it comes in front where they look, e.g. in a narrow
+   * window or in Focus's pane beside its chat (`chatKey`).
+   */
+  open(workerId: string, tab: string, options?: { reveal?: boolean; chatKey?: string }): void;
   showChat(workerId: string, key: string): void;
   /**
    * The sandbox's network is isolated: its reports' scripts do not run unless
@@ -322,8 +326,8 @@ export class Previews {
     return this.page.visible(preview.workerId, preview.id);
   }
 
-  activate(workerId: string, tab: string): void {
-    this.page.open(workerId, tab);
+  activate(workerId: string, tab: string, options?: { reveal?: boolean; chatKey?: string }): void {
+    this.page.open(workerId, tab, options);
   }
 
   /** The agent ran `codeflower-show`, or asks to approve a plan in a chat. */
@@ -348,24 +352,28 @@ export class Previews {
     }
   }
 
-  /** A path clicked in a chat or a report. */
-  async openPath(worker: WebWorker, path: string, chatKey: string | undefined): Promise<void> {
+  /** A path clicked in a chat or a report; `reveal: false` opens it without bringing it where the user looks. */
+  async openPath(worker: WebWorker, path: string, chatKey: string | undefined, { reveal = true } = {}): Promise<void> {
     try {
       if (!worker.connection) throw new Error('the sandbox is not connected');
-      this.open(worker.id, await worker.connection.statFile(path), { chatKey });
+      this.open(worker.id, await worker.connection.statFile(path), { chatKey, reveal });
     } catch (error) {
       const chat = chatKey ? worker.chats[chatKey] : undefined;
       chat?.notify('error', `Cannot show ${displayPath(path)}: ${describe(error)}`);
     }
   }
 
-  private open(workerId: string, file: SandboxFile, options: { chatKey?: string; message?: string | null; title?: string }): void {
+  private open(
+    workerId: string,
+    file: SandboxFile,
+    { reveal = false, ...options }: { chatKey?: string; message?: string | null; title?: string; reveal?: boolean }
+  ): void {
     let preview = this.find(workerId, file.path);
     if (!preview) {
       preview = new Preview(this, workerId, file);
       this.items.push(preview);
     }
-    this.activate(workerId, preview.id);
+    this.activate(workerId, preview.id, { reveal, chatKey: options.chatKey });
     preview.update(options);
   }
 

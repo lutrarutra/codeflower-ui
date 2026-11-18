@@ -40,6 +40,9 @@
   let resizing = $state(false);
   let target = $state<Placement | null>(null);
   const narrow = $derived(width > 0 && width < 640);
+  $effect(() => {
+    workbench.narrow = narrow;
+  });
   const dragged = $derived(dragging.tab !== null);
 
   let frame = 0;

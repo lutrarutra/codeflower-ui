@@ -168,7 +168,11 @@ class AppState {
   readonly previews = new Previews({
     agent: (id) => this.agents.get(id),
     visible: (id, tab) => this.shows(tabOf(id, tab)),
-    open: (id, tab) => this.workbench.openFile(id, tab),
+    open: (id, tab, { reveal = false, chatKey } = {}) => {
+      this.workbench.openFile(id, tab, reveal);
+      // Focus's pane beside the chat shows it too.
+      if (reveal && chatKey) this.focus.showing[tabOf(id, chatTab(chatKey))] = tab;
+    },
     showChat: (worker, session) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker, session }),
     // The app names the allowlist of a sandbox it isolated.
     isolated: (id) => Boolean(this.worker(id)?.allowlist)

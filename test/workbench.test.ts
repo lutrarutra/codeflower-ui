@@ -24,6 +24,29 @@ test('holds chats from several sandboxes, and closes one sandbox\'s tabs', () =>
   assert.deepEqual(focused.at(-1), { workerId: 'one', key: 'x' });
 });
 
+test('opens a clicked file beside the chat, and in a narrow grid, which shows only the focused group, in front', () => {
+  const workbench = new Workbench();
+  workbench.openChat('one', 'x');
+  const chat = tabOf('one', chatTab('x'));
+  const plot = tabOf('one', '/work/plot.png');
+  const shown = () => workbench.layout.group(workbench.layout.focused)!.active;
+
+  // Wide: the file opens beside the chat, which keeps the focus, clicked or not.
+  workbench.openFile('one', '/work/plot.png', true);
+  assert.equal(shown(), chat);
+  assert.ok(workbench.layout.visible(plot));
+
+  // Narrow: shown by the agent, it waits behind the chat; clicked, it comes in front, also once open.
+  workbench.narrow = true;
+  workbench.openFile('one', '/work/table.csv');
+  assert.equal(shown(), chat);
+  workbench.openFile('one', '/work/table.csv', true);
+  assert.equal(shown(), tabOf('one', '/work/table.csv'));
+  workbench.activate(chat);
+  workbench.openFile('one', '/work/plot.png', true);
+  assert.equal(shown(), plot);
+});
+
 test('opens a shell in a panel across the foot of the grid, and remembers it with the chats but not the files', () => {
   const stored = new Map<string, string>();
   Reflect.set(globalThis, 'localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });

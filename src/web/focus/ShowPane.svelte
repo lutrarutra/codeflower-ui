@@ -58,7 +58,7 @@
     if (!path || preview || !agent.connected || tried.has(path)) return;
     const file = path;
     tried.add(file);
-    untrack(() => void app.previews.openPath(agent, file, chatKey));
+    untrack(() => void app.previews.openPath(agent, file, chatKey, { reveal: false }));
   });
 
   function pick(file: string): void {
