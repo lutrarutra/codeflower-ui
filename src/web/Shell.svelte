@@ -208,6 +208,18 @@
       {#if app.quit?.quitting}
         <QuittingBanner />
       {/if}
+      {#if app.update}
+        {@const update = app.update}
+        <!-- The app was restarted as another release: its page is newer than this one. -->
+        <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-indigo bg-indigo-soft px-4 py-2.5" role="status">
+          <span class="min-w-0 flex-1">
+            code flower was updated{app.several ? ` on ${app.head.name}` : ''}{update.from ? `, ${update.from} → ${update.to}` : ` to ${update.to}`}.
+            Reload for its new page; your sandboxes and chats stay as they are.
+          </span>
+          <button class="pill pill-small pill-primary" onclick={() => location.reload()}>Reload</button>
+          <button class="pill pill-small" onclick={() => app.dismissUpdate()}>Later</button>
+        </section>
+      {/if}
       {#if app.pageCodeLost}
         {@const others = app.machines.filter((machine) => machine !== app.head && machine.reach === 'reachable')}
         <section class="flex flex-wrap items-center gap-3 border-b-[1.5px] border-orange bg-yellow-soft px-4 py-3" role="status">

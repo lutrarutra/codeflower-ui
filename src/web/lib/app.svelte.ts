@@ -34,6 +34,8 @@ const WORKERS_MS = 1500;
 const HIDDEN_MS = 10_000;
 /** How often the page looks for paired computers, and asks new ones what they are. */
 const DISCOVER_MS = 30_000;
+/** How often the page asks whether its app was restarted as another release. */
+const UPDATE_MS = 30_000;
 /** The page moved to the newest computer's page once in this tab. */
 const HEAD_MOVED = 'cf_head_moved';
 /** How long a file link waits for the page to list its sandbox, and how often it looks. */
@@ -150,6 +152,14 @@ class AppState {
   };
   /** Part of the page's code could not load from the head (it stopped answering). */
   pageCodeLost = $state(false);
+  /** The release of the app the page came from, as the page loaded. */
+  private pageAppVersion = '';
+  /** The app the page came from now runs another release (`codeflower client restart`, an update): reloading gets its page. */
+  updatedTo = $state<string | null>(null);
+  /** The update the user put off with Later: the banner stays away until another one. */
+  private updateDismissed = $state<string | null>(null);
+  /** The head did not answer its last list: the app may be restarting. */
+  private headFailing = false;
   /** The page knows which computers it shows: until then it lets no sandbox go. */
   private discovered = head === undefined;
   /** The user did something on the page: it no longer moves to another computer's page. */
@@ -485,7 +495,13 @@ class AppState {
       if (!answered) {
         // The client stopped while it was quitting.
         if (this.quitting) this.stopped = true;
+        this.headFailing = true;
         return;
+      }
+      // Back after a gap: maybe a restart from a newer codeflower.
+      if (this.headFailing) {
+        this.headFailing = false;
+        void this.checkUpdated();
       }
       // A sandbox's own page opens on it.
       const only = this.workers[0];
@@ -564,6 +580,25 @@ class AppState {
     location.replace(`/m/${target}/${routeHash(this.route)}`);
   }
 
+  /** The update to show: the app runs another release than the page came with, and the user did not put it off. */
+  get update(): { from: string; to: string } | null {
+    return this.updatedTo && this.updatedTo !== this.updateDismissed ? { from: this.pageAppVersion, to: this.updatedTo } : null;
+  }
+
+  dismissUpdate(): void {
+    this.updateDismissed = this.updatedTo;
+  }
+
+  /** Asks the head's app for its release (apps before v0.41.0 do not say, and nothing shows). */
+  private async checkUpdated(): Promise<void> {
+    if (!this.pageAppVersion || this.single) return;
+    const version = await this.head.api<{ version?: string }>('/api/version').then(
+      (answer) => answer.version ?? '',
+      () => ''
+    );
+    if (version) this.updatedTo = version === this.pageAppVersion ? null : version;
+  }
+
   /** The page is served by one sandbox itself, and shows only it. */
   get single(): boolean {
     return this.system?.capabilities.single ?? false;
@@ -581,6 +616,7 @@ class AppState {
   start(): void {
     // The system first: it says whether this is a sandbox's own page.
     void this.head.loadSystem().then(async () => {
+      this.pageAppVersion = this.head.system?.version ?? '';
       await this.discover().catch(() => undefined);
       this.moveToNewestPage();
       await this.refreshWorkers();
@@ -590,6 +626,12 @@ class AppState {
       void this.refreshWorkers();
     }, WORKERS_MS);
     if (head !== undefined) setInterval(() => void this.discover().catch(() => undefined), DISCOVER_MS);
+    setInterval(() => {
+      if (!document.hidden) void this.checkUpdated();
+    }, UPDATE_MS);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void this.checkUpdated();
+    });
   }
 }
 
