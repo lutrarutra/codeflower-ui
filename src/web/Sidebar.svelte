@@ -50,12 +50,19 @@
   let openingShell = $state(false);
   let shellError = $state('');
   const shells = $derived(browsed && browsable(browsed) ? app.agent(browsed.id).shells : []);
+  // The Server view keeps the sandbox here: what opens a tab shows the chats' grid first.
+  function inGrid(open: () => void): void {
+    if (app.route.view !== 'chat') app.go({ view: 'chat' });
+    open();
+    onNavigate();
+  }
+
   async function openShell(worker: Worker): Promise<void> {
     openingShell = true;
     shellError = '';
     try {
       await app.openShell(worker.id);
-      onNavigate();
+      inGrid(() => {});
     } catch (error) {
       shellError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -142,7 +149,7 @@
         <button
           class="pill pill-small"
           title="The sandbox: its chats, the agent's sign-in, how to reach it from VS Code, and its name and address"
-          onclick={() => (app.workbench.openOverview(browsed.id), onNavigate())}><span class="codicon codicon-settings-gear"></span>Manage</button
+          onclick={() => inGrid(() => app.workbench.openOverview(browsed.id))}><span class="codicon codicon-settings-gear"></span>Manage</button
         >
         {#if browsable(browsed) && !app.elsewhere(browsed)}
           <button
@@ -156,7 +163,7 @@
           <button
             class="chip"
             title="A shell running in the sandbox since {new Date(shell.startedAt).toLocaleString()}"
-            onclick={() => (app.workbench.openTerminal(browsed.id, shell.terminalId), onNavigate())}
+            onclick={() => inGrid(() => app.workbench.openTerminal(browsed.id, shell.terminalId))}
             ><span class="codicon codicon-terminal"></span>{index + 1}</button
           >
         {/each}
