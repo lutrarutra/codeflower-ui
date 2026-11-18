@@ -39,6 +39,8 @@ export interface Settings {
 
 export interface SystemInfo {
   version: string;
+  /** The computer's name (missing from older apps and from a sandbox's own page). */
+  hostname?: string;
   /** The version of the API pages use (see machineIds.ts); missing from older apps. */
   pageApi?: number;
   system: string;
@@ -113,6 +115,22 @@ export interface WorkerActivity {
   waiting: number;
   chats: ChatActivity[];
   agents?: AgentActivity[];
+  /** The versions of the sandbox's parts; missing from older sandboxes. */
+  versions?: SandboxVersions;
+}
+
+/** What a sandbox's bridge says of its parts' versions; each missing where nothing tells. */
+export interface SandboxVersions {
+  /** The app that started the sandbox, maybe on another computer (a batch job's). */
+  app?: string;
+  /** The image's release, and what it was started as (a name:tag, or an Apptainer file). */
+  image?: string;
+  imageRef?: string;
+  /** The page the image serves with --server (codeflower-ui). */
+  page?: string;
+  storyteller?: string;
+  /** The agents' own releases, by agent (claude: Claude Code). */
+  agents?: Record<string, string>;
 }
 
 /** started: by this client; added: by its pasted line; local: on this computer, outside this client. */

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tunnelConnectorId } from '../tunnel/connect.ts';
-  // A sandbox at a glance: its chats, the agent's sign-in, and how to reach it from VS Code.
+  // A sandbox at a glance: its chats, the agent's sign-in, the versions at work, and how to reach it from VS Code.
   // A tab of its own, and what an empty grid shows.
   import ErrorState from '../chat/lib/ErrorState.svelte';
   import OfflineState from '../chat/lib/OfflineState.svelte';
@@ -16,6 +16,7 @@
   import ConnectLine from './lib/ConnectLine.svelte';
   import { ago, SOURCE_TITLE, statusText, workerTitle } from './lib/format.ts';
   import StatusDot from './lib/StatusDot.svelte';
+  import VersionsCard from './lib/VersionsCard.svelte';
   import { chatTab, endDrag, startDrag } from './lib/workbench.svelte.ts';
   import type { WebWorker } from './lib/worker.svelte.ts';
 
@@ -76,6 +77,7 @@
   {:else if worker.error}
     <ErrorState title={worker.status === 'failed' ? 'This sandbox failed' : 'Something went wrong'} detail={worker.error} />
   {/if}
+  <VersionsCard {worker} {agent} />
   {#if worker.url && tunnelConnectorId() === undefined}
     <details class="card p-4">
       <summary class="cursor-pointer font-semibold">Open in VS Code instead</summary>
