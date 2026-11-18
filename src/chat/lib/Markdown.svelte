@@ -1,6 +1,7 @@
 <script lang="ts">
   import DOMPurify from 'dompurify';
   import { marked } from 'marked';
+  import { copyText } from './clipboard.ts';
   import { highlightElement } from './editor/highlight.ts';
   import { PATH_IN_TEXT, isLocalHref, looksLikeFile } from './files.ts';
 
@@ -15,6 +16,43 @@
     $props();
   const html = $derived(DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true, async: false })));
   let root: HTMLElement | undefined = $state();
+  let frame: HTMLElement | undefined = $state();
+  // The code block under the pointer, with its copy button over its top
+  // right corner. One button for all blocks, outside the rendered markdown,
+  // so it stays put when a wide block scrolls sideways.
+  let block: HTMLElement | undefined = $state();
+  let corner = $state({ top: 0, right: 0 });
+  let copied = $state(false);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function hover(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (target.closest('.code-copy')) return;
+    const pre = target.closest('pre');
+    const next = pre && root?.contains(pre) ? pre : undefined;
+    if (next === block) return;
+    block = next;
+    copied = false;
+    if (!next || !frame) return;
+    const outer = frame.getBoundingClientRect();
+    const box = next.getBoundingClientRect();
+    corner = { top: box.top - outer.top, right: outer.right - box.right };
+  }
+
+  async function copyBlock() {
+    if (!block) return;
+    await copyText(block.textContent ?? '');
+    copied = true;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => (copied = false), 1500);
+  }
+
+  // Inline code copies on a click, unless it opens a file or sits in a link.
+  async function copyInline(code: HTMLElement) {
+    await copyText(code.textContent ?? '');
+    code.dataset.copied = '';
+    setTimeout(() => delete code.dataset.copied, 1200);
+  }
 
   $effect(() => {
     void html;
@@ -74,6 +112,23 @@
     }
   });
 
+  // New markdown replaces the blocks, so the hovered one is gone.
+  $effect(() => {
+    void html;
+    block = undefined;
+  });
+
+  // After the file links above, so a path in code still opens the file.
+  $effect(() => {
+    void html;
+    if (!root) return;
+    for (const code of root.querySelectorAll<HTMLElement>('code')) {
+      if (code.closest('pre, a') || code.dataset.file !== undefined) continue;
+      code.dataset.copy = '';
+      code.title = 'Copy';
+    }
+  });
+
   $effect(() => {
     void html;
     if (!root || !asset) return;
@@ -90,16 +145,38 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div
-  bind:this={root}
-  class="prose break-words"
-  onclick={(event) => {
-    const target = (event.target as HTMLElement).closest<HTMLElement>('[data-file]');
-    if (!target || !openFile) return;
-    event.preventDefault();
-    openFile(target.dataset.file!);
-  }}
->
-  {@html html}
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_mouse_events_have_key_events -->
+<div bind:this={frame} class="relative" onmouseover={hover} onmouseleave={() => (block = undefined)}>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div
+    bind:this={root}
+    class="prose break-words"
+    onclick={(event) => {
+      const element = event.target as HTMLElement;
+      const target = element.closest<HTMLElement>('[data-file]');
+      if (target && openFile) {
+        event.preventDefault();
+        openFile(target.dataset.file!);
+        return;
+      }
+      const code = element.closest<HTMLElement>('code[data-copy]');
+      // A drag that selects part of the code is not a click to copy it.
+      if (code && !window.getSelection()?.toString()) void copyInline(code);
+    }}
+  >
+    {@html html}
+  </div>
+  {#if block}
+    <button
+      type="button"
+      class="code-copy"
+      style:top="{corner.top + 6}px"
+      style:right="{corner.right + 6}px"
+      title={copied ? 'Copied' : 'Copy'}
+      aria-label={copied ? 'Copied' : 'Copy code'}
+      onclick={copyBlock}
+    >
+      <span class="codicon {copied ? 'codicon-check' : 'codicon-copy'}"></span>
+    </button>
+  {/if}
 </div>

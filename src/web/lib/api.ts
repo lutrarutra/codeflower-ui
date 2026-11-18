@@ -273,19 +273,7 @@ export interface FolderListing {
   places: { name: string; path: string }[];
 }
 
-export async function copyText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const area = document.createElement('textarea');
-    area.style.cssText = 'position:fixed;opacity:0';
-    area.value = text;
-    document.body.append(area);
-    area.select();
-    document.execCommand('copy');
-    area.remove();
-  }
-}
+export { copyText } from '../../chat/lib/clipboard.ts';
 
 export function vscodeLink(url: string): string {
   return `vscode://codeflower.codeflower/connect?${new URLSearchParams({ address: url })}`;

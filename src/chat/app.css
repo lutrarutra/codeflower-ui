@@ -526,6 +526,45 @@ textarea:focus-visible {
   color: var(--cf-indigo);
 }
 
+/* Inline code copies on a click; a code block, with the button over it. */
+.prose code[data-copy] {
+  cursor: copy;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.prose code[data-copy]:hover {
+  color: var(--cf-indigo);
+}
+
+.prose code[data-copied] {
+  color: var(--cf-indigo);
+  background: var(--cf-indigo-soft);
+}
+
+.code-copy {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: var(--cf-code);
+  color: var(--cf-muted);
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.code-copy:hover {
+  opacity: 1;
+  color: var(--cf-ink);
+}
+
+.code-copy .codicon {
+  font-size: 13px;
+}
+
 .prose img {
   max-width: 100%;
   height: auto;
