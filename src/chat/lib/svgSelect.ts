@@ -6,6 +6,9 @@ import type { FeedbackElement } from '../../protocol/messages.ts';
 
 // Only the file's own fragments and embedded images; nothing is fetched.
 const SAFE_REFERENCE = /^(#|data:image\/(png|jpeg|gif|webp|svg\+xml)[;,])/i;
+// A <use> may only repeat an element of the figure itself: matplotlib draws every
+// glyph of its text as one, pointing at a path in the figure's <defs>.
+const OWN_FRAGMENT = /^#/;
 
 let purifier: ReturnType<typeof DOMPurify> | undefined;
 
@@ -14,14 +17,16 @@ export function sanitizeSvg(text: string): string {
   if (!purifier) {
     // An instance of its own: the hook must not apply to HTML reports.
     purifier = DOMPurify();
-    purifier.addHook('uponSanitizeAttribute', (_node, data) => {
-      if ((data.attrName === 'href' || data.attrName === 'xlink:href') && !SAFE_REFERENCE.test(data.attrValue.trim())) {
-        data.keepAttr = false;
-      }
+    purifier.addHook('uponSanitizeAttribute', (node, data) => {
+      if (data.attrName !== 'href' && data.attrName !== 'xlink:href') return;
+      const safe = node.nodeName.toLowerCase() === 'use' ? OWN_FRAGMENT : SAFE_REFERENCE;
+      if (!safe.test(data.attrValue.trim())) data.keepAttr = false;
     });
   }
   return purifier.sanitize(text, {
     USE_PROFILES: { svg: true, svgFilters: true },
+    // DOMPurify drops <use> as it may pull in another document; the hook above keeps it to the figure.
+    ADD_TAGS: ['use'],
     FORBID_TAGS: ['foreignObject', 'script'],
     // Ids name the elements; the shadow root keeps them from clobbering the document.
     SANITIZE_DOM: false
