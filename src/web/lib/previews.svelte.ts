@@ -10,7 +10,7 @@ import { isFileConflict } from '../../client/codeflower.ts';
 import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
 import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
-import { isStorytellerReport } from '../../chat/lib/report.ts';
+import { isBesideReport, isStorytellerReport } from '../../chat/lib/report.ts';
 import { basename, displayPath, resolvePath } from './report.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -245,6 +245,9 @@ export class Preview {
         break;
       case 'save':
         if (this.data) download(basename(this.file.path), this.file.mimeType, this.data);
+        break;
+      case 'saveFigure':
+        if (isBesideReport(message.name)) download(message.name, message.mimeType, message.data);
         break;
       case 'write':
         try {

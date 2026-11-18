@@ -108,6 +108,21 @@ function figureImage(src: string): { mimeType: string; data: string } | null {
   }
 }
 
+const FIGURE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg'
+};
+
+/** The name a report's figure is saved under: "results-figure-2.svg" for figure 2 of results.html. */
+export function figureFileName(reportPath: string, index: number, mimeType: string): string {
+  const name = reportPath.split(/[/\\]/).pop() ?? '';
+  const stem = name.replace(/\.[^.]*$/, '').replace(/[^\w@+-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 150) || 'report';
+  return `${stem}-figure-${index}.${FIGURE_EXTENSIONS[mimeType] ?? 'img'}`;
+}
+
 /** A file beside the report that it may ask the host to save: a plain name. */
 export function isBesideReport(path: string): boolean {
   return BESIDE.test(path);

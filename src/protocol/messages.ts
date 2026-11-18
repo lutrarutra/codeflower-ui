@@ -435,6 +435,8 @@ export type PreviewWebviewMessage =
   | { type: 'asset'; path: string }
   | { type: 'openFile'; path: string }
   | { type: 'save' }
+  /** Save a report's figure as it was clicked (base64), under a plain file name. */
+  | { type: 'saveFigure'; name: string; mimeType: string; data: string }
   /** Save the user's edits into the sandbox, over the version with `baseMtimeMs`. */
   | { type: 'write'; text: string; baseMtimeMs: number }
   /** The editor has edits that are not saved: the host asks before closing the tab. */

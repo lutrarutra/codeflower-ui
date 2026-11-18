@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { interactiveHtml, isStorytellerReport, printableHtml, reportMessage } from '../src/chat/lib/report.ts';
+import { figureFileName, interactiveHtml, isBesideReport, isStorytellerReport, printableHtml, reportMessage } from '../src/chat/lib/report.ts';
 import { displayPath, resolvePath } from '../src/web/lib/report.ts';
 
 test('resolves paths a file refers to against its folder', () => {
@@ -48,4 +48,11 @@ test('a printable copy has the policy and prints itself once loaded', () => {
   assert.ok(html.indexOf("default-src 'none'") < html.indexOf('report'));
   assert.ok(html.indexOf('report') < html.indexOf('print()'));
   assert.ok(html.indexOf('print()') < html.indexOf('</body>'));
+});
+
+test("names a saved figure after its report, as a plain name the hosts accept", () => {
+  assert.equal(figureFileName('/workspace/out/qc report.html', 2, 'image/svg+xml'), 'qc-report-figure-2.svg');
+  assert.equal(figureFileName('/workspace/out/results.html', 10, 'image/jpeg'), 'results-figure-10.jpg');
+  assert.equal(figureFileName('/workspace/.html', 1, 'image/png'), 'report-figure-1.png');
+  for (const path of ['/a/..html', '/a/.hidden.html', 'C:\\x\\r.html']) assert.ok(isBesideReport(figureFileName(path, 1, 'image/webp')));
 });

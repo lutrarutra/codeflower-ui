@@ -8,7 +8,7 @@
   import Markdown from './lib/Markdown.svelte';
   import type { PreviewHost } from './lib/host.ts';
   import ReportFrame, { type ReportFrameKind } from './lib/ReportFrame.svelte';
-  import type { ReportMessage } from './lib/report.ts';
+  import { figureFileName, type ReportMessage } from './lib/report.ts';
   // Loaded with the first file shown as text: chats alone do not need the editor.
   const loadEditor = () => import('./lib/editor/CodeEditor.svelte');
 
@@ -282,6 +282,16 @@
     }
     return kind === 'image' ? { draft, title: preview.title, subtitle: shownPath, mimeType: preview.file.mimeType, data: preview.data } : null;
   });
+
+  /** Saves what the overlay shows: the file itself, or the report's figure as clicked. */
+  function saveAnnotated(): (() => void) | undefined {
+    const report = annotated?.draft.report;
+    if (report && preview) {
+      const name = figureFileName(preview.file.path, report.figure.index, report.mimeType);
+      return () => sendPreview({ type: 'saveFigure', name, mimeType: report.mimeType, data: report.data });
+    }
+    return annotating === 'file' ? () => sendPreview({ type: 'save' }) : undefined;
+  }
 
   const sendHint = $derived(
     !preview?.chat ? 'Open a chat on this worker to send comments to its agent.' : !preview.live ? 'The worker is not connected.' : ''
@@ -579,7 +589,7 @@
           {sendHint}
           onsend={sendAnnotations}
           onclose={closeAnnotator}
-          ondownload={annotating === 'file' ? () => sendPreview({ type: 'save' }) : undefined}
+          ondownload={saveAnnotated()}
         />
       {/key}
     {/if}
