@@ -55,6 +55,12 @@
   const isSvg = $derived(mimeType === 'image/svg+xml');
 
   let host: HTMLElement | undefined = $state();
+  let dialog: HTMLElement | undefined = $state();
+  // The click that opened a report's figure left the keyboard in the report's frame,
+  // where this window hears no keys (Esc, the shortcuts): take it to the overlay.
+  $effect(() => {
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+  });
   let active = $state<number | null>(null);
   let hovered = $state<string | null>(null);
   let dragBox = $state<{ left: number; top: number; right: number; bottom: number } | null>(null);
@@ -479,7 +485,14 @@
   }}
 />
 
-<div class="fixed inset-0 z-50 flex flex-col bg-paper" role="dialog" aria-modal="true" aria-label="Comment on {title}">
+<div
+  bind:this={dialog}
+  class="fixed inset-0 z-50 flex flex-col bg-paper outline-none"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Comment on {title}"
+  tabindex="-1"
+>
   <header class="flex items-center gap-3 border-b-[1.5px] border-soft-line px-4 py-2.5 max-[640px]:flex-wrap max-[640px]:gap-2 max-[640px]:px-3">
     <div class="min-w-0 flex-1 max-[640px]:basis-[calc(100%-3rem)]">
       <h2 class="m-0 truncate font-display text-[1.1rem] leading-tight font-medium">{title}</h2>
