@@ -292,7 +292,8 @@ function workerQueue(options: { failAdd?: boolean } = {}) {
         : [{ id: 'q-3', title: 'mine', text: 'mine', prompt: [], editable: true }];
     },
     sendNow: async (id) => void calls.push(['sendNow', id]),
-    resume: async () => void calls.push(['resume'])
+    resume: async () => void calls.push(['resume']),
+    together: async (together) => void calls.push(['together', together])
   };
   return { queue, calls };
 }
@@ -340,8 +341,12 @@ test('on a worker with a queue, prompts wait there and every change goes through
   chat.host.send({ type: 'sendQueued', id: 'q-4' });
   chat.host.send({ type: 'removeQueued', id: 'q-4' });
   chat.host.send({ type: 'resumeQueue' });
+  chat.host.send({ type: 'queueTogether', together: true });
   await tick();
-  assert.deepEqual(worker.calls, [['take', { id: 'q-1' }], ['sendNow', 'q-4'], ['remove', 'q-4'], ['resume']]);
+  assert.deepEqual(worker.calls, [['take', { id: 'q-1' }], ['sendNow', 'q-4'], ['remove', 'q-4'], ['resume'], ['together', true]]);
+  // The views show the worker's choice.
+  chat.queueChanged({ items: [{ id: 'q-1', title: 'one', editable: true }, { id: 'q-4', title: 'Wrap up' }], together: true });
+  assert.equal(lastOf(messages, 'queue')?.together, true);
 
   // Stop: the worker hands the user's own back before the cancel reaches it.
   worker.calls.length = 0;
@@ -355,6 +360,23 @@ test('on a worker with a queue, prompts wait there and every change goes through
   await tick();
   assert.deepEqual(order, ['take', 'cancel']);
   assert.deepEqual(lastOf(messages, 'draft'), { type: 'draft', text: 'mine' });
+});
+
+test('in the window, together sends the queued messages as one, and a second message resets it', () => {
+  const sent: string[] = [];
+  const chat = new ChatSession('worker', 'session', { live: true, busy: true }, actions(async (_chat, text) => void sent.push(text)));
+  const messages: HostMessage[] = [];
+  chat.host.listen((message) => messages.push(message));
+  chat.host.send({ type: 'prompt', text: 'one' });
+  chat.host.send({ type: 'queueTogether', together: true });
+  chat.host.send({ type: 'prompt', text: 'two' });
+  assert.equal(lastOf(messages, 'queue')?.together, undefined);
+  chat.host.send({ type: 'queueTogether', together: true });
+  chat.host.send({ type: 'prompt', text: 'three' });
+  assert.equal(lastOf(messages, 'queue')?.together, true);
+  chat.setState({ busy: false });
+  assert.deepEqual(sent, ['one\n\ntwo\n\nthree']);
+  assert.deepEqual(lastOf(messages, 'queue'), { type: 'queue', items: [] });
 });
 
 test('a prompt the worker could not take waits in the window', async () => {

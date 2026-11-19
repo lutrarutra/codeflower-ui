@@ -330,6 +330,9 @@ export class ChatSession {
       case 'resumeQueue':
         this.queue.resume();
         break;
+      case 'queueTogether':
+        this.queue.setTogether(message.together);
+        break;
       case 'openSubagent':
         this.actions.openSubagent(this, message.key);
         break;

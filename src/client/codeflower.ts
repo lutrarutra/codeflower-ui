@@ -80,6 +80,8 @@ export interface AgentState extends AgentPresentation {
 export interface WorkerQueue {
   items: QueuedPromptSummary[];
   paused?: QueuePaused;
+  /** All of them go in the next turn, as one prompt. */
+  together?: boolean;
 }
 
 /** A queued prompt taken back from the worker: what the user wrote, and what the agent would get. */
@@ -539,8 +541,10 @@ export class CodeflowerExtensions {
       handlers.subagentSettingsChanged?.(agent, state);
     });
     rpc.on('_codeflower/queue', (params) => {
-      const { key, items, paused } = params as { key?: string } & Partial<WorkerQueue>;
-      if (typeof key === 'string' && Array.isArray(items)) handlers.queue?.(key, { items, ...(paused ? { paused } : {}) });
+      const { key, items, paused, together } = params as { key?: string } & Partial<WorkerQueue>;
+      if (typeof key === 'string' && Array.isArray(items)) {
+        handlers.queue?.(key, { items, ...(paused ? { paused } : {}), ...(together === true ? { together: true } : {}) });
+      }
     });
     rpc.on('_codeflower/browser/changed', (params) => {
       const { browser } = params as { browser?: BrowserState };
@@ -585,6 +589,11 @@ export class CodeflowerExtensions {
 
   async queueResume(key: string): Promise<void> {
     await this.rpc.request('_codeflower/queue/resume', { key });
+  }
+
+  /** All the queued prompts in the next turn, as one (`true`), or one per turn. */
+  async queueTogether(key: string, together: boolean): Promise<void> {
+    await this.rpc.request('_codeflower/queue/together', { key, together });
   }
 
   /** The chats open in the agent's terminal UI and the user's shells; none from workers without them. */

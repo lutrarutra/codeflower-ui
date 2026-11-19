@@ -46,10 +46,12 @@ export class ChatQueue {
 
   /** The queue as the views show it. */
   message(): Extract<HostMessage, { type: 'queue' }> {
+    const together = this.remote.items.length ? this.remote.together : this.local.together;
     return {
       type: 'queue',
       items: [...this.remote.items, ...this.local.summaries()],
-      ...(this.remote.paused ? { paused: this.remote.paused } : {})
+      ...(this.remote.paused ? { paused: this.remote.paused } : {}),
+      ...(together ? { together: true } : {})
     };
   }
 
@@ -59,7 +61,11 @@ export class ChatQueue {
 
   /** The worker's queue for the chat: when the chat opens here, and on every change. */
   workerChanged(queue: WorkerQueue): void {
-    this.remote = { items: queue.items.map(({ id, title, editable }) => ({ id, title, ...(editable ? { editable } : {}) })), ...(queue.paused ? { paused: queue.paused } : {}) };
+    this.remote = {
+      items: queue.items.map(({ id, title, editable }) => ({ id, title, ...(editable ? { editable } : {}) })),
+      ...(queue.paused ? { paused: queue.paused } : {}),
+      ...(queue.together ? { together: true } : {})
+    };
     this.publish();
   }
 
@@ -203,6 +209,17 @@ export class ChatQueue {
     this.host.cancel();
     const texts = [...(taking ? await taking : []).map((item) => item.text), ...local.map((item) => item.text)];
     if (texts.length) this.host.post({ type: 'draft', text: texts.join('\n\n') });
+  }
+
+  /** All the queued prompts in the next turn, as one (`true`), or one per turn. */
+  setTogether(together: boolean): void {
+    if (this.remote.items.length) {
+      void this.host.worker()?.together(together).catch((error: unknown) => this.host.error(`Could not change the queue: ${messageOf(error)}`));
+    }
+    if (this.local.length) {
+      this.local.setTogether(together);
+      this.publish();
+    }
   }
 
   /** Go on with a queue the worker paused. */

@@ -79,7 +79,7 @@ interface SessionSettings {
     /** The agent's background tasks that were running then; later ones come as AIR async task updates. */
     'codeflower/backgroundTasks'?: BackgroundTask[];
     /** The chat's prompts queued on the worker (workers with `promptQueue`). */
-    'codeflower/queue'?: { items?: QueuedPromptSummary[]; paused?: QueuePaused };
+    'codeflower/queue'?: { items?: QueuedPromptSummary[]; paused?: QueuePaused; together?: boolean };
   } | null;
 }
 
@@ -315,7 +315,7 @@ export class AcpClient {
     // The prompts queued on the worker, from any window (workers with `promptQueue`).
     const queue = meta?.['codeflower/queue'];
     if (queue && Array.isArray(queue.items)) {
-      this.handlers.queue?.(key, { items: queue.items, ...(queue.paused ? { paused: queue.paused } : {}) });
+      this.handlers.queue?.(key, { items: queue.items, ...(queue.paused ? { paused: queue.paused } : {}), ...(queue.together === true ? { together: true } : {}) });
     }
     const transcriptEntries = meta?.['codeflower/transcriptEntries'];
     return { key, ...(typeof transcriptEntries === 'number' ? { transcriptEntries } : {}) };

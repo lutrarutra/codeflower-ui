@@ -186,6 +186,8 @@ export interface ChatWorkerQueue {
   take(which: { id: string } | { editable: true }): Promise<TakenPrompt[]>;
   sendNow(id: string): Promise<void>;
   resume(): Promise<void>;
+  /** All the queued prompts in the next turn, as one, or one per turn. */
+  together(together: boolean): Promise<void>;
 }
 
 /** One agent's connection: its ACP client and its window's bridge methods. */
@@ -695,7 +697,8 @@ export class WorkerConnection {
         return taken;
       },
       sendNow: (id) => bridge.queueSendNow(key, id),
-      resume: () => bridge.queueResume(key)
+      resume: () => bridge.queueResume(key),
+      together: (together) => bridge.queueTogether(key, together)
     };
   }
 

@@ -102,6 +102,9 @@
   let queued = $state<QueuedPromptSummary[]>([]);
   /** The worker stopped sending the queue after a turn that did not end normally. */
   let queuePaused = $state<QueuePaused | undefined>(undefined);
+  /** All the queued messages go in the next turn, as one; offered once two or more wait. */
+  let queueTogether = $state(false);
+  const together = $derived(queueTogether && queued.length > 1);
   /** The chat's subagents, and the worker's defaults for them. */
   let subagents = $state<SubagentSummary[]>([]);
   let subagentSettings = $state<SubagentSettingsState | null>(null);
@@ -154,6 +157,7 @@
       case 'queue':
         queued = message.items;
         queuePaused = message.paused;
+        queueTogether = message.together === true;
         break;
       case 'draft':
         // Next to what the user is writing, never over it.
@@ -467,23 +471,49 @@
 
   {#if queued.length}
     <section class="mx-4 mb-2 flex flex-col gap-1 rounded-xl bg-sunken p-1.5 text-[0.9em]" aria-label="Queued messages" aria-live="polite">
-      {#if queuePaused}
-        <div class="flex items-center gap-2 px-1.5 text-[0.85em] text-muted">
+      <div class="flex items-center gap-2 px-1.5 text-[0.85em] text-muted">
+        {#if queuePaused}
           <span class="codicon codicon-debug-pause text-[12px]!"></span>
           <span class="min-w-0 flex-1">Paused: {pausedReason(queuePaused.stopReason)}</span>
           <button
             type="button"
             class="rounded-md px-1.5 py-0.5 text-ink hover:bg-soft-line"
-            title="Send the queued messages again, one per turn"
+            title={together ? 'Send the queued messages again, all together' : 'Send the queued messages again, one per turn'}
             onclick={() => send({ type: 'resumeQueue' })}>Resume</button
           >
-        </div>
-      {:else}
-        <span class="px-1.5 text-[0.85em] text-muted">
+        {:else}
           <span class="codicon codicon-history text-[12px]!"></span>
-          {chat.busy ? 'Next, one per turn once the agent is done' : chat.live ? 'Next' : 'Next, once the session is back'}
-        </span>
-      {/if}
+          <span class="min-w-0 flex-1">
+            {chat.busy
+              ? together
+                ? 'Next, all together once the agent is done'
+                : 'Next, one per turn once the agent is done'
+              : chat.live
+                ? 'Next'
+                : 'Next, once the session is back'}
+          </span>
+        {/if}
+        {#if queued.length > 1}
+          <!-- One per turn unless the user ticks it; a second queued message sets it back. -->
+          <button
+            type="button"
+            role="switch"
+            aria-checked={together}
+            class="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 hover:bg-soft-line hover:text-ink {together ? 'text-ink' : ''}"
+            title={together
+              ? 'All the queued messages go together, as one message, in the next turn. Click for one per turn.'
+              : 'The queued messages go one per turn. Click to send them all together in the next turn.'}
+            onclick={() => send({ type: 'queueTogether', together: !together })}
+          >
+            <span>All together</span>
+            <span class="relative h-3.5 w-6 rounded-full border border-line transition-colors {together ? 'bg-teal' : 'bg-soft-line'}">
+              <span
+                class="absolute top-px size-2.5 rounded-full border border-line bg-card transition-all {together ? 'left-[11px]' : 'left-px'}"
+              ></span>
+            </span>
+          </button>
+        {/if}
+      </div>
       {#each queued as item, index (item.id)}
         <div class="flex items-center gap-2 rounded-lg bg-card py-1 pr-1 pl-2.5 shadow-(--cf-elevation)">
           <span class="text-[0.85em] text-muted tabular-nums">{index + 1}</span>
