@@ -41,6 +41,9 @@ import {
   type ChatTerminal,
   type ShellTerminal,
   type DirectoryListing,
+  type FoundInChat,
+  type FoundInFile,
+  type FoundPath,
   type DownloadChunk,
   type DownloadStarted,
   type DshCredentials,
@@ -82,6 +85,10 @@ export {
   type AgentState,
   type DirectoryEntry,
   type DirectoryListing,
+  type FoundInChat,
+  type FoundInFile,
+  type FoundPath,
+  type FoundText,
   type DownloadChunk,
   type DownloadStarted,
   type DshCredentials,
@@ -527,6 +534,23 @@ export class WorkerConnection {
 
   listDirectory(path: string): Promise<DirectoryListing> {
     return this.bridge.listDirectory(path);
+  }
+
+  /** Whether the worker answers the page's search; older ones do not. */
+  get canSearch(): boolean {
+    return !!this.workerStatus.capabilities?.search;
+  }
+
+  searchPaths(query: string): Promise<{ files: FoundPath[]; truncated: boolean }> {
+    return this.bridge.searchPaths(query);
+  }
+
+  searchContents(query: string): Promise<{ files: FoundInFile[]; truncated: boolean; superseded?: boolean }> {
+    return this.bridge.searchContents(query);
+  }
+
+  searchChats(query: string): Promise<{ chats: FoundInChat[]; truncated: boolean }> {
+    return this.bridge.searchChats(query);
   }
 
   /** Whether files can be sent to the sandbox's folders and saved from it; see `web/lib/transfers.svelte.ts`. */

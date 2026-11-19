@@ -23,9 +23,19 @@
     canFold = false,
     folded = false,
     shortcut,
+    searchShortcut,
     onToggle,
-    onNavigate
-  }: { canFold?: boolean; folded?: boolean; shortcut: string; onToggle: () => void; onNavigate: () => void } = $props();
+    onNavigate,
+    onSearch
+  }: {
+    canFold?: boolean;
+    folded?: boolean;
+    shortcut: string;
+    searchShortcut: string;
+    onToggle: () => void;
+    onNavigate: () => void;
+    onSearch: () => void;
+  } = $props();
 
   const single = $derived(app.single);
   const keys = $derived(app.machines.map((machine) => machine.key));
@@ -416,6 +426,9 @@
     {/if}
   </ul>
 
+  <button class={ICON} title="Search chats and files ({searchShortcut})" aria-label="Search" aria-haspopup="dialog" onclick={() => (onNavigate(), onSearch())}>
+    <span class="codicon codicon-search text-[18px]!"></span>
+  </button>
   {#if !single}
     <button
       class="relative {ICON} {app.route.view === 'server' ? 'bg-card text-ink' : ''}"

@@ -117,6 +117,8 @@ export interface WorkerStatus {
   capabilities?: AgentState['capabilities'] & {
     /** The user's shells in the sandbox (the page's Terminal). */
     shellTerminals?: boolean;
+    /** The page's search (`_codeflower/search/*`): files by name and contents, and what chats say. */
+    search?: boolean;
   };
 }
 
@@ -287,6 +289,40 @@ export interface DirectoryListing {
   writable?: boolean;
   entries: DirectoryEntry[];
   truncated: boolean;
+}
+
+/** A file whose path matches a search, from `_codeflower/search/paths`. */
+export interface FoundPath {
+  path: string;
+  /** Its path in its folder (`root`), e.g. figures/umap.svg. */
+  relative: string;
+  /** The folder's name: Workspace, Inputs/study42, … */
+  folder: string;
+  root: string;
+}
+
+/** A piece of text with a match in it: `text.slice(start, start + length)`. */
+export interface FoundText {
+  text: string;
+  start: number;
+  length: number;
+}
+
+/** A file with lines that have the search, from `_codeflower/search/contents`. */
+export interface FoundInFile extends FoundPath {
+  lines: (FoundText & { line: number })[];
+}
+
+/** A chat whose prompts or replies have the search, from `_codeflower/search/chats`. */
+export interface FoundInChat {
+  key: string;
+  title: string;
+  harness: string;
+  updatedAt: string;
+  /** How many times the chat has it. */
+  count: number;
+  /** The first few, with who said it and the transcript entry it starts on. */
+  places: (FoundText & { role: 'user' | 'agent'; entry: number })[];
 }
 
 /** What a bridge says in `initialize` (`_meta['codeflower/files']`) about sending files both ways. */
@@ -696,6 +732,21 @@ export class CodeflowerExtensions {
 
   listDirectory(path: string): Promise<DirectoryListing> {
     return this.rpc.request<DirectoryListing>('_codeflower/files/list', { path });
+  }
+
+  // The page's search (Ctrl+K).
+
+  searchPaths(query: string): Promise<{ files: FoundPath[]; truncated: boolean }> {
+    return this.rpc.request('_codeflower/search/paths', { query });
+  }
+
+  /** A newer search from the same window stops this one, which answers `superseded`. */
+  searchContents(query: string): Promise<{ files: FoundInFile[]; truncated: boolean; superseded?: boolean }> {
+    return this.rpc.request('_codeflower/search/contents', { query });
+  }
+
+  searchChats(query: string): Promise<{ chats: FoundInChat[]; truncated: boolean }> {
+    return this.rpc.request('_codeflower/search/chats', { query });
   }
 
   // Files sent both ways in chunks; see `FileTransfers`.

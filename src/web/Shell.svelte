@@ -10,6 +10,7 @@
   import NewSandboxDialog from './NewSandboxDialog.svelte';
   import PluginsDialog from './PluginsDialog.svelte';
   import Rail from './Rail.svelte';
+  import SearchPalette from './SearchPalette.svelte';
   import SignInDialog from './SignInDialog.svelte';
   import Sidebar from './Sidebar.svelte';
   import { app } from './lib/app.svelte.ts';
@@ -22,7 +23,11 @@
 
   // Wide windows can fold the sidebar away, leaving the rail (Ctrl/⌘+B, as in VS Code); it stays so.
   const COLLAPSED = 'codeflower.sidebarCollapsed';
-  const shortcut = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const shortcut = mac ? '⌘B' : 'Ctrl+B';
+  // The search: ⌘K on a Mac (Ctrl+K deletes to the line's end there), else Ctrl+K.
+  const searchShortcut = mac ? '⌘K' : 'Ctrl+K';
+  let search: SearchPalette | undefined = $state();
   let collapsed = $state(stored());
   const folded = $derived(collapsed && wide);
   // The narrow top bar names the sandbox of the chat in front.
@@ -114,6 +119,13 @@
       terminal(event.shiftKey);
       return;
     }
+    if (event.key.toLowerCase() === 'k' && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey) {
+      // A terminal's Ctrl+K is the shell's: it deletes to the line's end.
+      if (!mac && (event.target as Element | null)?.closest?.('.xterm')) return;
+      event.preventDefault();
+      search?.toggle();
+      return;
+    }
     if (event.key.toLowerCase() !== 'b' || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
     event.preventDefault();
     if (wide) toggle();
@@ -153,7 +165,7 @@
       class="fixed inset-y-0 left-0 z-20 flex shrink-0 -translate-x-full min-[800px]:relative min-[800px]:translate-x-0 {resizing ? '' : 'transition-[translate]'}"
       class:translate-x-0={drawer}
     >
-      <Rail canFold={wide} {folded} {shortcut} onToggle={toggle} onNavigate={() => (drawer = false)} />
+      <Rail canFold={wide} {folded} {shortcut} {searchShortcut} onToggle={toggle} onNavigate={() => (drawer = false)} onSearch={() => void search?.open()} />
       {#if !folded}
         <div
           class="relative shrink-0 border-r-[1.5px] border-soft-line {wide ? '' : 'w-72 max-w-[calc(85vw-4.5rem)]'}"
@@ -246,6 +258,7 @@
   <Toasts />
   <NewSandboxDialog />
   <QuitDialog />
+  <SearchPalette bind:this={search} shortcut={searchShortcut} />
   <SignInDialog />
   <PluginsDialog />
   <AgentLinkDialog />
