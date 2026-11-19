@@ -170,6 +170,7 @@
     <button
       type="button"
       class="code-copy"
+      class:copied
       style:top="{corner.top + 6}px"
       style:right="{corner.right + 6}px"
       title={copied ? 'Copied' : 'Copy'}

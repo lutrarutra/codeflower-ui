@@ -536,9 +536,13 @@ textarea:focus-visible {
   color: var(--cf-indigo);
 }
 
-.prose code[data-copied] {
-  color: var(--cf-indigo);
-  background: var(--cf-indigo-soft);
+.prose code[data-copied]::after {
+  content: '\eab2';
+  font-family: codicon;
+  font-size: 0.95em;
+  margin-left: 0.3em;
+  vertical-align: -0.12em;
+  color: var(--cf-green);
 }
 
 .code-copy {
@@ -559,6 +563,12 @@ textarea:focus-visible {
 .code-copy:hover {
   opacity: 1;
   color: var(--cf-ink);
+}
+
+.code-copy.copied,
+.code-copy.copied:hover {
+  opacity: 1;
+  color: var(--cf-green);
 }
 
 .code-copy .codicon {
