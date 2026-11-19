@@ -283,7 +283,7 @@
   const sendNowHint = $derived(
     chat.steer
       ? `${modKey}+Enter: the agent reads it right away, without stopping`
-      : `${modKey}+Enter: stops the agent's turn and sends this next`
+      : `${modKey}+Enter: stops the agent's turn, and any command it is running, then sends this`
   );
 
   function suggest(text: string): void {
@@ -530,8 +530,10 @@
           <button
             type="button"
             class="grid size-6 shrink-0 place-items-center rounded-md text-muted hover:bg-soft-line hover:text-ink"
-            title={chat.steer && item.editable ? 'Send now: the agent reads it right away' : "Send now: stops the agent's turn"}
-            aria-label="Send {item.title} now"
+            title={chat.steer && item.editable
+              ? 'Send now: the agent reads it right away'
+              : 'Interrupt and send now: stops the agent and any command it is running'}
+            aria-label={chat.steer && item.editable ? `Send ${item.title} now` : `Interrupt and send ${item.title} now`}
             onclick={() => send({ type: 'sendQueued', id: item.id })}
           >
             <span class="codicon codicon-arrow-up"></span>
@@ -670,7 +672,7 @@
         </button>
         {#if draft.trim()}
           <button type="button" class="pill pill-small" title={sendNowHint} disabled={!chat.live} onclick={() => submit(true)}>
-            Send now
+            {chat.steer ? 'Send now' : 'Interrupt & send'}
           </button>
         {/if}
       {/if}
