@@ -4,8 +4,9 @@
   import { chatHost } from './host.ts';
   import { epoch } from './time.ts';
 
-  // Beside the usage: how many of the chat's subagents run, and a list of
-  // those and the latest ended ones, each opening its own chat.
+  // Beside the usage: how many of the chat's subagents run (0 once none
+  // do), and a list of those and the latest ended ones, each opening its
+  // own chat.
   const RECENT = 10;
 
   let { subagents }: { subagents: SubagentSummary[] } = $props();
@@ -52,12 +53,15 @@
       title={running.length
         ? `${running.length} subagent${running.length === 1 ? '' : 's'} running${waiting ? ', one waiting for you' : ''} · ${subagents.length} in all`
         : `${subagents.length} subagent${subagents.length === 1 ? '' : 's'} of this chat`}
-      aria-label={running.length ? `${running.length} subagents running` : `${subagents.length} subagents`}
+      aria-label={running.length
+        ? `${running.length} subagent${running.length === 1 ? '' : 's'} running`
+        : `${subagents.length} subagent${subagents.length === 1 ? '' : 's'}`}
       onclick={() => (open = !open)}
       onkeydown={(event) => event.key === 'Escape' && (open = false)}
     >
       <span class="codicon codicon-organization"></span>
-      {running.length || subagents.length}
+      <!-- Only the running ones count: the ended ones are in the list. -->
+      {running.length}
     </button>
     {#if open}
       <div
