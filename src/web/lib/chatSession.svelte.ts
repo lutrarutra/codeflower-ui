@@ -53,6 +53,10 @@ export interface ChatActions {
   openBrowser(chat: ChatSession): void;
   openShell(chat: ChatSession): Promise<void>;
   setSubagentSettings(chat: ChatSession, settings: Partial<SubagentSettings>): Promise<void>;
+  /** The sandbox's chats for the header's list: as known now, then again once listed afresh. */
+  listChats(chat: ChatSession): Promise<void>;
+  /** Another chat of the sandbox in front: its tab if open, else a new one. */
+  openChat(chat: ChatSession, key: string): void;
   restartAgent(chat: ChatSession): Promise<void>;
 }
 
@@ -356,6 +360,12 @@ export class ChatSession {
         break;
       case 'restartAgent':
         await this.failing('Could not restart the agent', this.actions.restartAgent(this));
+        break;
+      case 'listChats':
+        await this.actions.listChats(this);
+        break;
+      case 'openChat':
+        this.actions.openChat(this, message.key);
         break;
     }
   }

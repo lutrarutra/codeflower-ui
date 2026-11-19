@@ -51,7 +51,9 @@ function actions(
     openShell: async () => {},
     openBrowser: () => {},
     setSubagentSettings: async () => {},
-    restartAgent: async () => {}
+    restartAgent: async () => {},
+    listChats: async () => {},
+    openChat: () => {}
   };
 }
 

@@ -115,6 +115,7 @@ class AppState {
     openFile: (worker, chat, path) => void this.previews.openPath(worker, path, chat.key),
     // E.g. a subagent's chat from its parent's: in Focus, Focus shows it.
     openChat: (worker, key) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker: worker.id, session: key }),
+    activity: (worker) => this.worker(worker.id)?.activity,
     // Watched beside the chat; Focus shows only chats, so the grid comes back.
     openCommand: (worker, chat, commandId) => {
       if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });

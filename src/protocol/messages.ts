@@ -277,6 +277,19 @@ export function sessionStatus(state: ChatState, waitingForUser: boolean): Sessio
   return state.busy ? 'working' : 'ready';
 }
 
+/** A chat of the same sandbox, as the header's list of them shows it. */
+export interface SandboxChat {
+  key: string;
+  title: string;
+  agent?: AgentPresentation;
+  /** Its last prompt or reply (ISO); the list shows the latest first. */
+  updatedAt?: string;
+  /** Known for chats open in this window, and those the sandbox says are working or waiting. */
+  status?: SessionStatus;
+  /** The chat that shows the list. */
+  current?: boolean;
+}
+
 export type HostMessage =
   | { type: 'state'; state: ChatState }
   /**
@@ -306,7 +319,9 @@ export type HostMessage =
   /** The chat's subagents, running and ended. */
   | { type: 'subagents'; subagents: SubagentSummary[] }
   /** The defaults of the worker's subagents; null when its agent has none in code flower. */
-  | { type: 'subagentSettings'; state: SubagentSettingsState | null };
+  | { type: 'subagentSettings'; state: SubagentSettingsState | null }
+  /** The sandbox's chats, in answer to `listChats` (again when the host learns more). */
+  | { type: 'chats'; chats: SandboxChat[] };
 
 export type WebviewMessage =
   | { type: 'ready' }
@@ -350,7 +365,11 @@ export type WebviewMessage =
   | { type: 'openBrowser' }
   | { type: 'subagentSettings'; settings: Partial<SubagentSettings> }
   /** Restart the agent so settings it reads at start apply. */
-  | { type: 'restartAgent' };
+  | { type: 'restartAgent' }
+  /** The sandbox's chats, for the header's list (answered with `chats`). */
+  | { type: 'listChats' }
+  /** Show another chat of the sandbox: bring its tab to the front, or open one. */
+  | { type: 'openChat'; key: string };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

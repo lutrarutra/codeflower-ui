@@ -10,8 +10,11 @@ import {
   type ChatState,
   type PendingPermission,
   type PendingQuestion,
+  type SandboxChat,
   type TranscriptEntry
 } from '../../protocol/messages.ts';
+import { chatStatus } from './focusList.ts';
+import type { WorkerActivity } from './api.ts';
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { AgentCommand } from '../../protocol/commands.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
@@ -57,6 +60,8 @@ export interface WorkerEvents {
   openFile(worker: WebWorker, chat: ChatSession, path: string): void;
   /** A chat of the sandbox in front, e.g. a subagent's from its parent. */
   openChat(worker: WebWorker, key: string): void;
+  /** What the app last polled of the sandbox's chats: which work or wait. */
+  activity(worker: WebWorker): WorkerActivity | undefined;
   /** A command a chat's agent runs, watched read-only in a tab. */
   openCommand(worker: WebWorker, chat: ChatSession, commandId: string): void;
   /** A shell in the sandbox, from a chat's header. */
@@ -614,8 +619,31 @@ export class WebWorker {
       const agent = agentOfKey(chat.key);
       this.setSubagentSettings(agent, await this.require().subagentSettings(agent, settings));
     },
-    restartAgent: (chat) => this.restartAgent(agentOfKey(chat.key))
+    restartAgent: (chat) => this.restartAgent(agentOfKey(chat.key)),
+    listChats: async (chat) => {
+      chat.post({ type: 'chats', chats: this.sandboxChats(chat.key) });
+      if (await this.listSessions().catch(() => false)) chat.post({ type: 'chats', chats: this.sandboxChats(chat.key) });
+    },
+    openChat: (_chat, key) => this.events.openChat(this, key)
   };
+
+  /** The sandbox's chats as a chat's header lists them; `current` is that chat. */
+  private sandboxChats(current: string): SandboxChat[] {
+    const activity = this.events.activity(this);
+    return this.sessions.map((session) => {
+      const open = this.chats[session.key];
+      const polled = activity?.chats.find((candidate) => candidate.key === session.key);
+      const status = chatStatus(open?.status, polled, open?.backgroundWork);
+      return {
+        key: session.key,
+        title: open?.state.title || session.title,
+        agent: this.presentation(session.key).agent,
+        updatedAt: session.updatedAt,
+        ...(status ? { status } : {}),
+        ...(session.key === current ? { current: true } : {})
+      };
+    });
+  }
 
   /**
    * Restarts an agent, e.g. so new keys or plugins apply (refused while its chats work). Its

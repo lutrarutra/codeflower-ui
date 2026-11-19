@@ -7,6 +7,7 @@
     type PendingQuestion,
     type QueuedPromptSummary,
     type QueuePaused,
+    type SandboxChat,
     type SessionStatus,
     type TranscriptEntry
   } from '../protocol/messages.ts';
@@ -18,6 +19,7 @@
   import AgentIcon from './lib/AgentIcon.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
   import ShownFilesMenu from './lib/ShownFilesMenu.svelte';
+  import ChatSwitcher from './lib/ChatSwitcher.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
   import { provideSandboxFiles, SandboxFiles } from './lib/sandboxFiles.svelte.ts';
   import PermissionPrompt from './lib/PermissionPrompt.svelte';
@@ -25,7 +27,6 @@
   import QuestionCard from './lib/QuestionCard.svelte';
   import SettingsBar from './lib/SettingsBar.svelte';
   import Transcript from './lib/Transcript.svelte';
-  import ChatTitle from './lib/ChatTitle.svelte';
   import Tulip from './lib/Tulip.svelte';
   import UsageMeter from './lib/UsageMeter.svelte';
   import Elapsed from './lib/Elapsed.svelte';
@@ -107,6 +108,8 @@
   const together = $derived(queueTogether && queued.length > 1);
   /** The chat's subagents, and the worker's defaults for them. */
   let subagents = $state<SubagentSummary[]>([]);
+  /** The sandbox's chats, for the title's list; asked for when it opens. */
+  let sandboxChats = $state<SandboxChat[] | undefined>();
   let subagentSettings = $state<SubagentSettingsState | null>(null);
   let settings: SettingsBar | undefined = $state();
 
@@ -173,6 +176,9 @@
         break;
       case 'subagentSettings':
         subagentSettings = message.state;
+        break;
+      case 'chats':
+        sandboxChats = message.chats;
         break;
     }
   }
@@ -341,8 +347,13 @@
   <!-- One line: the chat, its agent, the tools and the status; a narrow chat keeps only the status dot. -->
   <header class="@container flex items-center gap-2 border-b-[1.5px] border-soft-line bg-card/60 px-3 py-1.5">
     <span class="contents max-[640px]:hidden"><Tulip size={20} /></span>
-    <h1 class="m-0 flex min-w-0 flex-1 font-display text-[1rem] leading-tight font-medium" title={chat.title || 'New session'}>
-      <ChatTitle title={chat.title} fallback="New session" />
+    <h1 class="m-0 flex min-w-0 flex-1 font-display text-[1rem] leading-tight font-medium">
+      <ChatSwitcher
+        title={chat.title}
+        chats={sandboxChats}
+        list={() => send({ type: 'listChats' })}
+        choose={(key) => send({ type: 'openChat', key })}
+      />
     </h1>
     {#if subagent}
       <button

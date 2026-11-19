@@ -7,6 +7,15 @@ export function duration(ms: number): string {
   return `${Math.floor(minutes / 60)}h ${`${minutes % 60}`.padStart(2, '0')}m`;
 }
 
+/** How long ago a time was: just now, 5 min ago, 3 h ago, 2 d ago. */
+export function ago(timeMs: number): string {
+  const seconds = Math.max(0, (Date.now() - timeMs) / 1000);
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+  return `${Math.floor(seconds / 86400)} d ago`;
+}
+
 /** An ISO time as ms since the epoch, or null. */
 export function epoch(time: string | null | undefined): number | null {
   if (!time) return null;

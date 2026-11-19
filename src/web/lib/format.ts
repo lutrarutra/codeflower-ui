@@ -100,14 +100,8 @@ export function resets(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-/** How long ago a time was: just now, 5 min ago, 3 h ago, 2 d ago. */
-export function ago(timeMs: number): string {
-  const seconds = Math.max(0, (Date.now() - timeMs) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-  return `${Math.floor(seconds / 86400)} d ago`;
-}
+/** How long ago a time was; shared with the chat view, which shows it in its list of chats. */
+export { ago } from '../../chat/lib/time.ts';
 
 /** A duration in seconds as a clock reads it: 45 s, 2 min 05 s, 1 h 03 min. */
 export function duration(seconds: number): string {
