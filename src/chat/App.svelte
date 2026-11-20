@@ -706,5 +706,5 @@
   </form>
   {/if}
 
-  <UsageMeter {usage} {subagents} commands={agentCommands} {background} />
+  <UsageMeter {usage} {subagents} commands={agentCommands} {background} jobs={subagent ? [] : (chat.jobs ?? [])} />
 </main>

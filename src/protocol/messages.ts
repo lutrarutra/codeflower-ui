@@ -12,6 +12,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from './subagents.ts';
 import type { AgentCommand } from './commands.ts';
+import type { BatchJob } from './jobs.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -225,6 +226,8 @@ export interface ChatState {
   background?: BackgroundTask[];
   /** The commands the agent runs, and the last few that ended (bridges that tell of them). */
   commands?: AgentCommand[];
+  /** The batch jobs this chat asked for (codeflower-job): active, and those that ended in the last day. */
+  jobs?: BatchJob[];
   /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
   subagent?: SubagentSummary & { parentTitle?: string };
   /** The chat's sandbox opens shells for the user: the header's terminal button (`openShell`). */
@@ -359,6 +362,8 @@ export type WebviewMessage =
   | { type: 'stopSubagent'; key: string }
   /** Show a command the agent runs, its output so far and the rest as it comes (read-only). */
   | { type: 'openCommand'; commandId: string }
+  /** Cancel one of the chat's batch jobs (`jobs`); its output stays. */
+  | { type: 'cancelJob'; id: string }
   /** Open a shell in the chat's sandbox, where the window keeps its terminals (`shells`). */
   | { type: 'openShell' }
   /** Show the chat's browser (`browser`). */

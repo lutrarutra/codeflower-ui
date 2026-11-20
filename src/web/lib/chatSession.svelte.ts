@@ -48,6 +48,8 @@ export interface ChatActions {
   stopSubagent(chat: ChatSession, key: string): Promise<void>;
   /** A command the chat's agent runs, watched read-only in a tab of its own. */
   openCommand(chat: ChatSession, commandId: string): void;
+  /** Cancels one of the chat's batch jobs. */
+  cancelJob(chat: ChatSession, id: string): Promise<void>;
   /** A shell in the chat's sandbox, in the terminals' panel. */
   /** Shows the chat's browser beside it. */
   openBrowser(chat: ChatSession): void;
@@ -348,6 +350,9 @@ export class ChatSession {
         break;
       case 'openCommand':
         this.actions.openCommand(this, message.commandId);
+        break;
+      case 'cancelJob':
+        await this.failing('Could not cancel the job', this.actions.cancelJob(this, message.id));
         break;
       case 'openShell':
         await this.failing('Could not open a terminal', this.actions.openShell(this));

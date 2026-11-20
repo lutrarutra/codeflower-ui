@@ -12,21 +12,30 @@
     type ChatUsage
   } from '../../protocol/usage.ts';
   import type { AgentCommand, BackgroundWork } from '../../protocol/commands.ts';
+  import type { BatchJob } from '../../protocol/jobs.ts';
   import type { SubagentSummary } from '../../protocol/subagents.ts';
   import BackgroundBadge from './BackgroundBadge.svelte';
   import CommandsBadge from './CommandsBadge.svelte';
+  import JobsBadge from './JobsBadge.svelte';
   import SubagentBadge from './SubagentBadge.svelte';
 
   // Under the composer, mostly icons with the details on hover: how full the
   // context is, what this chat used, how much of the worker's subscription
   // quota is left and, at the right, what runs in the background (the agent's
-  // commands, its other tasks) and the chat's subagents.
+  // commands, its other tasks, its batch jobs) and the chat's subagents.
   let {
     usage,
     subagents = [],
     commands = [],
-    background = []
-  }: { usage: ChatUsage; subagents?: SubagentSummary[]; commands?: AgentCommand[]; background?: BackgroundWork[] } = $props();
+    background = [],
+    jobs = []
+  }: {
+    usage: ChatUsage;
+    subagents?: SubagentSummary[];
+    commands?: AgentCommand[];
+    background?: BackgroundWork[];
+    jobs?: BatchJob[];
+  } = $props();
 
   // Resets count down; a minute is fine enough.
   let now = $state(Date.now());
@@ -89,6 +98,7 @@
   <span class="ml-auto flex shrink-0 items-center gap-x-3">
     <CommandsBadge {commands} />
     <BackgroundBadge work={background} />
+    <JobsBadge {jobs} />
     <SubagentBadge {subagents} />
   </span>
 </div>

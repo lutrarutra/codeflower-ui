@@ -17,6 +17,7 @@ import { chatStatus } from './focusList.ts';
 import type { WorkerActivity } from './api.ts';
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { AgentCommand } from '../../protocol/commands.ts';
+import { jobsOfChat, type BatchJob } from '../../protocol/jobs.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
@@ -98,6 +99,8 @@ export class WebWorker {
   chats = $state<Record<string, ChatSession>>({});
   /** The commands the open chats' agents run, by id: what their tabs show. */
   commands = $state<Record<string, AgentCommand>>({});
+  /** The project's batch jobs (codeflower-job), active and of the last day; each chat shows its own. */
+  jobs = $state<BatchJob[]>([]);
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
   /** The user's shells running in the sandbox (the page's Terminal). */
@@ -441,6 +444,7 @@ export class WebWorker {
       this.noticeTerminal(chat);
       void this.loadSubagents(chat);
       void this.loadCommands(chat);
+      void this.loadJobs(chat);
     } catch (error) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
@@ -470,6 +474,20 @@ export class WebWorker {
     if (!connection?.commandsFeature(agentOfKey(chat.key))) return;
     const commands = await connection.commands(chat.key).catch(() => undefined);
     if (commands && this.connection === connection) this.setCommands(chat.key, commands);
+  }
+
+  /** The project's batch jobs, for a chat that attached. */
+  private async loadJobs(chat: ChatSession): Promise<void> {
+    const connection = this.connection;
+    if (!connection?.jobsFeature) return;
+    const jobs = await connection.jobs();
+    if (this.connection === connection) this.setJobs(jobs);
+    else chat.setState({ jobs: jobsOfChat(this.jobs, chat.key) });
+  }
+
+  private setJobs(jobs: BatchJob[]): void {
+    this.jobs = jobs;
+    for (const [key, chat] of Object.entries(this.chats)) chat?.setState({ jobs: jobsOfChat(jobs, key) });
   }
 
   private setCommands(key: string, commands: AgentCommand[]): void {
@@ -615,6 +633,9 @@ export class WebWorker {
       if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
     },
     stopSubagent: (_chat, key) => this.require().cancelSubagent(key),
+    cancelJob: async (_chat, id) => {
+      await this.require().cancelJob(id);
+    },
     setSubagentSettings: async (chat, settings) => {
       const agent = agentOfKey(chat.key);
       this.setSubagentSettings(agent, await this.require().subagentSettings(agent, settings));
@@ -862,6 +883,7 @@ export class WebWorker {
       busy: (key: string, busy: boolean) => this.chats[key]?.setState({ busy }),
       background: (key: string, background: BackgroundTask[]) => this.chats[key]?.setState({ background }),
       commands: (key: string, commands: AgentCommand[]) => this.setCommands(key, commands),
+      jobs: (jobs: BatchJob[]) => this.setJobs(jobs),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),
       elicitUrl: (request: UrlElicitation, agent?: AgentName) => this.events.elicitUrl(this, request, agent),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),

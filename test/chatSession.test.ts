@@ -48,6 +48,7 @@ function actions(
     openParent: () => {},
     stopSubagent: async () => {},
     openCommand: () => {},
+    cancelJob: async () => {},
     openShell: async () => {},
     openBrowser: () => {},
     setSubagentSettings: async () => {},

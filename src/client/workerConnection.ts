@@ -31,6 +31,7 @@ import {
 } from '../protocol/messages.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
+import type { BatchJob } from '../protocol/jobs.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../protocol/browser.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
 import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
@@ -168,6 +169,8 @@ export interface WorkerHandlers {
   browser?(browser: BrowserState): void;
   /** A frame of a chat's browser this window watches. */
   browserFrame?(frame: BrowserFrame): void;
+  /** The project's batch jobs changed (codeflower-job): one was submitted, or changed state. */
+  jobs?(jobs: BatchJob[]): void;
   /** An agent's connection ended, e.g. it restarted (1011): its chats are detached. */
   agentClosed?(agent: AgentName, reason: string, code: number): void;
   /** The connection to the sandbox ended. */
@@ -263,7 +266,8 @@ export class WorkerConnection {
       shells: (shells) => handlers.shells?.(shells),
       subagentSettingsChanged: (agent, state) => handlers.subagentSettings?.(agent, state),
       browserChanged: (browser) => handlers.browser?.(browser),
-      browserFrame: (frame) => handlers.browserFrame?.(frame)
+      browserFrame: (frame) => handlers.browserFrame?.(frame),
+      jobsChanged: (jobs) => handlers.jobs?.(jobs)
     });
     // The agents' connections go with it; one that is closing for the same reason says so first.
     control.onClose((reason, code) => {
@@ -889,6 +893,22 @@ export class WorkerConnection {
   async commands(key: string): Promise<AgentCommand[]> {
     if (!this.commandsFeature(agentOfKey(key))) return [];
     return this.linkOf(key).bridge.commands(key);
+  }
+
+  /** Whether the agents may ask for batch jobs here, as the worker's status said. */
+  get jobsFeature(): boolean {
+    return this.workerStatus.jobs !== undefined;
+  }
+
+  /** The project's batch jobs; none from workers without them. */
+  async jobs(): Promise<BatchJob[]> {
+    if (!this.jobsFeature) return [];
+    return this.bridge.jobs().catch(() => []);
+  }
+
+  /** Cancels one of the project's batch jobs. */
+  cancelJob(id: string): Promise<BatchJob | undefined> {
+    return this.bridge.cancelJob(id);
   }
 
   /** A chat's subagents, running and recorded; none for agents without them. */

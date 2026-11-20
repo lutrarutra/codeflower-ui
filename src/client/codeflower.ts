@@ -14,6 +14,7 @@ import type {
   TranscriptEntry
 } from '../protocol/messages.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
+import type { BatchJob, JobsSummary } from '../protocol/jobs.ts';
 import type { BrowserFrame, BrowserInputEvent, BrowserNavigation, BrowserState } from '../protocol/browser.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
@@ -113,6 +114,8 @@ export interface WorkerStatus {
   slurmJobId?: string;
   /** When the batch job ends (ISO 8601); chats are asked to wrap up before. Missing without a known end. */
   allocationEnd?: string;
+  /** Batch jobs the agents may ask for (codeflower-job); missing when the worker has none. */
+  jobs?: JobsSummary;
   /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
   mounts?: Mount[];
   /** What the worker offers beyond chats; on an agent's connection also that agent's. */
@@ -469,6 +472,8 @@ export interface CodeflowerHandlers {
   browserChanged?(browser: BrowserState): void;
   /** A frame of a browser this window watches; `browserAck` it for the next. */
   browserFrame?(frame: BrowserFrame): void;
+  /** The project's batch jobs changed: one was submitted, or changed state. */
+  jobsChanged?(jobs: BatchJob[]): void;
 }
 
 /** A notification about one agent carries its name. */
@@ -551,6 +556,10 @@ export class CodeflowerExtensions {
       if (browser && typeof browser.key === 'string') handlers.browserChanged?.(browser);
     });
     rpc.on('_codeflower/browser/frame', (params) => handlers.browserFrame?.(params as BrowserFrame));
+    rpc.on('_codeflower/jobs/changed', (params) => {
+      const { jobs } = params as { jobs?: BatchJob[] };
+      if (Array.isArray(jobs)) handlers.jobsChanged?.(jobs);
+    });
     rpc.on('_codeflower/terminal/changed', (params) => {
       const { terminals } = params as { terminals?: (ChatTerminal | ShellTerminal)[] };
       if (!Array.isArray(terminals)) return;
@@ -945,6 +954,18 @@ export class CodeflowerExtensions {
   /** The commands a chat's agent runs, and the last few that ended. */
   async commands(key: string): Promise<AgentCommand[]> {
     return (await this.rpc.request<{ commands?: AgentCommand[] }>('_codeflower/commands/list', { key })).commands ?? [];
+  }
+
+  // ---- batch jobs ----
+
+  /** The project's batch jobs: active, and those that ended in the last day. */
+  async jobs(): Promise<BatchJob[]> {
+    return (await this.rpc.request<{ jobs?: BatchJob[] }>('_codeflower/jobs/list', {})).jobs ?? [];
+  }
+
+  /** Cancels one of the project's batch jobs. */
+  async cancelJob(id: string): Promise<BatchJob | undefined> {
+    return (await this.rpc.request<{ job?: BatchJob }>('_codeflower/jobs/cancel', { id })).job;
   }
 
   // ---- subagents ----
