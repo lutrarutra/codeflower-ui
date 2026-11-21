@@ -9,6 +9,8 @@ import {
   type ChatState,
   type FormContent,
   type HostMessage,
+  NOTICE_ACTION_LABELS,
+  type NoticeAction,
   type PendingPermission,
   type PendingQuestion,
   type QuestionAction,
@@ -42,6 +44,8 @@ export interface ChatActions {
   transcriptPage(chat: ChatSession, before: number): Promise<TranscriptPage>;
   openFile(chat: ChatSession, path: string): void;
   signIn(chat: ChatSession): void;
+  /** The chat is open on another sandbox: ask it to let go, and open the chat here once it did. */
+  takeOver(chat: ChatSession): void;
   /** A subagent's chat, or a subagent chat's parent, in a tab of its own. */
   openSubagent(chat: ChatSession, key: string): void;
   openParent(chat: ChatSession): void;
@@ -250,8 +254,10 @@ export class ChatSession {
     this.queue.flush();
   }
 
-  notify(level: 'info' | 'error', message: string, signIn = false): void {
-    this.post({ type: 'notice', level, message, ...(signIn ? { action: { id: 'signIn' as const, label: 'Sign in' } } : {}) });
+  /** `action`: the notice's button (`true`: Sign in). */
+  notify(level: 'info' | 'error', message: string, action: NoticeAction | boolean = false): void {
+    const id = action === true ? 'signIn' : action || undefined;
+    this.post({ type: 'notice', level, message, ...(id ? { action: { id, label: NOTICE_ACTION_LABELS[id] } } : {}) });
   }
 
   private replay(listener: (message: HostMessage) => void): void {
@@ -322,6 +328,7 @@ export class ChatSession {
         break;
       case 'action':
         if (message.id === 'signIn') this.actions.signIn(this);
+        else if (message.id === 'takeOver') this.actions.takeOver(this);
         else this.runAction(message.id);
         break;
       case 'removeQueued':

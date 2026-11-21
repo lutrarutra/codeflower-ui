@@ -271,6 +271,10 @@ export interface QueuePaused {
 
 export const ACTION_PROMPT_META = 'codeflower/action';
 
+/** A notice's button: sign the agent in, or take a chat open on another sandbox over. */
+export type NoticeAction = 'signIn' | 'takeOver';
+export const NOTICE_ACTION_LABELS: Record<NoticeAction, string> = { signIn: 'Sign in', takeOver: 'Take over' };
+
 /** What the session is doing, shown on its tab and in its header. */
 export type SessionStatus = 'ready' | 'waiting' | 'working' | 'offline';
 
@@ -310,7 +314,7 @@ export type HostMessage =
   | { type: 'config'; options: SessionConfigOption[] }
   /** The chat's tokens and cost, and its worker's quota. */
   | { type: 'usage'; usage: ChatUsage }
-  | { type: 'notice'; level: 'info' | 'error'; message: string; action?: { id: 'signIn'; label: string } }
+  | { type: 'notice'; level: 'info' | 'error'; message: string; action?: { id: NoticeAction; label: string } }
   /** The notice no longer holds, e.g. the chat reconnected. */
   | { type: 'clearNotice' }
   /** `together`: all of them go in the next turn, as one prompt, instead of one per turn. */

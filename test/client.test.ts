@@ -594,3 +594,35 @@ test("routes each chat to its agent's own connection, and an agent's restart lea
   assert.equal(await connection.newSession('claude'), 'claude-one');
   assert.equal(connection.agentConnected('claude'), true);
 });
+
+test('lets go of a chat it closed, hears when the worker lets go of one, and asks for one open elsewhere', async () => {
+  const agent = new FakeAgent({
+    '_codeflower/status': () => ({ agent: 'claude', signedIn: true }),
+    initialize: () => ({ protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } } }),
+    'session/resume': () => ({}),
+    '_codeflower/sessions/close': () => ({}),
+    '_codeflower/sessions/takeOver': () => ({ state: 'requested', holder: 'other' })
+  });
+  const { events, handlers } = recorder();
+  handlers.released = (key, reason) => events.push(`released ${key} ${reason}`);
+  handlers.requested = (key) => events.push(`requested ${key}`);
+  const connection = await WorkerConnection.connect(agent.open, handlers, client);
+  const resumes = () => agent.received.filter((message) => message.method === 'session/resume').length;
+
+  await connection.resumeSession('claude', 'abc', null);
+  agent.notify('_codeflower/sessions/requested', { key: 'claude-abc', agent: 'claude' });
+  // Released: no longer attached, so opening it again resumes it.
+  agent.notify('_codeflower/sessions/released', { key: 'claude-abc', reason: 'takeover', agent: 'claude' });
+  await tick();
+  assert.deepEqual(events.filter((event) => /^(released|requested)/.test(event)), ['requested claude-abc', 'released claude-abc takeover']);
+  await connection.resumeSession('claude', 'abc', null);
+  assert.equal(resumes(), 2);
+
+  // Closed here: the worker hears it, and opening it again resumes it.
+  await connection.closeSession('claude-abc');
+  assert.deepEqual(agent.received.find((message) => message.method === '_codeflower/sessions/close')?.params, { key: 'claude-abc' });
+  await connection.resumeSession('claude', 'abc', null);
+  assert.equal(resumes(), 3);
+
+  assert.deepEqual(await connection.takeOver('claude-abc'), { state: 'requested', holder: 'other' });
+});

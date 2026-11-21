@@ -26,6 +26,7 @@ import {
   isConnectionClosed,
   EMPTY_TRANSCRIPT,
   pageUpTo,
+  METHOD_NOT_FOUND,
   RpcError,
   TAKEN_OVER,
   WorkerConnection,
@@ -47,6 +48,11 @@ const RECONNECT_MS = 10_000;
 // After an agent's restart, how long its chats wait before they attach to the fresh one.
 const AGENT_RESTART_MS = 500;
 const LEASE_CONFLICT = -32010;
+// A chat open on another sandbox tries to open here again this often, so it does once that sandbox lets go of it;
+// after Take over, more often, for as long as the other sandbox heeds the request.
+const LEASE_RETRY_MS = 15_000;
+const TAKE_OVER_RETRY_MS = 2_000;
+const TAKE_OVER_MS = 10 * 60_000;
 const CLIENT = { name: 'codeflower-app', title: 'code flower', version: '1' };
 
 function describe(error: unknown): string {
@@ -125,6 +131,10 @@ export class WebWorker {
   private connecting: Promise<void> | undefined;
   /** Chats being attached, by key. */
   private readonly attaching = new Map<string, Promise<void>>();
+  /** Chats open on another sandbox, read-only here, and their next try to open here (retryLease). */
+  private readonly leaseRetries = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Chats this page asked the other sandbox for (Take over), until when the request holds. */
+  private readonly takingOver = new Map<string, number>();
   /** Counts connections, so a late close of an old one changes nothing. */
   private generation = 0;
   private retry: ReturnType<typeof setInterval> | undefined;
@@ -346,6 +356,18 @@ export class WebWorker {
     return chat;
   }
 
+  /**
+   * The chat's last tab closed: the page stops following it, and the sandbox lets go of it once no window
+   * has it open and it is idle, so another sandbox can open it. Opening it again attaches it again.
+   */
+  closeChat(key: string): void {
+    const chat = this.chats[key];
+    if (!chat) return;
+    this.stopLeaseRetry(key);
+    if (!chat.state.subagent && chat.state.live) void this.connection?.closeSession(key).catch(() => undefined);
+    this.forget(key);
+  }
+
   forget(key: string): void {
     // A subagent's updates stop coming once no chat of it is open.
     if (this.chats[key]?.state.subagent) void this.connection?.closeSubagent(key).catch(() => undefined);
@@ -426,6 +448,8 @@ export class WebWorker {
     chat.hold();
     try {
       const attached = await connection.resumeSession(session.harness, session.nativeSessionId, session.cwd);
+      // It was open on another sandbox, which let go of it.
+      if (this.stopLeaseRetry(chat.key)) chat.notify('info', 'The other sandbox let go of this chat: it is open here now.');
       // Updates after the attach came live; the transcript has them too.
       chat.loaded(pageUpTo(await connection.transcriptPage(chat.key), attached.transcriptEntries));
       chat.post({ type: 'config', options: connection.config(chat.key) });
@@ -561,9 +585,62 @@ export class WebWorker {
 
   private report(chat: ChatSession, error: unknown): void {
     if (isAuthRequired(error)) chat.notify('error', `${this.agent(agentOfKey(chat.key))?.name ?? 'The agent'} is not signed in for this project.`, true);
-    else if (error instanceof RpcError && error.code === LEASE_CONFLICT)
-      chat.notify('info', 'This chat is open on another sandbox; it is read-only here.');
-    else chat.notify('error', describe(error));
+    else if (error instanceof RpcError && error.code === LEASE_CONFLICT) {
+      // After Take over, the notice says the request is on its way.
+      if (!this.takingOver.has(chat.key)) {
+        chat.notify(
+          'info',
+          'This chat is open on another sandbox; it is read-only here. It opens here once that sandbox lets go of it: Take over asks it to, after its turn.',
+          'takeOver'
+        );
+      }
+      this.retryLease(chat);
+    } else chat.notify('error', describe(error));
+  }
+
+  /** Asks the sandbox that has the chat to let go of it; the chat opens here once it did. */
+  private async takeOver(chat: ChatSession): Promise<void> {
+    try {
+      const result = await this.require().takeOver(chat.key);
+      if (result.state === 'free') {
+        await this.attach(chat);
+        return;
+      }
+      this.takingOver.set(chat.key, Date.now() + TAKE_OVER_MS);
+      chat.notify('info', 'Asked the other sandbox for this chat. It lets go once the chat is idle, after its turn; the chat opens here then.');
+      this.retryLease(chat);
+    } catch (error) {
+      if (error instanceof RpcError && error.code === METHOD_NOT_FOUND) {
+        chat.notify('error', 'This sandbox cannot take chats over: update it, or close the chat on the other sandbox.');
+      } else this.report(chat, error);
+    }
+  }
+
+  /** The chat tries to open here again in a while: after Take over soon, else now and then. */
+  private retryLease(chat: ChatSession): void {
+    clearTimeout(this.leaseRetries.get(chat.key));
+    const until = this.takingOver.get(chat.key);
+    if (until !== undefined && Date.now() > until) this.takingOver.delete(chat.key);
+    const wait = this.takingOver.has(chat.key) ? TAKE_OVER_RETRY_MS : LEASE_RETRY_MS;
+    this.leaseRetries.set(
+      chat.key,
+      setTimeout(() => {
+        if (this.chats[chat.key] !== chat || chat.state.live || !this.connected) {
+          this.stopLeaseRetry(chat.key);
+          return;
+        }
+        void this.attach(chat).catch((error) => this.report(chat, error));
+      }, wait)
+    );
+  }
+
+  /** Whether the chat was waiting for another sandbox to let go of it. */
+  private stopLeaseRetry(key: string): boolean {
+    const waiting = this.leaseRetries.has(key);
+    clearTimeout(this.leaseRetries.get(key));
+    this.leaseRetries.delete(key);
+    this.takingOver.delete(key);
+    return waiting;
   }
 
   private require(): WorkerConnection {
@@ -625,6 +702,7 @@ export class WebWorker {
     },
     openFile: (chat, path) => this.events.openFile(this, chat, path),
     signIn: (chat) => this.events.signIn(this, agentOfKey(chat.key)),
+    takeOver: (chat) => void this.takeOver(chat),
     openSubagent: (_chat, key) => this.events.openChat(this, key),
     openCommand: (chat, commandId) => this.events.openCommand(this, chat, commandId),
     openShell: (chat) => this.events.openShell(this, chat),
@@ -910,6 +988,16 @@ export class WebWorker {
         if (views?.size) for (const view of views) view(frame);
         else void this.connection?.browser(frame.key).ack(frame.frameId).catch(() => undefined);
       },
+      // Another sandbox took the chat over: read-only here, until it lets go of it again or Take over.
+      released: (key: string) => {
+        const chat = this.chats[key];
+        if (!chat) return;
+        chat.setState({ live: false, busy: false, background: [] });
+        chat.post({ type: 'config', options: [] });
+        chat.notify('info', 'Another sandbox took this chat over; it is read-only here. Take over to move it back.', 'takeOver');
+        this.retryLease(chat);
+      },
+      requested: (key: string) => this.chats[key]?.notify('info', 'Another sandbox asked for this chat: it moves there once this turn ends.'),
       agentClosed: (agent: AgentName, _reason: string, code: number) => this.agentClosed(agent, code, generation),
       closed: (_reason: string, code: number) => this.closed(code, generation)
     };

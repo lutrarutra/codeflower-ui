@@ -44,6 +44,7 @@ function actions(
     transcriptPage: async () => ({ entries: [], start: 0, context: [] }),
     openFile: () => {},
     signIn: () => {},
+    takeOver: () => {},
     openSubagent: () => {},
     openParent: () => {},
     stopSubagent: async () => {},

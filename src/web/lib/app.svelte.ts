@@ -232,7 +232,8 @@ class AppState {
       // A command's tab stops watching it as it goes; the command runs on.
       // A browser's tab only stops showing it: the browser stays the chat's, and its tab does not open by itself again.
       else if (browserKeyOf(local)) this.closedBrowsers.add(tab);
-      else if (!chatKeyOf(local) && !commandIdOf(local)) this.previews.closed(workerId, local);
+      else if (chatKeyOf(local)) this.chatClosed(workerId, chatKeyOf(local)!, tab);
+      else if (!commandIdOf(local)) this.previews.closed(workerId, local);
     };
     this.workbench.onChatFocus = (chat) => {
       this.follow(chat);
@@ -305,6 +306,16 @@ class AppState {
    * A chat came to the front: if its connection went (the tunnel closes chats
    * after idle minutes), it connects again at once, not at the next retry.
    */
+  /**
+   * A chat's tab closed: unless another tab or the Focus view still shows it, the page lets go of it, and
+   * the sandbox does too once no window has it open, so another sandbox can open it.
+   */
+  private chatClosed(workerId: string, key: string, tab: string): void {
+    if (this.workbench.layout.has(tab)) return;
+    if (this.focus.selected?.workerId === workerId && this.focus.selected.key === key) return;
+    this.agents.get(workerId)?.closeChat(key);
+  }
+
   private wake(workerId: string): void {
     const agent = this.agents.get(workerId);
     if (agent?.state === 'disconnected' && Object.keys(agent.chats).length) void agent.connect().catch(() => undefined);

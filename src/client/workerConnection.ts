@@ -53,8 +53,10 @@ import {
   type SavedCredentials,
   type FileTransfers,
   type SessionRecord,
+  type SessionRelease,
   type ShowRequest,
   type ShownNotice,
+  type TakeOverResult,
   type TranscriptPage,
   type UploadTarget,
   type UploadedFile,
@@ -99,7 +101,9 @@ export {
   type FileTransfers,
   type Mount,
   type SessionRecord,
+  type SessionRelease,
   type ShowRequest,
+  type TakeOverResult,
   type TranscriptPage,
   type UploadTarget,
   type UploadedFile,
@@ -171,6 +175,10 @@ export interface WorkerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed (codeflower-job): one was submitted, or changed state. */
   jobs?(jobs: BatchJob[]): void;
+  /** The worker let go of a chat open here (another worker asked for it): it is no longer attached. */
+  released?(sessionKey: string, reason: SessionRelease): void;
+  /** Another worker asked for a chat open here; it goes there once its turn ended. */
+  requested?(sessionKey: string): void;
   /** An agent's connection ended, e.g. it restarted (1011): its chats are detached. */
   agentClosed?(agent: AgentName, reason: string, code: number): void;
   /** The connection to the sandbox ended. */
@@ -380,6 +388,14 @@ export class WorkerConnection {
       },
       queue: (key, queue) => {
         if (acp.isAttached(key)) handlers.queue?.(key, queue);
+      },
+      sessionReleased: (key, reason) => {
+        if (!acp.isAttached(key)) return;
+        acp.detach(key);
+        handlers.released?.(key, reason);
+      },
+      sessionRequested: (key) => {
+        if (acp.isAttached(key)) handlers.requested?.(key);
       }
     });
     link = { agent, rpc, acp, bridge };
@@ -926,6 +942,23 @@ export class WorkerConnection {
     const opened = await link.bridge.openSubagent(key);
     if (opened.live && opened.sessionId) link.acp.attachChild(opened.sessionId);
     return opened;
+  }
+
+  /**
+   * This window closed the chat: it stops following it, and the worker lets go of it once no window has it
+   * open and it is idle, so another sandbox can open it. Opening it again here resumes it.
+   */
+  async closeSession(key: string): Promise<void> {
+    const link = this.links.get(agentOfKey(key));
+    if (!link?.acp.isAttached(key)) return;
+    link.acp.detach(key);
+    // Older workers keep sending its updates, which nothing here takes any more.
+    if (link.rpc.connected) await link.bridge.closeSession(key).catch(() => undefined);
+  }
+
+  /** Asks the sandbox that has the chat open to let go of it, once the chat is idle; `free` when none has it. */
+  takeOver(key: string): Promise<TakeOverResult> {
+    return this.bridge.takeOver(key);
   }
 
   async closeSubagent(key: string): Promise<void> {

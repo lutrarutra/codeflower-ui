@@ -332,6 +332,16 @@ export class AcpClient {
     this.children.delete(key);
   }
 
+  /** A chat no longer attached here: this window closed it, or the worker let go of it. Opening it resumes it again. */
+  detach(key: string): void {
+    this.sessions.delete(key);
+    this.configs.delete(key);
+    this.leftOut.delete(key);
+    this.busySessions.delete(key);
+    this.remoteBusy.delete(key);
+    this.backgroundTasks.delete(key);
+  }
+
   /** What a session is doing now, for a chat that opens mid-turn. */
   activity(key: string): { busy: boolean; background: BackgroundTask[]; permission: PendingPermission | null; question: PendingQuestion | null } {
     return {

@@ -474,7 +474,20 @@ export interface CodeflowerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed: one was submitted, or changed state. */
   jobsChanged?(jobs: BatchJob[]): void;
+  /**
+   * The worker let go of a chat open here, which the window no longer has: another worker asked for it
+   * (`takeover`), or no window had it open (`idle`).
+   */
+  sessionReleased?(key: string, reason: SessionRelease): void;
+  /** Another worker asked for a chat open here (`takeOver`): the worker lets go of it once its turn ended. */
+  sessionRequested?(key: string): void;
 }
+
+/** Why a worker let go of a chat (`_codeflower/sessions/released`). */
+export type SessionRelease = 'takeover' | 'idle';
+
+/** What `_codeflower/sessions/takeOver` did: asked the worker that has the chat, or none has it. */
+export type TakeOverResult = { state: 'requested'; holder: string } | { state: 'free' };
 
 /** A notification about one agent carries its name. */
 type ForAgent<T> = T & { agent: AgentName };
@@ -556,6 +569,14 @@ export class CodeflowerExtensions {
       if (browser && typeof browser.key === 'string') handlers.browserChanged?.(browser);
     });
     rpc.on('_codeflower/browser/frame', (params) => handlers.browserFrame?.(params as BrowserFrame));
+    rpc.on('_codeflower/sessions/released', (params) => {
+      const { key, reason } = params as { key?: string; reason?: SessionRelease };
+      if (typeof key === 'string') handlers.sessionReleased?.(key, reason === 'idle' ? 'idle' : 'takeover');
+    });
+    rpc.on('_codeflower/sessions/requested', (params) => {
+      const { key } = params as { key?: string };
+      if (typeof key === 'string') handlers.sessionRequested?.(key);
+    });
     rpc.on('_codeflower/jobs/changed', (params) => {
       const { jobs } = params as { jobs?: BatchJob[] };
       if (Array.isArray(jobs)) handlers.jobsChanged?.(jobs);
@@ -711,6 +732,16 @@ export class CodeflowerExtensions {
 
   async deleteSession(key: string): Promise<void> {
     await this.rpc.request('_codeflower/sessions/delete', { key });
+  }
+
+  /** On the agent's connection: this window closed the chat, which the worker lets go of once no window has it open. */
+  async closeSession(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/sessions/close', { key });
+  }
+
+  /** Asks the worker that has the chat open to let go of it, which it does once the chat is idle. */
+  takeOver(key: string): Promise<TakeOverResult> {
+    return this.rpc.request<TakeOverResult>('_codeflower/sessions/takeOver', { key });
   }
 
   /** Notes an entry in a session's recorded history, e.g. the files the agent showed. */
