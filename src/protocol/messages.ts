@@ -271,6 +271,18 @@ export interface QueuePaused {
 
 export const ACTION_PROMPT_META = 'codeflower/action';
 
+/**
+ * A prompt of the bridge's own, which the user did not write (a batch job ended, the wrap-up, the
+ * browser handed back): on its text block (`noticePrompt` in the bridge's server.js), so the chat
+ * shows it apart from the user's messages, folded under its title and summary.
+ */
+export const NOTICE_PROMPT_META = 'codeflower/notice';
+
+export interface NoticePromptMeta {
+  title: string;
+  summary?: string;
+}
+
 /** A notice's button: sign the agent in, or take a chat open on another sandbox over. */
 export type NoticeAction = 'signIn' | 'takeOver';
 export const NOTICE_ACTION_LABELS: Record<NoticeAction, string> = { signIn: 'Sign in', takeOver: 'Take over' };

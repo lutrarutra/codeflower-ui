@@ -58,7 +58,7 @@
     const labels = new Map<string, string>();
     let previous: number = Date.now();
     for (const item of items) {
-      if ((item.kind !== 'user' && item.kind !== 'action') || item.started === null) continue;
+      if ((item.kind !== 'user' && item.kind !== 'action' && item.kind !== 'notice') || item.started === null) continue;
       if (!sameDay(item.started, previous)) labels.set(item.id, day(item.started));
       previous = item.started;
     }
@@ -151,6 +151,14 @@
     }
   });
 
+  /** A notice's icon, by what it is about. */
+  function noticeIcon(title: string): string {
+    if (/batch job/i.test(title)) return 'server-process';
+    if (/wrap/i.test(title)) return 'clock';
+    if (/browser/i.test(title)) return 'globe';
+    return 'info';
+  }
+
   // ACP tool kinds: an icon and a tile color each.
   const toolIcon: Record<string, [string, string]> = {
     read: ['file', 'bg-teal-soft'],
@@ -212,7 +220,7 @@
 {/snippet}
 
 {#snippet row(item: ChatItem, previous: ChatItem | undefined, open = false)}
-  {#if (item.kind === 'user' || item.kind === 'action') && days.has(item.id)}
+  {#if (item.kind === 'user' || item.kind === 'action' || item.kind === 'notice') && days.has(item.id)}
     <div class="flex items-center gap-3 py-1 text-[0.72em] text-muted opacity-70 select-none" role="separator">
       <span class="h-px flex-1 bg-soft-line"></span>{days.get(item.id)}<span class="h-px flex-1 bg-soft-line"></span>
     </div>
@@ -238,6 +246,23 @@
       {/if}
       {#if item.started !== null}{@render stamp(item.started)}{/if}
     </div>
+  {:else if item.kind === 'notice'}
+    <!-- The bridge's own message to the agent, not the user's: a line apart, its text folded. -->
+    <details class="group min-w-0 self-stretch text-muted" {open}>
+      <summary
+        class="flex min-w-0 cursor-pointer list-none items-center gap-1.5 rounded-xl border-[1.5px] border-dashed border-soft-line px-2.5 py-1 text-[0.85em] select-none hover:text-ink"
+        title="Sent to the agent by code flower, not by you"
+      >
+        <span class="codicon codicon-{noticeIcon(item.title)} shrink-0 text-violet"></span>
+        <span class="shrink-0 font-semibold">{item.title}</span>
+        {#if item.summary}<span class="min-w-0 truncate">· {item.summary}</span>{/if}
+        <span class="ml-auto flex shrink-0 items-center gap-1">
+          {#if item.started !== null}{@render stamp(item.started)}{/if}
+          <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
+        </span>
+      </summary>
+      <div class="mt-1.5 ml-3 border-l-2 border-soft-line pl-3 text-[0.85em] wrap-anywhere whitespace-pre-wrap">{item.text}</div>
+    </details>
   {:else if item.kind === 'assistant'}
     <div class="max-w-[95%]">
       <Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} />

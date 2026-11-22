@@ -3,6 +3,7 @@ import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCa
 import { looksLikeFile } from './files.ts';
 import {
   ACTION_PROMPT_META,
+  NOTICE_PROMPT_META,
   hiddenBlock,
   type ActionPromptMeta,
   formFields,
@@ -30,6 +31,8 @@ export interface TurnStamp {
 export type ChatItem =
   | ({ kind: 'user'; id: string; text: string } & TurnTimes)
   | ({ kind: 'action'; id: string; title: string; text: string } & TurnTimes)
+  /** A prompt of the bridge's own (e.g. a batch job ended): not the user's message, shown apart and folded. */
+  | ({ kind: 'notice'; id: string; title: string; summary: string | null; text: string } & TurnTimes)
   | { kind: 'assistant'; id: string; text: string; messageId?: string | null; at: number | null; stamp?: TurnStamp }
   | { kind: 'thought'; id: string; text: string }
   | {
@@ -126,6 +129,17 @@ function blockText(block: ContentBlock): string {
       return '[audio]';
     default:
       return '';
+  }
+}
+
+/** The bridge's notice a prompt is, from its text block's `codeflower/notice`. */
+function promptNotice(prompt: ContentBlock[]): { title: string; summary: string | null } | undefined {
+  for (const block of prompt) {
+    const meta = block._meta?.[NOTICE_PROMPT_META];
+    if (typeof meta === 'object' && meta !== null && 'title' in meta && typeof meta.title === 'string') {
+      const summary = 'summary' in meta && typeof meta.summary === 'string' && meta.summary.trim() ? meta.summary : null;
+      return { title: meta.title, summary };
+    }
   }
 }
 
@@ -238,7 +252,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
   let pendingQuestion: Extract<ChatItem, { kind: 'question' }> | undefined;
   // The prompts of the agent's current turn: the first, and any sent while it worked.
-  let prompted: Extract<ChatItem, { kind: 'user' | 'action' }>[] = [];
+  let prompted: Extract<ChatItem, { kind: 'user' | 'action' | 'notice' }>[] = [];
   // Where the current turn's items start.
   let turnStart = 0;
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
@@ -255,10 +269,13 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           const prompt = entry.prompt.filter((block) => !hiddenBlock(block));
           const text = prompt.map(blockText).join('\n');
           const action = promptAction(prompt);
+          const notice = action ? undefined : promptNotice(prompt);
           const times = { started: time(entry.t), ended: null };
           const item: (typeof prompted)[number] = action
             ? { kind: 'action', id, title: action.title, text, ...times }
-            : { kind: 'user', id, text, ...times };
+            : notice
+              ? { kind: 'notice', id, title: notice.title, summary: notice.summary, text, ...times }
+              : { kind: 'user', id, text, ...times };
           prompted.push(item);
           items.push(item);
         }
@@ -472,7 +489,7 @@ export type TurnPart = { kind: 'item'; item: ChatItem } | { kind: 'steps'; id: s
 export interface Turn {
   /** The prompt's id, or `start` for the first page's entries from before its first prompt. */
   id: string;
-  prompt: Extract<ChatItem, { kind: 'user' | 'action' }> | null;
+  prompt: Extract<ChatItem, { kind: 'user' | 'action' | 'notice' }> | null;
   /**
    * Everything after the prompt, in order. The agent's messages, files shown to
    * the user, their own commands, a turn that stopped and a failed call that
@@ -515,7 +532,8 @@ export function foldTurns(items: ChatItem[]): Turn[] {
     turns.push({ id: prompt?.id ?? 'start', prompt, parts, steps, work });
   };
   for (const item of items) {
-    if (item.kind === 'user' || item.kind === 'action') {
+    // A notice of the bridge's starts a turn as the user's prompt does: the agent works on it.
+    if (item.kind === 'user' || item.kind === 'action' || item.kind === 'notice') {
       close(true);
       prompt = item;
       work = [];

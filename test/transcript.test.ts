@@ -56,6 +56,46 @@ test('renders action prompts compactly and falls back when metadata is missing',
   assert.deepEqual(plain, [{ kind: 'user', id: '0', text: 'Make a checkpoint.', started: null, ended: null }]);
 });
 
+test("shows the bridge's notices apart from the user's messages, each starting the agent's turn", () => {
+  const at = (seconds: number) => new Date(seconds * 1000).toISOString();
+  const text = 'A batch job you submitted ended:\n- align (j-2d5d65, slurm 1): done (6 done, 0 failed)';
+  const items = buildItems([
+    { t: at(0), kind: 'prompt', prompt: [{ type: 'text', text: 'Run the alignment.' }] },
+    chunk('Submitted.'),
+    { t: at(5), kind: 'turn_end', stopReason: 'end_turn' },
+    {
+      t: at(60),
+      kind: 'prompt',
+      prompt: [{ type: 'text', text, _meta: { 'codeflower/notice': { title: 'Batch job ended', summary: 'align done (6 done)' } } }]
+    },
+    chunk('The alignment is done.'),
+    { t: at(70), kind: 'turn_end', stopReason: 'end_turn' },
+    // A notice without a summary.
+    { t: at(80), kind: 'prompt', prompt: [{ type: 'text', text: 'Wrap up.', _meta: { 'codeflower/notice': { title: 'Wrap up' } } }] }
+  ]);
+  assert.deepEqual(items[2], {
+    kind: 'notice',
+    id: '3',
+    title: 'Batch job ended',
+    summary: 'align done (6 done)',
+    text,
+    started: 60_000,
+    ended: 70_000
+  });
+  assert.deepEqual(
+    items.map((item) => item.kind),
+    ['user', 'assistant', 'notice', 'assistant', 'notice']
+  );
+  const last = items.at(-1);
+  assert.equal(last?.kind === 'notice' ? last.summary : undefined, null);
+  // The agent's answer to a notice is that notice's turn, not the user's prompt's.
+  const turns = foldTurns(items);
+  assert.deepEqual(
+    turns.map((turn) => turn.prompt?.kind),
+    ['user', 'notice', 'notice']
+  );
+});
+
 test("shows a message sent while the agent worked without the client's note to the agent", () => {
   const items = buildItems([
     {
