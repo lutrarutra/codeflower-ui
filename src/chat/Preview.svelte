@@ -1,5 +1,6 @@
 <script lang="ts">
   import DOMPurify from 'dompurify';
+  import { jobActive, jobStatus } from '../protocol/jobs.ts';
   import type { FeedbackAnnotation, FeedbackFigure, PreviewHostMessage, PreviewState } from '../protocol/messages.ts';
   import Annotator, { type Note } from './lib/Annotator.svelte';
   import ErrorState from './lib/ErrorState.svelte';
@@ -74,8 +75,11 @@
         if (previous?.data && message.state.data && previous.file.mtimeMs !== message.state.file.mtimeMs && !ownSave) {
           assets = {};
           requested = new Set();
-          updated = true;
-          setTimeout(() => (updated = false), 4000);
+          // A running job's output grows all the time: its strip says so, without a flash at each change.
+          if (!message.state.job || !jobActive(message.state.job)) {
+            updated = true;
+            setTimeout(() => (updated = false), 4000);
+          }
         }
         follow();
         break;
@@ -247,6 +251,82 @@
     return `<!doctype html>${document.documentElement.outerHTML}`;
   });
 
+  // A batch job's output (jobOfFile): whether more is coming, or how the job ended. An array task's
+  // files (output-INDEX.log, scheduler-INDEX.log) say how that task is, when the app tells.
+  const job = $derived(preview?.job);
+  const task = $derived(preview ? /\/(?:output|scheduler)-(\d+)\.log$/.exec(preview.file.path)?.[1] : undefined);
+  const taskState = $derived(task !== undefined ? job?.taskStates?.[task] : undefined);
+  const shownState = $derived(taskState ?? job?.state);
+  const jobLive = $derived(shownState === 'submitting' || shownState === 'queued' || shownState === 'running');
+  const jobState = $derived.by(() => {
+    if (!job || !shownState) return null;
+    // A task's own times are not known: only the job's are told.
+    const time = (iso?: string) => (iso && !taskState ? new Date(iso).toLocaleTimeString([], { timeStyle: 'short' }) : '');
+    const at = (iso?: string) => (time(iso) ? ` (${time(iso)})` : '');
+    const noun = taskState ? `task ${task}` : 'job';
+    const subject = taskState ? `Task ${task}` : 'The job';
+    const failed = taskState ? shownState : jobStatus(job);
+    switch (shownState) {
+      case 'submitting':
+      case 'queued':
+        return {
+          noun,
+          icon: 'loading codicon-modifier-spin',
+          label: shownState,
+          tone: 'bg-yellow-soft text-ink',
+          strip: `Waiting for ${job.scheduler} to start the ${noun}: its output shows here as it is written.`,
+          empty: ''
+        };
+      case 'running':
+        return {
+          noun,
+          icon: 'loading codicon-modifier-spin',
+          label: 'running',
+          tone: 'bg-teal-soft text-teal',
+          strip: `Streaming: the ${noun} runs${time(job.started) ? ` since ${time(job.started)}` : ''}, and new output shows here as it is written.`,
+          empty: ''
+        };
+      case 'done':
+        return {
+          noun,
+          icon: 'pass-filled',
+          label: 'done',
+          tone: 'bg-teal-soft text-teal',
+          strip: `${subject} is done${at(job.ended)}: this is all of its output.`,
+          empty: `${subject} is done and wrote nothing here.`
+        };
+      case 'cancelled':
+        return {
+          noun,
+          icon: 'circle-slash',
+          label: 'cancelled',
+          tone: 'bg-pink-soft text-pink',
+          strip: `${subject} was cancelled${at(job.ended)}: no more output comes.`,
+          empty: `${subject} was cancelled before it wrote anything here.`
+        };
+      default:
+        return {
+          noun,
+          icon: 'error',
+          label: failed,
+          tone: 'bg-pink-soft text-pink',
+          strip: `${subject} ${shownState === 'lost' ? 'was stopped from outside (a time or memory limit, or a cancel)' : failed}${at(job.ended)}: no more output comes.`,
+          empty: `${subject} ${shownState === 'lost' ? 'was stopped from outside' : failed} and wrote nothing here.`
+        };
+    }
+  });
+  const jobTitle = $derived(
+    job
+      ? `Batch job ${job.name} (${job.id}${job.schedulerId ? `, ${job.scheduler} ${job.schedulerId}` : ''}): ${jobStatus(job)}${taskState ? `; task ${task}: ${taskState}` : ''}`
+      : ''
+  );
+  // How the scheduler stopped a job (time or memory limits) is in its own log, not the job's output:
+  // an array task's own (scheduler-INDEX.log), which every profile but local writes, else the job's.
+  const schedulerLog = $derived.by(() => {
+    if (!job || jobLive || shownState === 'done' || !preview || /\/scheduler(-\d+)?\.log$/.test(preview.file.path)) return null;
+    return task !== undefined && job.scheduler !== 'local' ? `scheduler-${task}.log` : 'scheduler.log';
+  });
+
   const updatedAt = $derived(
     preview ? new Date(preview.file.mtimeMs).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''
   );
@@ -311,12 +391,18 @@
         </h1>
         <div class="flex items-center gap-2 text-[0.8em] text-muted">
           <span class="truncate font-mono" title={preview.file.path}>{shownPath}</span>
-          <span class="shrink-0">· {formatSize(preview.file.size)} · {updatedAt}</span>
+          <!-- A job's output that is not there yet has no size or time. -->
+          {#if preview.file.mtimeMs}<span class="shrink-0">· {formatSize(preview.file.size)} · {updatedAt}</span>{/if}
         </div>
       </div>
       {#if updated}
         <span class="shrink-0 rounded-full bg-teal-soft px-2 py-0.5 text-[0.8em] font-semibold text-teal">
           <span class="codicon codicon-refresh text-[11px]!"></span> updated
+        </span>
+      {/if}
+      {#if jobState}
+        <span class="shrink-0 rounded-full px-2 py-0.5 text-[0.8em] font-semibold {jobState.tone}" title={jobTitle} role="status">
+          <span class="codicon codicon-{jobState.icon} text-[11px]!"></span> {jobState.noun} {jobState.label}
         </span>
       {/if}
       {#if kind === 'html' && text !== null}
@@ -420,7 +506,13 @@
           <ReportFrame html={text} title="{preview.title} (interactive)" kind={reportFrame} onMessage={fromReport} />
         </div>
       {/if}
-      {#if preview.error}
+      {#if jobState && !preview.data && (jobLive || !preview.error)}
+        <!-- A job's output before it has any: not there yet, or empty. -->
+        <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-10 text-center text-muted" role="status">
+          <span class="codicon codicon-{jobLive ? 'loading codicon-modifier-spin' : jobState.icon} text-3xl!"></span>
+          <p class="m-0">{jobLive ? jobState.strip : jobState.empty}</p>
+        </div>
+      {:else if preview.error}
         <ErrorState title="Cannot show this file" detail={preview.error} />
       {:else if !preview.data}
         <div class="flex items-center gap-2 py-10 text-muted">
@@ -524,6 +616,23 @@
         </div>
       {/if}
     </section>
+
+    {#if jobState && preview.data}
+      <!-- At the end of a job's output: more is coming, or that was all. -->
+      <div class="mx-4 mb-3 flex items-center gap-2 rounded-xl px-3 py-1.5 text-[0.85em] {jobState.tone}" role="status" title={jobTitle}>
+        <span class="codicon codicon-{jobState.icon}"></span>
+        <span class="min-w-0 flex-1">{jobState.strip}</span>
+        {#if schedulerLog}
+          <button
+            class="chip shrink-0"
+            title="What {job?.scheduler} said of the job, e.g. a time or memory limit"
+            onclick={() => sendPreview({ type: 'openFile', path: schedulerLog })}
+          >
+            <span class="codicon codicon-output"></span> {schedulerLog}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     <form
       class="card mx-4 mb-4 flex flex-col gap-1 px-3 pt-2 pb-2 focus-within:border-indigo"

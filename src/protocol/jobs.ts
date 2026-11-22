@@ -17,6 +17,8 @@ export interface BatchJob {
   tasks?: number;
   array?: string;
   outcome?: { done: number; failed: number; cancelled?: number; lost?: number };
+  /** An array's tasks' states by index, kept up to date while it runs; missing from older apps. */
+  taskStates?: Record<string, BatchJobState>;
   exitCode?: number;
   command: string[];
   workdir: string;
@@ -61,9 +63,57 @@ export function jobStatus(job: BatchJob): string {
   return job.state;
 }
 
-/** Where its output is: output.log, or an array's first task's. */
-export function jobOutput(job: BatchJob): string {
+/** Where its output is: output.log, or an array task's (the first one's unless `index` says). */
+export function jobOutput(job: BatchJob, index?: number): string {
   if (!job.tasks) return `${job.logs}/output.log`;
-  const first = /^\d+/.exec(job.array ?? '')?.[0] ?? '0';
-  return `${job.logs}/output-${first}.log`;
+  return `${job.logs}/output-${index ?? arrayIndices(job.array)[0] ?? 0}.log`;
+}
+
+// More than any limit allows; a spec that asks for more is not read past it.
+const MAX_INDICES = 100_000;
+
+/**
+ * An array's task indices from its spec, as the app keeps it (`1-10:2,20`, with an optional `%LIMIT`):
+ * single indices and FIRST-LAST[:STEP] ranges, separated by commas, in order and without repeats.
+ */
+export function arrayIndices(spec: string | undefined): number[] {
+  const indices = new Set<number>();
+  for (const part of (spec ?? '').split('%')[0].split(',')) {
+    const range = /^\s*(\d+)(?:-(\d+)(?::(\d+))?)?\s*$/.exec(part);
+    if (!range) continue;
+    const first = Number(range[1]);
+    const last = range[2] === undefined ? first : Number(range[2]);
+    const step = Math.max(1, Number(range[3] ?? 1));
+    for (let index = first; index <= last && indices.size < MAX_INDICES; index += step) indices.add(index);
+  }
+  return [...indices];
+}
+
+/**
+ * The job whose folder a file is in (output.log, output-INDEX.log, scheduler.log), for a tab that
+ * shows it. By the job's id in the path: the sandbox gives files by their real path, which need not
+ * start with `logs` as the app wrote it.
+ */
+export function jobOfFile(jobs: BatchJob[] | undefined, path: string): BatchJob | undefined {
+  const id = /\/jobs\/(j-[0-9a-f]{6,16})\/[^/]+$/.exec(path)?.[1];
+  return id ? jobs?.find((job) => job.id === id) : undefined;
+}
+
+/** How many of an array's tasks are in each state, from its task states; undefined without them. */
+export function taskCounts(job: BatchJob): Partial<Record<BatchJobState, number>> | undefined {
+  if (!job.taskStates) return undefined;
+  const counts: Partial<Record<BatchJobState, number>> = {};
+  for (const state of Object.values(job.taskStates)) counts[state] = (counts[state] ?? 0) + 1;
+  return counts;
+}
+
+/** The task counts for people, the states that matter first: `3 running · 1 failed · 4 done · 16 queued`. */
+export function taskSummary(job: BatchJob): string {
+  const counts = taskCounts(job);
+  if (!counts) return '';
+  const order: BatchJobState[] = ['running', 'failed', 'lost', 'cancelled', 'done', 'queued', 'submitting'];
+  return order
+    .filter((state) => counts[state])
+    .map((state) => `${counts[state]} ${state}`)
+    .join(' · ');
 }

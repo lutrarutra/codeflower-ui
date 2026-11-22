@@ -405,6 +405,8 @@ export interface PreviewState {
   live: boolean;
   /** An HTML file shows with its scripts running (a report's charts, explorers and comments). */
   interactive?: boolean;
+  /** The batch job whose output the file is (jobOfFile): the tab says whether more is coming. */
+  job?: BatchJob;
 }
 
 export type PreviewHostMessage =

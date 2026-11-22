@@ -10,6 +10,7 @@ import { isFileConflict } from '../../client/codeflower.ts';
 import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
 import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
+import { jobActive, jobOfFile } from '../../protocol/jobs.ts';
 import { isBesideReport, isStorytellerReport } from '../../chat/lib/report.ts';
 import { basename, displayPath, resolvePath } from './report.ts';
 import type { WebWorker } from './worker.svelte.ts';
@@ -92,6 +93,7 @@ export class Preview {
   private readonly state = $derived.by((): PreviewState => {
     const agent = this.owner.page.agent(this.workerId);
     const chat = this.chatKey ? agent?.chats[this.chatKey] : undefined;
+    const job = jobOfFile(agent?.jobs, this.file.path);
     return {
       file: this.file,
       data: this.data,
@@ -100,7 +102,8 @@ export class Preview {
       message: this.messageFor === this.file.mtimeMs ? this.message : null,
       chat: chat ? { title: chat.state.title, busy: chat.state.busy } : this.chatKey ? { title: 'the chat', busy: false } : null,
       live: agent?.state === 'connected',
-      interactive: this.interactive
+      interactive: this.interactive,
+      ...(job ? { job } : {})
     };
   });
 
@@ -299,6 +302,16 @@ function download(name: string, mimeType: string, base64: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/**
+ * A batch job's output that is not there yet (the job is queued): its tab opens all the same,
+ * says it waits for it, and shows it once the job writes it. Other files that cannot be read throw.
+ */
+function waitingOutput(worker: WebWorker, path: string, error: unknown): SandboxFile {
+  const job = jobOfFile(worker.jobs, path);
+  if (!job || !jobActive(job)) throw error;
+  return { path, size: 0, mtimeMs: 0, mimeType: 'text/plain' };
+}
+
 export class Previews {
   items = $state<Preview[]>([]);
   readonly page: PreviewOwner;
@@ -359,7 +372,10 @@ export class Previews {
   async openPath(worker: WebWorker, path: string, chatKey: string | undefined, { reveal = true } = {}): Promise<void> {
     try {
       if (!worker.connection) throw new Error('the sandbox is not connected');
-      this.open(worker.id, await worker.connection.statFile(path), { chatKey, reveal });
+      this.open(worker.id, await worker.connection.statFile(path).catch((error: unknown) => waitingOutput(worker, path, error)), {
+        chatKey,
+        reveal
+      });
     } catch (error) {
       const chat = chatKey ? worker.chats[chatKey] : undefined;
       chat?.notify('error', `Cannot show ${displayPath(path)}: ${describe(error)}`);
