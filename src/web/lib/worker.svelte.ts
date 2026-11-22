@@ -138,8 +138,6 @@ export class WebWorker {
   /** Counts connections, so a late close of an old one changes nothing. */
   private generation = 0;
   private retry: ReturnType<typeof setInterval> | undefined;
-  /** The user's last mode per agent, for new chats. */
-  private static readonly MODES = 'codeflower.modes';
 
   /** The computer it runs on. */
   readonly machine: Machine;
@@ -319,7 +317,6 @@ export class WebWorker {
     } else {
       chat.post({ type: 'transcript', entries: [] });
     }
-    await this.applyRememberedMode(key);
     chat.post({ type: 'config', options: connection.config(key) });
     chat.setState({ live: true, steer: connection.canSteer(key), shells: connection.shellTerminals });
     this.noticeMcp(chat, connection.mcpNotice(key));
@@ -681,7 +678,6 @@ export class WebWorker {
     setConfig: async (chat, configId, value) => {
       try {
         await this.require().setConfigOption(chat.key, configId, value);
-        this.rememberConfig(chat.key, configId, value);
       } catch (error) {
         this.report(chat, error);
         // Show the agent's actual settings again.
@@ -750,38 +746,6 @@ export class WebWorker {
    */
   async restartAgent(agent: AgentName): Promise<void> {
     await this.require().restartAgent(agent);
-  }
-
-  // ---- remembered settings ----
-
-  private modes(): Record<string, string> {
-    try {
-      return JSON.parse(localStorage.getItem(WebWorker.MODES) ?? '{}') as Record<string, string>;
-    } catch {
-      return {};
-    }
-  }
-
-  private rememberConfig(key: string, configId: string, value: string | boolean): void {
-    const option = this.connection?.config(key).find((candidate) => candidate.id === configId);
-    const agent = agentOfKey(key);
-    if (option?.category !== 'mode' || typeof value !== 'string') return;
-    try {
-      localStorage.setItem(WebWorker.MODES, JSON.stringify({ ...this.modes(), [agent]: value }));
-    } catch {
-      // Not remembered; new chats start in the agent's default mode.
-    }
-  }
-
-  /** New chats start in the mode the user chose last for this agent, e.g. one that asks less. */
-  private async applyRememberedMode(key: string): Promise<void> {
-    const remembered = this.modes()[agentOfKey(key)];
-    const connection = this.connection;
-    const mode = connection?.config(key).find((option) => option.category === 'mode');
-    if (!connection || !remembered || mode?.type !== 'select' || mode.currentValue === remembered) return;
-    const values = mode.options.flatMap((entry) => ('options' in entry ? entry.options : [entry])).map((choice) => choice.value);
-    if (!values.includes(remembered)) return;
-    await connection.setConfigOption(key, mode.id, remembered).catch(() => undefined);
   }
 
   // ---- what the agent sends ----
