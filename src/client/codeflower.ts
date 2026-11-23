@@ -110,6 +110,8 @@ export interface WorkerStatus {
   /** Sending files both ways, as an agent's `initialize` says it. */
   files?: FileTransfers;
   stateDirectory: string | null;
+  /** The workspace's own folder on the host, when the app mounts it from outside the project (workspace_dir). */
+  workspaceDirectory?: string | null;
   engine: string;
   slurmJobId?: string;
   /** When the batch job ends (ISO 8601); chats are asked to wrap up before. Missing without a known end. */

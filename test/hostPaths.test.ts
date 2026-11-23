@@ -45,3 +45,10 @@ test('Windows host paths keep their separators', () => {
   assert.equal(hostPath(windows, '/data/input/study/sub/b.csv'), 'C:\\Users\\Ana\\Study\\sub\\b.csv');
   assert.equal(hostPath(windows, '/codeflower-state/workspace/a.txt'), 'C:\\Users\\Ana\\codeflower\\projects\\p\\workspace\\a.txt');
 });
+
+test('a workspace mounted from outside the project maps to its own folder', () => {
+  const elsewhere = { ...status, workspaceDirectory: '/groups/lab/ana/workspaces/p' };
+  assert.equal(hostPath(elsewhere, '/codeflower-state/workspace/reports/r.html'), '/groups/lab/ana/workspaces/p/reports/r.html');
+  assert.equal(hostPath(elsewhere, '/codeflower-state/workspace'), '/groups/lab/ana/workspaces/p');
+  assert.equal(hostPath(elsewhere, '/codeflower-state/sessions/a.json'), '/Users/ana/codeflower/projects/p/sessions/a.json');
+});

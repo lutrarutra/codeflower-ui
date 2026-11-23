@@ -15,13 +15,15 @@ const within = (path: string, root: string) => path === root || path.startsWith(
 const windows = (path: string) => /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
 
 /** The host path of `path` in the sandbox, or null when it is in no folder from the host. */
-export function hostPath(status: Pick<WorkerStatus, 'mounts' | 'stateDirectory'> | undefined, path: string): string | null {
+export function hostPath(status: Pick<WorkerStatus, 'mounts' | 'stateDirectory' | 'workspaceDirectory'> | undefined, path: string): string | null {
   if (!status || !path.startsWith('/')) return null;
   path = path.replace(/(.)\/+$/, '$1');
   const roots = (status.mounts ?? []).filter((mount) => mount.target && mount.source).map(({ target, source }) => ({ target, source }));
   if (status.stateDirectory && !(ELSEWHERE.some((root) => within(path, root)) && !within(path, OWN))) {
     roots.push({ target: STATE, source: status.stateDirectory });
   }
+  // With --workspace-dir the workspace is a folder of its own.
+  if (status.workspaceDirectory) roots.push({ target: `${STATE}/workspace`, source: status.workspaceDirectory });
   // The longest matching folder wins, as mounts can nest.
   let best: { target: string; source: string } | undefined;
   for (const root of roots) {
