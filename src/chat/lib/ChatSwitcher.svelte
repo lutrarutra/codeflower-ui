@@ -10,7 +10,8 @@
     title,
     chats,
     list,
-    choose
+    choose,
+    create
   }: {
     title: string;
     /** The sandbox's chats, once the host told them. */
@@ -18,6 +19,8 @@
     /** Asks the host for the chats (again). */
     list: () => void;
     choose: (key: string) => void;
+    /** Starts a new chat in the sandbox, with this chat's agent. */
+    create: () => void;
   } = $props();
 
   /** A filter shows once the list is longer than this. */
@@ -48,7 +51,8 @@
   }
 
   function focusFirst(): void {
-    (menu?.querySelector<HTMLElement>('input') ?? menu?.querySelector<HTMLElement>(ITEM))?.focus();
+    // The first chat, not the + before it: opening and pressing Enter keeps going to a chat.
+    (menu?.querySelector<HTMLElement>('input') ?? menu?.querySelector<HTMLElement>(`${ITEM}:not([data-new])`) ?? menu?.querySelector<HTMLElement>(ITEM))?.focus();
   }
 
   function close(): void {
@@ -59,6 +63,11 @@
   function pick(chat: SandboxChat): void {
     close();
     if (!chat.current) choose(chat.key);
+  }
+
+  function startNew(): void {
+    close();
+    create();
   }
 
   function keydown(event: KeyboardEvent): void {
@@ -107,7 +116,20 @@
       aria-label="Chats of this sandbox"
       class="card absolute top-full left-0 z-30 mt-2 flex max-h-[min(28rem,70vh)] w-96 max-w-[calc(100vw-2rem)] flex-col p-1.5 font-sans text-[0.8rem] font-normal"
     >
-      <div class="eyebrow px-2 pt-1 pb-1.5 text-teal">Chats in this sandbox</div>
+      <div class="flex items-center gap-2 pt-0.5 pr-0.5 pb-1 pl-2">
+        <span class="eyebrow flex-1 text-teal">Chats in this sandbox</span>
+        <button
+          type="button"
+          role="menuitem"
+          data-new
+          class="grid size-6 shrink-0 place-items-center rounded-lg border-none bg-transparent text-muted hover:bg-code hover:text-ink focus-visible:bg-code focus-visible:text-ink focus-visible:outline-none"
+          title="New chat in this sandbox, with this chat's agent"
+          aria-label="New chat in this sandbox"
+          onclick={startNew}
+        >
+          <span class="codicon codicon-add text-[14px]!"></span>
+        </button>
+      </div>
       {#if (chats?.length ?? 0) > FILTER_FROM}
         <input
           class="mx-1 mb-1.5 rounded-lg border-[1.5px] border-line bg-card px-2 py-1 text-[1em] focus:border-teal focus:outline-none"

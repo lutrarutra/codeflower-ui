@@ -63,6 +63,8 @@ export interface ChatActions {
   listChats(chat: ChatSession): Promise<void>;
   /** Another chat of the sandbox in front: its tab if open, else a new one. */
   openChat(chat: ChatSession, key: string): void;
+  /** A new chat in the sandbox with the chat's agent, in front. */
+  newChat(chat: ChatSession): Promise<void>;
   restartAgent(chat: ChatSession): Promise<void>;
 }
 
@@ -378,6 +380,9 @@ export class ChatSession {
         break;
       case 'openChat':
         this.actions.openChat(this, message.key);
+        break;
+      case 'newChat':
+        await this.failing('Could not start a chat', this.actions.newChat(this));
         break;
     }
   }

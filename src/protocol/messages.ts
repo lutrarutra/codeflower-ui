@@ -390,7 +390,9 @@ export type WebviewMessage =
   /** The sandbox's chats, for the header's list (answered with `chats`). */
   | { type: 'listChats' }
   /** Show another chat of the sandbox: bring its tab to the front, or open one. */
-  | { type: 'openChat'; key: string };
+  | { type: 'openChat'; key: string }
+  /** Start a new chat in the sandbox with this chat's agent, and show it. */
+  | { type: 'newChat' };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

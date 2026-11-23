@@ -55,7 +55,8 @@ function actions(
     setSubagentSettings: async () => {},
     restartAgent: async () => {},
     listChats: async () => {},
-    openChat: () => {}
+    openChat: () => {},
+    newChat: async () => {}
   };
 }
 

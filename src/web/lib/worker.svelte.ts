@@ -719,7 +719,12 @@ export class WebWorker {
       chat.post({ type: 'chats', chats: this.sandboxChats(chat.key) });
       if (await this.listSessions().catch(() => false)) chat.post({ type: 'chats', chats: this.sandboxChats(chat.key) });
     },
-    openChat: (_chat, key) => this.events.openChat(this, key)
+    openChat: (_chat, key) => this.events.openChat(this, key),
+    newChat: async (chat) => {
+      // Undefined when the agent has to sign in first: its sign-in opens instead.
+      const key = await this.newChat(agentOfKey(chat.key));
+      if (key) this.events.openChat(this, key);
+    }
   };
 
   /** The sandbox's chats as a chat's header lists them; `current` is that chat. */

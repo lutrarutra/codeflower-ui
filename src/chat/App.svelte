@@ -353,6 +353,7 @@
         chats={sandboxChats}
         list={() => send({ type: 'listChats' })}
         choose={(key) => send({ type: 'openChat', key })}
+        create={() => send({ type: 'newChat' })}
       />
     </h1>
     {#if subagent}
