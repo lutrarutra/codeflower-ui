@@ -102,11 +102,12 @@
   };
 
   function detail(job: BatchJob): string {
+    // The state last: the dot's color says it already.
     return [
-      jobStatus(job),
       job.schedulerId ? `${job.scheduler} ${job.schedulerId}` : job.scheduler,
+      job.resources?.queue ?? '',
       job.tasks ? `${job.tasks} tasks` : '',
-      job.resources?.queue ?? ''
+      jobStatus(job)
     ]
       .filter(Boolean)
       .join(' · ');
@@ -154,55 +155,61 @@
           {@const live = jobActive(job)}
           {@const tasks = job.tasks ? arrayIndices(job.array) : []}
           {@const counts = taskCounts(job)}
-          <div class="flex items-center gap-1 rounded-lg hover:bg-code">
+          {@const actions = (tasks.length > 1 ? 1 : 0) + (live ? 1 : 0)}
+          <!-- The actions sit in the top line's corner, so the line under it runs the row's whole width. -->
+          <div class="relative rounded-lg hover:bg-code">
             <button
               type="button"
-              class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border-none bg-transparent px-2 py-1.5 text-left"
+              class="flex w-full min-w-0 flex-col rounded-lg border-none bg-transparent px-2 py-1.5 text-left"
               title="{job.command.join(' ')}\nOpen {tasks.length ? `the output of task ${tasks[0]}` : 'its output'}"
               aria-label="Open the output of {job.name}{tasks.length ? `, task ${tasks[0]}` : ''}"
               onclick={() => openOutput(job)}
             >
-              <span class="size-2 shrink-0 rounded-full {dot[job.state] ?? 'bg-muted'}" title={job.state}></span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-[0.9em]">{job.name} <span class="text-muted">{job.id}</span></span>
-                <span class="block truncate text-[0.75em] text-muted">{detail(job)}</span>
-                {#if counts && tasks.length}
-                  <!-- How far the array is, at a glance: its tasks by state. -->
-                  <span class="mt-1 flex h-1.5 w-full overflow-hidden rounded-full bg-code" title={taskSummary(job)}>
-                    {#each TASK_ORDER as state (state)}
-                      {#if counts[state]}
-                        <span class={bar[state]} style:width="{(counts[state]! / tasks.length) * 100}%"></span>
-                      {/if}
-                    {/each}
-                  </span>
+              <span class="flex w-full min-w-0 items-center gap-2" style:padding-right="{actions * 1.625}rem">
+                <span class="size-2 shrink-0 rounded-full {dot[job.state] ?? 'bg-muted'}" title={job.state}></span>
+                <span class="min-w-0 flex-1 truncate text-[0.9em]">{job.name} <span class="text-muted">{job.id}</span></span>
+                <Elapsed started={epoch(job.started)} ended={live ? null : epoch(job.ended)} running={job.state === 'running'} />
+              </span>
+              <span class="block w-full truncate pl-4 text-[0.75em] text-muted" title={detail(job)}>{detail(job)}</span>
+              {#if counts && tasks.length}
+                <!-- How far the array is, at a glance: its tasks by state. -->
+                <span class="mt-1 ml-4 flex h-1.5 w-[calc(100%-1rem)] overflow-hidden rounded-full bg-code" title={taskSummary(job)}>
+                  {#each TASK_ORDER as state (state)}
+                    {#if counts[state]}
+                      <span class={bar[state]} style:width="{(counts[state]! / tasks.length) * 100}%"></span>
+                    {/if}
+                  {/each}
+                </span>
+              {/if}
+            </button>
+            {#if actions}
+              <span class="absolute top-1 right-1 flex items-center gap-0.5">
+                {#if tasks.length > 1}
+                  <button
+                    type="button"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-muted hover:text-ink"
+                    title="{expanded[job.id] ? 'Hide' : 'Show'} its {tasks.length} tasks, to open each one's output"
+                    aria-label="{expanded[job.id] ? 'Hide' : 'Show'} the tasks of {job.name}"
+                    aria-expanded={!!expanded[job.id]}
+                    onclick={() => (expanded[job.id] = !expanded[job.id])}
+                  >
+                    <span class="codicon codicon-chevron-{expanded[job.id] ? 'up' : 'down'}"></span>
+                  </button>
+                {/if}
+                {#if live}
+                  <button
+                    type="button"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-muted hover:text-red disabled:opacity-50"
+                    title="Cancel this job…"
+                    aria-label="Cancel {job.name}…"
+                    aria-expanded={confirming === job.id}
+                    disabled={cancelling[job.id]}
+                    onclick={() => (confirming = confirming === job.id ? null : job.id)}
+                  >
+                    <span class="codicon codicon-{cancelling[job.id] ? 'loading codicon-modifier-spin' : 'close'}"></span>
+                  </button>
                 {/if}
               </span>
-              <Elapsed started={epoch(job.started)} ended={live ? null : epoch(job.ended)} running={job.state === 'running'} />
-            </button>
-            {#if tasks.length > 1}
-              <button
-                type="button"
-                class="inline-flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-muted hover:text-ink"
-                title="{expanded[job.id] ? 'Hide' : 'Show'} its {tasks.length} tasks, to open each one's output"
-                aria-label="{expanded[job.id] ? 'Hide' : 'Show'} the tasks of {job.name}"
-                aria-expanded={!!expanded[job.id]}
-                onclick={() => (expanded[job.id] = !expanded[job.id])}
-              >
-                <span class="codicon codicon-chevron-{expanded[job.id] ? 'up' : 'down'}"></span>
-              </button>
-            {/if}
-            {#if live}
-              <button
-                type="button"
-                class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-muted hover:text-red disabled:opacity-50"
-                title="Cancel this job…"
-                aria-label="Cancel {job.name}…"
-                aria-expanded={confirming === job.id}
-                disabled={cancelling[job.id]}
-                onclick={() => (confirming = confirming === job.id ? null : job.id)}
-              >
-                <span class="codicon codicon-{cancelling[job.id] ? 'loading codicon-modifier-spin' : 'close'}"></span>
-              </button>
             {/if}
           </div>
           {#if confirming === job.id && live && !cancelling[job.id]}
