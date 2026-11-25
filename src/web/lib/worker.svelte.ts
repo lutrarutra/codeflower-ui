@@ -752,6 +752,7 @@ export class WebWorker {
     openCommand: (chat, commandId) => this.events.openCommand(this, chat, commandId),
     openShell: (chat) => this.events.openShell(this, chat),
     openBrowser: (chat) => this.events.openBrowser(this, chat),
+    openRoots: () => this.events.openRoots(this),
     openParent: (chat) => {
       if (chat.state.subagent) this.events.openChat(this, chat.state.subagent.parentKey);
     },

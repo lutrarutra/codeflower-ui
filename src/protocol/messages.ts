@@ -412,6 +412,8 @@ export type WebviewMessage =
   | { type: 'openShell' }
   /** Show the chat's browser (`browser`). */
   | { type: 'openBrowser' }
+  /** Show the sandbox's map of ideas (Roots): bring its tab to the front, or open one. */
+  | { type: 'openRoots' }
   | { type: 'subagentSettings'; settings: Partial<SubagentSettings> }
   /** Restart the agent so settings it reads at start apply. */
   | { type: 'restartAgent' }

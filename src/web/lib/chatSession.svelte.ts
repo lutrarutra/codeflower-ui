@@ -61,6 +61,8 @@ export interface ChatActions {
   /** A shell in the chat's sandbox, in the terminals' panel. */
   /** Shows the chat's browser beside it. */
   openBrowser(chat: ChatSession): void;
+  /** The sandbox's map of ideas, from the chat's header. */
+  openRoots(chat: ChatSession): void;
   openShell(chat: ChatSession): Promise<void>;
   setSubagentSettings(chat: ChatSession, settings: Partial<SubagentSettings>): Promise<void>;
   /** The sandbox's chats for the header's list: as known now, then again once listed afresh. */
@@ -380,6 +382,9 @@ export class ChatSession {
         break;
       case 'openBrowser':
         this.actions.openBrowser(this);
+        break;
+      case 'openRoots':
+        this.actions.openRoots(this);
         break;
       case 'subagentSettings':
         await this.failing('Could not change the subagent settings', this.actions.setSubagentSettings(this, message.settings));

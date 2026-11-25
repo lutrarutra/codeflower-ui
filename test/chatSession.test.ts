@@ -54,6 +54,7 @@ function actions(
     checkWatch: async () => {},
     openShell: async () => {},
     openBrowser: () => {},
+    openRoots: () => {},
     setSubagentSettings: async () => {},
     restartAgent: async () => {},
     listChats: async () => {},

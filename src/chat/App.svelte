@@ -416,6 +416,15 @@
     <button
       type="button"
       class={iconButton}
+      title="Show the sandbox's map of ideas (Roots)"
+      aria-label="Show the sandbox's map of ideas"
+      onclick={() => send({ type: 'openRoots' })}
+    >
+      <span class="codicon codicon-type-hierarchy"></span>
+    </button>
+    <button
+      type="button"
+      class={iconButton}
       title={folded ? 'Show every step' : 'Show only the messages'}
       aria-label={folded ? 'Show every step' : 'Show only the messages'}
       aria-pressed={!folded}
