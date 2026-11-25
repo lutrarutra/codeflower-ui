@@ -20,6 +20,7 @@
   import ErrorState from './lib/ErrorState.svelte';
   import type { Host } from './lib/host.ts';
   import Markdown from './lib/Markdown.svelte';
+  import { layoutIdeas } from './lib/rootsLayout.ts';
   import Skeleton from './lib/Skeleton.svelte';
 
   let { host }: { host: Host<RootsWebviewMessage, RootsHostMessage> } = $props();
@@ -42,6 +43,10 @@
   let loadError = $state('');
   let busy = $state(false);
   let comment = $state('');
+  /** The panel lists every chat of the idea, not only the latest. */
+  let allChats = $state(false);
+  const MAX_DOTS = 4;
+  const SHOWN_CHATS = 3;
   let toast = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -145,46 +150,71 @@
   // ---- layout: rows by how deep an idea builds, each below its parents ----
 
   const W = 228;
-  const H = 112;
+  // A card's size is fixed, so the layout's rows hold: its title shows at most three lines.
+  const H = 124;
   const GX = 36;
   const GY = 64;
 
   const ideas = $derived(map?.ideas ?? []);
   const byId = $derived(new Map(ideas.map((idea) => [idea.id, idea])));
   const current = $derived(selected === undefined ? undefined : byId.get(selected));
-
-  const placed = $derived.by(() => {
-    const depth = new Map<number, number>();
-    const visiting = new Set<number>();
-    const depthOf = (idea: Idea): number => {
-      const known = depth.get(idea.id);
-      if (known !== undefined) return known;
-      if (visiting.has(idea.id)) return 0;
-      visiting.add(idea.id);
-      const parents = idea.from.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
-      const value = parents.length ? 1 + Math.max(...parents.map(depthOf)) : 0;
-      depth.set(idea.id, value);
-      return value;
-    };
-    const rows: Idea[][] = [];
-    for (const idea of ideas) (rows[depthOf(idea)] ??= []).push(idea);
-    const x = new Map<number, number>();
-    const parentX = (idea: Idea) => {
-      const known = idea.from.filter((id) => x.has(id));
-      return known.length ? known.reduce((sum, id) => sum + x.get(id)!, 0) / known.length : 0;
-    };
-    rows.forEach((row, index) => {
-      if (index) row.sort((a, b) => parentX(a) - parentX(b) || a.id - b.id);
-      let cursor = 0;
-      for (const idea of row) {
-        const at = Math.max(cursor, index ? parentX(idea) : cursor);
-        x.set(idea.id, at);
-        cursor = at + W + GX;
+  /** Each chat's latest idea: its state shows there only, as it works on one idea at a time. */
+  const latestOf = $derived.by(() => {
+    const latest = new Map<string, { id: number; at: string }>();
+    for (const idea of ideas) {
+      for (const entry of idea.chats) {
+        const key = entry.key ?? `${entry.agent}:${entry.sessionId}`;
+        const seen = latest.get(key);
+        if (!seen || entry.at > seen.at) latest.set(key, { id: idea.id, at: entry.at });
       }
-    });
-    const left = Math.min(0, ...x.values());
-    return new Map(ideas.map((idea) => [idea.id, { x: (x.get(idea.id) ?? 0) - left, y: (depth.get(idea.id) ?? 0) * (H + GY) }]));
+    }
+    return latest;
   });
+  /** The chats of an idea, one dot each, the latest first: their state where it is their latest idea. */
+  interface Dot {
+    title: string;
+    state: RootsChat['state'];
+    /** The chat to open: its own, or a subagent's parent chat. */
+    open?: string;
+    agent?: string;
+    at: string;
+  }
+  function dotsOf(idea: Idea): Dot[] {
+    const seen = new Set<string>();
+    const dots: Dot[] = [];
+    for (const entry of [...idea.chats].reverse()) {
+      const key = entry.key ?? `${entry.agent}:${entry.sessionId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const chat = chatOf(entry);
+      const here = latestOf.get(key)?.id === idea.id;
+      dots.push({
+        title: chat?.title ?? (entry.agent ? `A ${entry.agent} chat` : 'A chat'),
+        state: here ? (chat?.state ?? 'idle') : 'idle',
+        ...(chat ? { open: chat.key } : {}),
+        ...(chat?.agentLabel ?? entry.agent ? { agent: chat?.agentLabel ?? entry.agent } : {}),
+        at: entry.at
+      });
+    }
+    return dots;
+  }
+  /** The idea whose chats' menu is open (its dots clicked), and where on the canvas. */
+  let dotsMenu = $state<{ idea: number; x: number; y: number } | undefined>();
+  function openDots(idea: Idea, event: MouseEvent): void {
+    event.stopPropagation();
+    const openable = dotsOf(idea).filter((dot) => dot.open);
+    const dots = dotsOf(idea);
+    if (dots.length === 1 && openable.length === 1) {
+      host.send({ type: 'openChat', key: openable[0].open! });
+      return;
+    }
+    const rect = canvas?.getBoundingClientRect();
+    const target = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    dotsMenu = dotsMenu?.idea === idea.id ? undefined : { idea: idea.id, x: target.right - (rect?.left ?? 0), y: target.bottom - (rect?.top ?? 0) + 4 };
+  }
+  const short = (text: string, length = 60) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
+
+  const placed = $derived(layoutIdeas(ideas, { width: W, height: H, gapX: GX, gapY: GY }));
 
   const bounds = $derived.by(() => {
     let w = 0;
@@ -201,15 +231,29 @@
     kind: 'from' | 'need';
     faint: boolean;
   }
+  const ARROW = 10;
+  const LEAVE = 8;
+  const CORNER = 14;
   const edges = $derived.by(() => {
     const result: Edge[] = [];
+    // Like an org chart: down from the card, a rounded corner onto a line halfway to the
+    // row below (siblings share it), and a rounded corner down into the card, whose
+    // arrowhead sits on the straight end. A curve squeezed into the gap would kink.
     const curve = (a: { x: number; y: number }, b: { x: number; y: number }) => {
       const x1 = a.x + W / 2;
-      const y1 = a.y + H - 4;
+      const y1 = a.y + H;
       const x2 = b.x + W / 2;
-      const y2 = b.y - 2;
-      const mid = (y1 + y2) / 2;
-      return `M${x1} ${y1} C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
+      const y2 = b.y - 1;
+      const dx = x2 - x1;
+      if (Math.abs(dx) < 1) return `M${x1} ${y1} V${y2}`;
+      // Halfway between the cards, or higher when the target is rows below (a need), keeping room for the arrow.
+      const mid = Math.min(y1 + GY / 2, y2 - ARROW - CORNER);
+      const r = Math.min(CORNER, Math.abs(dx) / 2, (mid - y1) / 2);
+      const side = Math.sign(dx);
+      return (
+        `M${x1} ${y1} V${mid - r} Q${x1} ${mid} ${x1 + side * r} ${mid} ` +
+        `H${x2 - side * r} Q${x2} ${mid} ${x2} ${mid + r} V${y2}`
+      );
     };
     // A need across several rows goes around the ideas between, on their right.
     const around = (a: { x: number; y: number }, b: { x: number; y: number }) => {
@@ -219,7 +263,8 @@
       const x2 = b.x + W;
       const y2 = b.y + H / 2;
       const side = Math.max(x1, x2) + GX * 1.5;
-      return `M${x1} ${y1} C${side} ${y1} ${side} ${y2} ${x2 + 2} ${y2}`;
+      const end = x2 + 1;
+      return `M${x1} ${y1} L${x1 + LEAVE} ${y1} C${side} ${y1} ${side} ${y2} ${end + ARROW + 2} ${y2} L${end} ${y2}`;
     };
     for (const idea of ideas) {
       const to = placed.get(idea.id);
@@ -259,11 +304,14 @@
     view = { k: scale, x: Math.max(pad, (rect.width - bounds.w * scale) / 2), y: pad };
   }
 
+  /** Brings an idea to the middle, readable: the map stays there until Fit. */
   function center(id: number): void {
     const at = placed.get(id);
     if (!canvas || !at) return;
+    moved = true;
     const rect = canvas.getBoundingClientRect();
-    view = { ...view, x: rect.width / 2 - (at.x + W / 2) * view.k, y: rect.height / 3 - (at.y + H / 2) * view.k };
+    const k = Math.max(view.k, 0.9);
+    view = { k, x: rect.width / 2 - (at.x + W / 2) * k, y: rect.height / 3 - (at.y + H / 2) * k };
   }
 
   function zoom(factor: number, cx?: number, cy?: number): void {
@@ -278,6 +326,7 @@
 
   function wheel(event: WheelEvent): void {
     event.preventDefault();
+    dotsMenu = undefined;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     if (event.ctrlKey || event.metaKey) zoom(Math.exp(-event.deltaY * 0.01), event.clientX - rect.left, event.clientY - rect.top);
@@ -287,6 +336,7 @@
   }
 
   function pointerDown(event: PointerEvent): void {
+    if (!(event.target as HTMLElement).closest('.dots-menu, .chats')) dotsMenu = undefined;
     if ((event.target as HTMLElement).closest('.node, button')) return;
     drag = { x: event.clientX - view.x, y: event.clientY - view.y };
     canvas?.setPointerCapture(event.pointerId);
@@ -311,13 +361,20 @@
   // ---- what an idea shows ----
 
   function select(id: number | undefined): void {
-    if (id !== selected) comment = '';
+    if (id !== selected) {
+      comment = '';
+      allChats = false;
+    }
     selected = id;
     error = '';
   }
 
+  /** The chat the host knows for an entry; a subagent's shows as in its parent chat, which opens. */
   function chatOf(entry: Idea['chats'][number]): RootsChat | undefined {
-    return entry.key ? chats.get(entry.key) : undefined;
+    const own = entry.key ? chats.get(entry.key) : undefined;
+    if (own) return own;
+    const parent = entry.parentKey ? chats.get(entry.parentKey) : undefined;
+    return parent ? { ...parent, title: `A subagent in “${parent.title}”`, state: 'idle' } : undefined;
   }
 
   const kindOf = (path: string) => {
@@ -334,6 +391,8 @@
   };
 </script>
 
+<svelte:window onkeydown={(event) => event.key === 'Escape' && dotsMenu && (dotsMenu = undefined)} />
+
 <div class="roots">
   <header class="bar">
     <h1 class="m-0 flex items-center gap-2 font-display text-lg font-medium">
@@ -342,9 +401,9 @@
       </svg>
       Roots
     </h1>
-    {#if label}<span class="text-[0.85em] text-muted">{label}</span>{/if}
+    {#if label}<span class="label truncate text-[0.85em] text-muted">{label}</span>{/if}
     {#if ideas.length}
-      <div class="flex flex-wrap gap-1.5" role="group" aria-label="Show ideas by status">
+      <div class="chips-row flex gap-1.5" role="group" aria-label="Show ideas by status">
         {#each IDEA_STATUSES as status (status)}
           <button
             class="chip"
@@ -396,10 +455,11 @@
         <div class="world" style:transform="translate({view.x}px, {view.y}px) scale({view.k})">
           <svg class="edges" width={bounds.w} height={bounds.h} aria-hidden="true">
             <defs>
-              <marker id="roots-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <!-- In the map's units, not the line's width: the tip at the line's end, its base across it. -->
+              <marker id="roots-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth={ARROW} markerHeight={ARROW} markerUnits="userSpaceOnUse" orient="auto">
                 <path d="M0 0L10 5L0 10z" fill="var(--cf-muted)" />
               </marker>
-              <marker id="roots-arrow-need" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <marker id="roots-arrow-need" viewBox="0 0 10 10" refX="10" refY="5" markerWidth={ARROW} markerHeight={ARROW} markerUnits="userSpaceOnUse" orient="auto">
                 <path d="M0 0L10 5L0 10z" fill="var(--cf-orange)" />
               </marker>
             </defs>
@@ -420,26 +480,19 @@
             {@const done = idea.todos.filter((todo) => todo.done).length}
             {@const unmet = idea.needs.filter((need) => !needMet(need, byId)).length}
             {@const asks = unansweredComments(idea).length}
+            {@const dots = dotsOf(idea)}
+            <div class="node-at" class:dim={hidden.has(idea.status)} style:left="{at?.x ?? 0}px" style:top="{at?.y ?? 0}px">
             <button
               class="node {idea.status}"
               class:origin={!idea.from.length}
               class:selected={idea.id === selected}
-              class:dim={hidden.has(idea.status)}
-              style:left="{at?.x ?? 0}px"
-              style:top="{at?.y ?? 0}px"
               onclick={() => select(idea.id === selected ? undefined : idea.id)}
             >
               <span class="top">
                 <span class="id">#{idea.id}</span>
                 <span class="status s-{idea.status}">{idea.status}</span>
-                <span class="chats">
-                  {#each idea.chats as entry, index (index)}
-                    {@const chat = chatOf(entry)}
-                    <span class="chat-dot c-{chat?.state ?? 'idle'}" title="{chat?.title ?? entry.agent ?? 'A chat'}: {CHAT_STATE[chat?.state ?? 'idle']}"></span>
-                  {/each}
-                </span>
               </span>
-              <span class="title">{idea.title}</span>
+              <span class="title" title={idea.title}>{idea.title}</span>
               <span class="meta">
                 {#if idea.todos.length}
                   <span>{done}/{idea.todos.length}</span>
@@ -450,8 +503,50 @@
                 {#if idea.files.length}<span>{idea.files.length} file{idea.files.length === 1 ? '' : 's'}</span>{/if}
               </span>
             </button>
+            {#if dots.length}
+              <!-- Over the card, not in it: a button cannot hold buttons. -->
+              <button
+                class="chats"
+                title={dots.length === 1 ? `${dots[0].title}: ${CHAT_STATE[dots[0].state]}${dots[0].open ? ' (open it)' : ''}` : `${dots.length} chats worked on this idea`}
+                aria-label={dots.length === 1 ? `Open ${dots[0].title}` : `The ${dots.length} chats of idea ${idea.id}`}
+                aria-haspopup={dots.length > 1 || !dots[0].open ? 'menu' : undefined}
+                onclick={(event) => openDots(idea, event)}
+              >
+                {#each dots.slice(0, MAX_DOTS) as dot, index (index)}
+                  <span class="chat-dot c-{dot.state}"></span>
+                {/each}
+                {#if dots.length > MAX_DOTS}<span class="more-dots">+{dots.length - MAX_DOTS}</span>{/if}
+              </button>
+            {/if}
+            </div>
           {/each}
         </div>
+        {#if dotsMenu}
+          {@const menuIdea = byId.get(dotsMenu.idea)}
+          {#if menuIdea}
+            <div class="dots-menu" role="menu" aria-label="Chats of idea {menuIdea.id}" style:left="{dotsMenu.x}px" style:top="{dotsMenu.y}px">
+              {#each dotsOf(menuIdea) as dot, index (index)}
+                <button
+                  role="menuitem"
+                  class="dots-item"
+                  disabled={!dot.open}
+                  title={dot.open ? undefined : 'Not a chat of this sandbox, e.g. one deleted since'}
+                  onclick={() => {
+                    if (dot.open) host.send({ type: 'openChat', key: dot.open });
+                    dotsMenu = undefined;
+                  }}
+                >
+                  <span class="chat-dot c-{dot.state}"></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate">{dot.title}</span>
+                    <small class="text-muted">{CHAT_STATE[dot.state]} · {when(dot.at)}</small>
+                  </span>
+                  {#if dot.agent}<span class="agent">{dot.agent}</span>{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+        {/if}
         <div class="legend">
           <span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--cf-muted)" stroke-width="2" /></svg>builds on</span>
           <span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--cf-orange)" stroke-width="2" stroke-dasharray="5 4" /></svg>needs</span>
@@ -473,6 +568,7 @@
         {@const idea = current}
         {@const kids = ideas.filter((other) => other.from.includes(idea.id))}
         {@const done = idea.todos.filter((todo) => todo.done).length}
+        {@const listed = [...idea.chats].reverse()}
         <aside class="panel" aria-label="Idea {idea.id}">
           <div class="flex items-center gap-2">
             <span class="id">#{idea.id}</span>
@@ -489,39 +585,49 @@
             <button class="close" aria-label="Close" onclick={() => select(undefined)}>×</button>
           </div>
           <h2 class="m-0 font-display text-xl font-medium [text-wrap:balance]">{idea.title}</h2>
-          <p class="m-0 text-[0.88em] text-muted">
+          <div class="relations text-[0.88em] text-muted">
             {#if idea.from.length}
-              Builds on
-              {#each idea.from as id, index (id)}{index ? ', ' : ' '}<button class="link" onclick={() => (select(id), center(id))}>#{id} {byId.get(id)?.title ?? ''}</button>{/each}
+              <span>Builds on</span>
+              <ul>
+                {#each idea.from as id (id)}
+                  <li><button class="link" title={byId.get(id)?.title} onclick={() => (select(id), center(id))}>#{id} {short(byId.get(id)?.title ?? '(missing)')}</button></li>
+                {/each}
+              </ul>
             {:else}
-              Starts from the data
+              <span>Starts from the data</span>
             {/if}
             {#if kids.length}
-              <br />Leads to
-              {#each kids as kid, index (kid.id)}{index ? ', ' : ' '}<button class="link" onclick={() => (select(kid.id), center(kid.id))}>#{kid.id}</button>{/each}
+              <span>Leads to
+                {#each kids as kid, index (kid.id)}{index ? ', ' : ' '}<button class="link" title={kid.title} onclick={() => (select(kid.id), center(kid.id))}>#{kid.id}</button>{/each}
+              </span>
             {/if}
-          </p>
+          </div>
           {#if error}<p class="m-0 text-red" role="alert">{error}</p>{/if}
 
           <section>
             <h3>Chats</h3>
             <div class="flex flex-col gap-1.5">
-              {#each [...idea.chats].reverse() as entry, index (index)}
+              {#each allChats ? listed : listed.slice(0, SHOWN_CHATS) as entry, index (index)}
                 {@const chat = chatOf(entry)}
                 <div class="chat-row">
                   <span class="chat-dot c-{chat?.state ?? 'idle'}"></span>
                   <span class="min-w-0 flex-1">
-                    <span class="block truncate">{chat?.title ?? 'A chat of this project'}</span>
+                    <span class="block truncate">{chat?.title ?? (entry.agent ? `A ${entry.agent} chat` : 'A chat')}</span>
                     <small class="text-muted">{chat ? CHAT_STATE[chat.state] : 'not listed in this sandbox'} · {when(entry.at)}</small>
                   </span>
                   {#if chat?.agentLabel ?? entry.agent}<span class="agent">{chat?.agentLabel ?? entry.agent}</span>{/if}
-                  {#if entry.key && chat}
-                    <button class="pill pill-small" onclick={() => host.send({ type: 'openChat', key: entry.key! })}>Open</button>
+                  {#if chat}
+                    <button class="pill pill-small" onclick={() => host.send({ type: 'openChat', key: chat.key })}>Open</button>
                   {/if}
                 </div>
               {:else}
                 <p class="m-0 text-[0.9em] text-muted">No chat has worked on it yet.</p>
               {/each}
+              {#if listed.length > SHOWN_CHATS}
+                <button class="link self-start text-[0.88em]" onclick={() => (allChats = !allChats)}>
+                  {allChats ? 'Show the latest only' : `Show all ${listed.length} chats`}
+                </button>
+              {/if}
               <div>
                 <button class="pill pill-small pill-primary" onclick={() => host.send({ type: 'newChat', idea: idea.id, title: idea.title })}>
                   New chat on this idea
@@ -585,7 +691,7 @@
               <h3>Files</h3>
               <div class="flex flex-col gap-0.5">
                 {#each idea.files as file (file)}
-                  <button class="file" onclick={() => host.send({ type: 'openFile', path: file })}><span class="kind">{kindOf(file)}</span><span class="truncate">{file}</span></button>
+                  <button class="file" title={file} onclick={() => host.send({ type: 'openFile', path: file })}><span class="kind">{kindOf(file)}</span><span class="truncate">{file}</span></button>
                 {/each}
               </div>
             </section>
@@ -634,12 +740,13 @@
     height: 100vh;
     display: grid;
     grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr);
     background: var(--cf-paper);
     color: var(--cf-ink);
   }
   .bar {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 8px 14px;
     padding: 10px 16px;
@@ -705,10 +812,18 @@
     overflow: visible;
     pointer-events: none;
   }
-  .node {
+  .node-at {
     position: absolute;
     width: 228px;
-    min-height: 92px;
+    height: 124px;
+  }
+  .node-at.dim {
+    opacity: 0.35;
+  }
+  .node {
+    position: relative;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -732,9 +847,6 @@
   .node.selected {
     border-color: var(--cf-indigo);
     box-shadow: 0 0 0 2px var(--cf-indigo), var(--cf-hover);
-  }
-  .node.dim {
-    opacity: 0.35;
   }
   .node.origin::before {
     content: 'origin';
@@ -789,8 +901,35 @@
     color: var(--cf-muted);
   }
   .title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+    overflow-wrap: anywhere;
     font-weight: 600;
     line-height: 1.3;
+  }
+  .more-dots {
+    font-size: 0.7em;
+    font-weight: 600;
+    color: var(--cf-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .relations {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .relations ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .relations .link {
+    text-align: left;
+    overflow-wrap: anywhere;
   }
   .node.dropped .title {
     text-decoration: line-through;
@@ -827,10 +966,65 @@
     color: var(--cf-pink);
     font-weight: 600;
   }
+  /* The chats' dots, over the card's top right corner: they open a chat, or a menu of them. */
   .chats {
+    position: absolute;
+    top: 8px;
+    right: 8px;
     display: flex;
+    align-items: center;
     gap: 4px;
-    margin-left: auto;
+    padding: 4px 6px;
+    color: inherit;
+    font: inherit;
+    background: none;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .chats:hover {
+    background: var(--cf-sunken);
+  }
+  .chats:focus-visible {
+    outline: 2px solid var(--cf-indigo);
+  }
+  .dots-menu {
+    position: absolute;
+    z-index: 5;
+    transform: translateX(-100%);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: min(300px, calc(100% - 24px));
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--cf-card);
+    border: 1px solid var(--cf-soft-line);
+    border-radius: 12px;
+    box-shadow: var(--cf-hover);
+  }
+  .dots-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    color: inherit;
+    font: inherit;
+    font-size: 0.9em;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .dots-item:hover:not(:disabled) {
+    background: var(--cf-sunken);
+  }
+  .dots-item:disabled {
+    opacity: 0.55;
+    cursor: default;
   }
   .chat-dot {
     display: inline-block;
@@ -959,6 +1153,8 @@
     display: flex;
     gap: 8px;
     align-items: flex-start;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .list input {
     margin-top: 3px;
@@ -991,14 +1187,26 @@
     background: var(--cf-sunken);
     border-radius: 6px;
   }
+  .conclusion :global(pre),
+  .conclusion :global(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .conclusion {
+    min-width: 0;
+    overflow-wrap: anywhere;
     padding: 10px 12px;
     font-size: 0.95em;
     background: var(--cf-paper);
     border: 1px solid var(--cf-soft-line);
     border-radius: 12px;
   }
+  .file :global(.truncate) {
+    min-width: 0;
+  }
   .file {
+    max-width: 100%;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1029,6 +1237,7 @@
     border-radius: 5px;
   }
   .comment {
+    overflow-wrap: anywhere;
     max-width: 92%;
     padding: 7px 10px;
     font-size: 0.92em;
@@ -1063,6 +1272,25 @@
     background: var(--cf-ink);
     border-radius: 999px;
     box-shadow: var(--cf-elevation);
+  }
+  .chips-row {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .chip {
+    flex: none;
+  }
+  .bar > :global(h1),
+  .bar > span:not(.flex-1) {
+    flex: none;
+  }
+  @media (max-width: 600px) {
+    .legend,
+    .bar .label {
+      display: none;
+    }
   }
   @media (max-width: 720px) {
     .main.open {

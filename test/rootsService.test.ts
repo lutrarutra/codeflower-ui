@@ -50,7 +50,7 @@ test('answers the view from the connection, and sends the map when it changes', 
   const service = serveRoots({
     connection: () => fake.connection,
     send: (message) => sent.push(message),
-    label: 'pbmc-study',
+    label: () => 'pbmc-study',
     chats: () => [{ key: 'claude:s1', title: 'QC', state: 'working' }],
     openChat: (key) => opened.push(`chat ${key}`),
     newChat: (prompt) => opened.push(`new ${prompt}`),
@@ -94,7 +94,7 @@ test('answers the view from the connection, and sends the map when it changes', 
   ]);
 
   service.chatsChanged();
-  assert.equal(sent.pop()?.type, 'chats');
+  assert.deepEqual(sent.splice(-2).map((message) => message.type), ['context', 'chats']);
   service.dispose();
   assert.equal(fake.listeners.size, 0);
 });
@@ -105,7 +105,7 @@ test('says when the sandbox is older than Roots', async () => {
   const service = serveRoots({
     connection: () => fake.connection,
     send: (message) => sent.push(message),
-    label: 'x',
+    label: () => 'x',
     chats: () => [],
     openChat: () => {},
     newChat: () => {},

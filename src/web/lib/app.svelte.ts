@@ -103,6 +103,8 @@ class AppState {
   sidebarFolds = $state(0);
   /** Opens the quit dialog; set by the shell. */
   askToQuit: () => void = () => {};
+  /** The idea a sandbox's map should show, asked by an agent (codeflower-roots open); `at` tells repeats apart. */
+  rootsFocus = $state<{ workerId: string; idea: number; at: number } | null>(null);
   /** The latest wrap-up a sandbox announced, by sandbox. */
   wrapUps = $state<Record<string, WrapUpNotice>>({});
 
@@ -116,6 +118,12 @@ class AppState {
     // E.g. a subagent's chat from its parent's: in Focus, Focus shows it.
     openChat: (worker, key) => this.go({ view: this.route.view === 'focus' ? 'focus' : 'chat', worker: worker.id, session: key }),
     activity: (worker) => this.worker(worker.id)?.activity,
+    // Beside the chats; Focus shows only chats, so the grid comes back.
+    openRoots: (worker, idea) => {
+      if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id });
+      this.workbench.openRoots(worker.id);
+      if (idea !== undefined) this.rootsFocus = { workerId: worker.id, idea, at: Date.now() };
+    },
     // Watched beside the chat; Focus shows only chats, so the grid comes back.
     openCommand: (worker, chat, commandId) => {
       if (this.route.view === 'focus') this.go({ view: 'chat', worker: worker.id, session: chat.key });

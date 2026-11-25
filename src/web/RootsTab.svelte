@@ -47,7 +47,7 @@
     app.go({ view: 'chat', worker: workerId, session: key });
   }
 
-  type TabHost = Host<RootsWebviewMessage, RootsHostMessage> & { chatsChanged(): void; dispose(): void };
+  type TabHost = Host<RootsWebviewMessage, RootsHostMessage> & { chatsChanged(): void; focus(idea: number): void; dispose(): void };
 
   function makeHost(): TabHost {
     const listeners = new Set<(message: RootsHostMessage) => void>();
@@ -56,7 +56,10 @@
       send: (message) => {
         for (const listener of listeners) listener(message);
       },
-      label: worker ? workerTitle(worker).filter(Boolean).join(', ') : '',
+      label: () => {
+        const current = app.worker(workerId);
+        return current ? workerTitle(current).filter(Boolean).join(', ') : '';
+      },
       chats,
       openChat: (key) => app.go({ view: 'chat', worker: workerId, session: key }),
       newChat: (prompt) =>
@@ -76,12 +79,23 @@
         return () => listeners.delete(listener);
       },
       chatsChanged: () => service.chatsChanged(),
+      focus: (idea) => service.focus(idea),
       dispose: () => service.dispose()
     };
   }
 
   const host = makeHost();
   $effect(() => () => host.dispose());
+
+  // An agent asked to show an idea (codeflower-roots open).
+  $effect(() => {
+    const asked = app.rootsFocus;
+    if (asked?.workerId !== workerId) return;
+    untrack(() => {
+      host.focus(asked.idea);
+      app.rootsFocus = null;
+    });
+  });
 
   // The chats, their titles and states, and the connection, as they change.
   $effect(() => {

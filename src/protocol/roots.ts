@@ -21,12 +21,17 @@ export interface IdeaTodo {
   done: boolean;
 }
 
-/** A chat that worked on the idea, the latest last; `key` when the worker knows the chat. */
+/**
+ * A chat that worked on the idea, the latest last; `key` when the worker knows the chat. A
+ * subagent has its parent chat's session id (`parent`) and key (`parentKey`).
+ */
 export interface IdeaChat {
   agent?: string;
   sessionId?: string;
+  parent?: string;
   at: string;
   key?: string;
+  parentKey?: string;
 }
 
 export interface IdeaComment {

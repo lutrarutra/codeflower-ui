@@ -71,6 +71,8 @@ export interface WorkerEvents {
   activity(worker: WebWorker): WorkerActivity | undefined;
   /** A command a chat's agent runs, watched read-only in a tab. */
   openCommand(worker: WebWorker, chat: ChatSession, commandId: string): void;
+  /** An agent shows the project's map of ideas (codeflower-roots open), on `idea` when given. */
+  openRoots(worker: WebWorker, idea?: number): void;
   /** A shell in the sandbox, from a chat's header. */
   openShell(worker: WebWorker, chat: ChatSession): Promise<void>;
   /** The chat's browser, from its header. */
@@ -935,6 +937,7 @@ export class WebWorker {
       elicitUrl: (request: UrlElicitation, agent?: AgentName) => this.events.elicitUrl(this, request, agent),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),
       show: (request: ShowRequest) => this.events.show(this, request),
+      roots: (idea?: number) => this.events.openRoots(this, idea),
       terminalOutput: (terminalId: string, data: string, replayed?: boolean) => this.events.terminalOutput(terminalId, data, replayed === true),
       terminalExit: (terminalId: string, exitCode: number) => this.events.terminalExit(terminalId, exitCode),
       usage: (agent: AgentName, usage: WorkerUsage) => this.setUsage(agent, usage),

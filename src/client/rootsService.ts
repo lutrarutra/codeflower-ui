@@ -9,8 +9,8 @@ export interface RootsServiceOptions {
   /** The worker's connection now; it changes when the sandbox reconnects. */
   connection(): WorkerConnection | undefined;
   send(message: RootsHostMessage): void;
-  /** The sandbox's name, for the view's header. */
-  label: string;
+  /** The sandbox's name, for the view's header; asked again when the chats change, as it may come later. */
+  label(): string;
   /** The chats the host knows, with their state. */
   chats(): RootsChat[];
   openChat(key: string): void;
@@ -91,7 +91,7 @@ export function serveRoots(options: RootsServiceOptions): {
           // The view lists the map itself; later connections list it for the view.
           subscribe();
           ready = true;
-          options.send({ type: 'context', label: options.label });
+          options.send({ type: 'context', label: options.label() });
           options.send({ type: 'chats', chats: options.chats() });
           if (focusing !== undefined) options.send({ type: 'focus', idea: focusing });
           focusing = undefined;
@@ -114,7 +114,10 @@ export function serveRoots(options: RootsServiceOptions): {
       }
     },
     chatsChanged() {
-      if (ready) options.send({ type: 'chats', chats: options.chats() });
+      if (ready) {
+        options.send({ type: 'context', label: options.label() });
+        options.send({ type: 'chats', chats: options.chats() });
+      }
       subscribe();
     },
     focus(idea) {

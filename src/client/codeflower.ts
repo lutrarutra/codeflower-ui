@@ -481,6 +481,8 @@ export interface CodeflowerHandlers {
   jobsChanged?(jobs: BatchJob[]): void;
   /** The project's map of ideas changed: an agent or a window changed an idea. */
   rootsChanged?(map: RootsMap): void;
+  /** An agent asks to show the map (codeflower-roots open), on an idea; `key`: the chat that asks. */
+  rootsOpen?(request: { idea?: number; key?: string }): void;
   /**
    * The worker let go of a chat open here, which the window no longer has: another worker asked for it
    * (`takeover`), or no window had it open (`idle`).
@@ -583,6 +585,10 @@ export class CodeflowerExtensions {
     rpc.on('_codeflower/sessions/requested', (params) => {
       const { key } = params as { key?: string };
       if (typeof key === 'string') handlers.sessionRequested?.(key);
+    });
+    rpc.on('_codeflower/roots/open', (params) => {
+      const { idea, key } = (params ?? {}) as { idea?: unknown; key?: unknown };
+      handlers.rootsOpen?.({ ...(typeof idea === 'number' ? { idea } : {}), ...(typeof key === 'string' ? { key } : {}) });
     });
     rpc.on('_codeflower/roots/changed', (params) => {
       const map = params as RootsMap;

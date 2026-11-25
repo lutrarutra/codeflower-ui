@@ -176,6 +176,8 @@ export interface WorkerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed (codeflower-job): one was submitted, or changed state. */
   jobs?(jobs: BatchJob[]): void;
+  /** An agent asks to show the project's map of ideas (codeflower-roots open), on `idea` when given. */
+  roots?(idea?: number): void;
   /** The worker let go of a chat open here (another worker asked for it): it is no longer attached. */
   released?(sessionKey: string, reason: SessionRelease): void;
   /** Another worker asked for a chat open here; it goes there once its turn ended. */
@@ -336,6 +338,7 @@ export class WorkerConnection {
         this.shells.delete(runId);
         handlers.entry(run.sessionKey, { t: now(), kind: 'shell_end', runId, exitCode, timedOut: timedOut === true });
       },
+      rootsOpen: ({ idea }: { idea?: number }) => handlers.roots?.(idea),
       show: (request: ShowRequest) => {
         const current = link?.();
         const key = request.key ?? (current && request.sessionId ? sessionKey(current.agent, request.sessionId) : undefined);
