@@ -8,6 +8,7 @@
     IDEA_STATUSES,
     needMet,
     unansweredComments,
+    watchNeedState,
     type Idea,
     type IdeaPatch,
     type IdeaStatus,
@@ -479,6 +480,7 @@
             {@const at = placed.get(idea.id)}
             {@const done = idea.todos.filter((todo) => todo.done).length}
             {@const unmet = idea.needs.filter((need) => !needMet(need, byId)).length}
+            {@const watching = idea.needs.filter((need) => need.watch && !need.met && !need.ended)}
             {@const asks = unansweredComments(idea).length}
             {@const dots = dotsOf(idea)}
             <div class="node-at" class:dim={hidden.has(idea.status)} style:left="{at?.x ?? 0}px" style:top="{at?.y ?? 0}px">
@@ -499,6 +501,11 @@
                   <span class="progress"><i style:width="{(done / idea.todos.length) * 100}%"></i></span>
                 {/if}
                 {#if unmet}<span class="warn">{unmet} need{unmet === 1 ? '' : 's'}</span>{/if}
+                {#if watching.length}
+                  <span class="watching" title="Waiting on {watching.map((need) => need.text).join(', ')}"
+                    ><span class="codicon codicon-eye-watch"></span>{watching.length === 1 ? watching[0].text : watching.length}</span
+                  >
+                {/if}
                 {#if asks}<span class="asks" title="Your comments the agents have not answered">✎ {asks}</span>{/if}
                 {#if idea.files.length}<span>{idea.files.length} file{idea.files.length === 1 ? '' : 's'}</span>{/if}
               </span>
@@ -664,6 +671,19 @@
                       <span>
                         <button class="link" onclick={() => (select(need.idea), center(need.idea!))}>#{need.idea} {byId.get(need.idea)?.title ?? '(missing)'}</button>
                         <small class="text-muted">({byId.get(need.idea)?.status ?? 'missing'})</small>
+                      </span>
+                    {:else if need.watch}
+                      <!-- A watch the agent started for the idea: met when its condition holds. -->
+                      <span class="mark watch s-{watchNeedState(need)}" class:met title="A watch: {watchNeedState(need)}"
+                        ><span class="codicon codicon-{met ? 'check' : 'eye-watch'}"></span></span
+                      >
+                      <span>
+                        {#if need.log}
+                          <button class="link" title="Open its output ({need.watch})" onclick={() => host.send({ type: 'openFile', path: need.log! })}>{need.text}</button>
+                        {:else}
+                          {need.text}
+                        {/if}
+                        <small class="text-muted">(watch, {watchNeedState(need)})</small>
                       </span>
                     {:else}
                       <label class="flex items-start gap-2" class:checked={met}>
@@ -1170,6 +1190,34 @@
   }
   .mark.met {
     color: var(--cf-green);
+  }
+  .mark.watch {
+    display: inline-flex;
+    margin-top: 2px;
+    color: var(--cf-cyan, var(--cf-teal));
+  }
+  .mark.watch.met {
+    color: var(--cf-green);
+  }
+  .mark.watch.s-failing,
+  .mark.watch.s-lost,
+  .mark.watch.s-timeout,
+  .mark.watch.s-stopped {
+    color: var(--cf-pink);
+  }
+  .watching {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    max-width: 12em;
+    overflow: hidden;
+    color: var(--cf-teal);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .watching .codicon {
+    font-size: 1em;
   }
   .chat-row {
     display: flex;

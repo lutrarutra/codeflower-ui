@@ -9,11 +9,24 @@ export type IdeaStatus = 'idea' | 'active' | 'blocked' | 'done' | 'dropped';
 
 export const IDEA_STATUSES: IdeaStatus[] = ['idea', 'active', 'blocked', 'done', 'dropped'];
 
-/** Another idea that must be done first, or a condition. */
+/**
+ * Another idea that must be done first, or a condition; or a watch (codeflower-watch) the agent
+ * started for the idea: met when its condition holds, else `ended` says how it stopped (failing,
+ * timeout, stopped, lost). Must match roots-store.js (addWatchNeed, endWatchNeeds).
+ */
 export interface IdeaNeed {
   idea?: number;
   text?: string;
   met?: boolean;
+  watch?: string;
+  ended?: string;
+  /** The watch's output, in the sandbox. */
+  log?: string;
+}
+
+/** A watch need's state for people: watching, met, or how it ended. */
+export function watchNeedState(need: IdeaNeed): string {
+  return need.met ? 'met' : (need.ended ?? 'watching');
 }
 
 export interface IdeaTodo {
