@@ -50,6 +50,8 @@ function actions(
     stopSubagent: async () => {},
     openCommand: () => {},
     cancelJob: async () => {},
+    stopWatch: async () => {},
+    checkWatch: async () => {},
     openShell: async () => {},
     openBrowser: () => {},
     setSubagentSettings: async () => {},

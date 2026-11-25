@@ -18,6 +18,7 @@ import type { WorkerActivity } from './api.ts';
 import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentSummary } from '../../protocol/subagents.ts';
 import type { AgentCommand } from '../../protocol/commands.ts';
 import { jobsOfChat, type BatchJob } from '../../protocol/jobs.ts';
+import { watchesOfChat, type Watch } from '../../protocol/watches.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
@@ -109,6 +110,8 @@ export class WebWorker {
   commands = $state<Record<string, AgentCommand>>({});
   /** The project's batch jobs (codeflower-job), active and of the last day; each chat shows its own. */
   jobs = $state<BatchJob[]>([]);
+  /** The project's watches (codeflower-watch), running and of the last day; each chat shows its own. */
+  watches = $state<Watch[]>([]);
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
   /** The user's shells running in the sandbox (the page's Terminal). */
@@ -497,6 +500,7 @@ export class WebWorker {
       void this.loadSubagents(chat);
       void this.loadCommands(chat);
       void this.loadJobs(chat);
+      void this.loadWatches(chat);
     } catch (error) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
@@ -540,6 +544,20 @@ export class WebWorker {
   private setJobs(jobs: BatchJob[]): void {
     this.jobs = jobs;
     for (const [key, chat] of Object.entries(this.chats)) chat?.setState({ jobs: jobsOfChat(jobs, key) });
+  }
+
+  /** The project's watches, for a chat that attached. */
+  private async loadWatches(chat: ChatSession): Promise<void> {
+    const connection = this.connection;
+    if (!connection?.watchesFeature) return;
+    const watches = await connection.watches();
+    if (this.connection === connection) this.setWatches(watches);
+    else chat.setState({ watches: watchesOfChat(this.watches, chat.key) });
+  }
+
+  private setWatches(watches: Watch[]): void {
+    this.watches = watches;
+    for (const [key, chat] of Object.entries(this.chats)) chat?.setState({ watches: watchesOfChat(watches, key) });
   }
 
   private setCommands(key: string, commands: AgentCommand[]): void {
@@ -740,6 +758,12 @@ export class WebWorker {
     stopSubagent: (_chat, key) => this.require().cancelSubagent(key),
     cancelJob: async (_chat, id) => {
       await this.require().cancelJob(id);
+    },
+    stopWatch: async (_chat, id) => {
+      await this.require().stopWatch(id);
+    },
+    checkWatch: async (_chat, id) => {
+      await this.require().checkWatch(id);
     },
     setSubagentSettings: async (chat, settings) => {
       const agent = agentOfKey(chat.key);
@@ -963,6 +987,7 @@ export class WebWorker {
       background: (key: string, background: BackgroundTask[]) => this.chats[key]?.setState({ background }),
       commands: (key: string, commands: AgentCommand[]) => this.setCommands(key, commands),
       jobs: (jobs: BatchJob[]) => this.setJobs(jobs),
+      watches: (watches: Watch[]) => this.setWatches(watches),
       // A chat was forked or an agent started one: the lists show it at once, not at the next poll.
       sessions: () => void this.refresh(),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),

@@ -54,6 +54,10 @@ export interface ChatActions {
   openCommand(chat: ChatSession, commandId: string): void;
   /** Cancels one of the chat's batch jobs. */
   cancelJob(chat: ChatSession, id: string): Promise<void>;
+  /** Stops one of the chat's watches. */
+  stopWatch(chat: ChatSession, id: string): Promise<void>;
+  /** Runs one of the chat's watches now. */
+  checkWatch(chat: ChatSession, id: string): Promise<void>;
   /** A shell in the chat's sandbox, in the terminals' panel. */
   /** Shows the chat's browser beside it. */
   openBrowser(chat: ChatSession): void;
@@ -364,6 +368,12 @@ export class ChatSession {
         break;
       case 'cancelJob':
         await this.failing('Could not cancel the job', this.actions.cancelJob(this, message.id));
+        break;
+      case 'stopWatch':
+        await this.failing('Could not stop the watch', this.actions.stopWatch(this, message.id));
+        break;
+      case 'checkWatch':
+        await this.failing('Could not check the watch', this.actions.checkWatch(this, message.id));
         break;
       case 'openShell':
         await this.failing('Could not open a terminal', this.actions.openShell(this));

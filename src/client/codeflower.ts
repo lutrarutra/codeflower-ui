@@ -15,6 +15,7 @@ import type {
 } from '../protocol/messages.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob, JobsSummary } from '../protocol/jobs.ts';
+import type { Watch, WatchesSummary } from '../protocol/watches.ts';
 import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserInputEvent, BrowserNavigation, BrowserState } from '../protocol/browser.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
@@ -119,6 +120,8 @@ export interface WorkerStatus {
   allocationEnd?: string;
   /** Batch jobs the agents may ask for (codeflower-job); missing when the worker has none. */
   jobs?: JobsSummary;
+  /** The agents' watches (codeflower-watch); missing from older workers. */
+  watches?: WatchesSummary;
   /** The worker keeps the project's map of ideas (`_codeflower/roots/*`); missing from older workers. */
   roots?: boolean;
   /** The worker forks chats (`_codeflower/sessions/fork`), and tells of new ones (`sessions/changed`); missing from older workers. */
@@ -502,6 +505,8 @@ export interface CodeflowerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed: one was submitted, or changed state. */
   jobsChanged?(jobs: BatchJob[]): void;
+  /** The project's watches changed: one started, ran, or ended. */
+  watchesChanged?(watches: Watch[]): void;
   /** The project's map of ideas changed: an agent or a window changed an idea. */
   rootsChanged?(map: RootsMap): void;
   /** An agent asks to show the map (codeflower-roots open), on an idea; `key`: the chat that asks. */
@@ -623,6 +628,10 @@ export class CodeflowerExtensions {
     rpc.on('_codeflower/jobs/changed', (params) => {
       const { jobs } = params as { jobs?: BatchJob[] };
       if (Array.isArray(jobs)) handlers.jobsChanged?.(jobs);
+    });
+    rpc.on('_codeflower/watches/changed', (params) => {
+      const { watches } = params as { watches?: Watch[] };
+      if (Array.isArray(watches)) handlers.watchesChanged?.(watches);
     });
     rpc.on('_codeflower/terminal/changed', (params) => {
       const { terminals } = params as { terminals?: (ChatTerminal | ShellTerminal)[] };
@@ -1063,6 +1072,23 @@ export class CodeflowerExtensions {
   /** Cancels one of the project's batch jobs. */
   async cancelJob(id: string): Promise<BatchJob | undefined> {
     return (await this.rpc.request<{ job?: BatchJob }>('_codeflower/jobs/cancel', { id })).job;
+  }
+
+  // ---- watches ----
+
+  /** The project's watches: running, and those that ended in the last day. */
+  async watches(): Promise<Watch[]> {
+    return (await this.rpc.request<{ watches?: Watch[] }>('_codeflower/watches/list', {})).watches ?? [];
+  }
+
+  /** Runs a watch's command now; a met watch is told to its chat. */
+  async checkWatch(id: string): Promise<{ watch?: Watch; run?: { exitCode: number; verdict: string; timedOut?: boolean } }> {
+    return this.rpc.request('_codeflower/watches/check', { id });
+  }
+
+  /** Stops one of the project's watches; its chat is told. */
+  async stopWatch(id: string): Promise<Watch | undefined> {
+    return (await this.rpc.request<{ watch?: Watch }>('_codeflower/watches/stop', { id })).watch;
   }
 
   // ---- subagents ----

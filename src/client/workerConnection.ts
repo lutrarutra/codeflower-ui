@@ -32,6 +32,7 @@ import {
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob } from '../protocol/jobs.ts';
+import type { Watch } from '../protocol/watches.ts';
 import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../protocol/browser.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
@@ -178,6 +179,8 @@ export interface WorkerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed (codeflower-job): one was submitted, or changed state. */
   jobs?(jobs: BatchJob[]): void;
+  /** The project's watches changed (codeflower-watch): one started, ran, or ended. */
+  watches?(watches: Watch[]): void;
   /** A chat was forked, or an agent started one (codeflower-chat): the chat list changed. */
   sessions?(): void;
   /** An agent asks to show the project's map of ideas (codeflower-roots open), on `idea` when given. */
@@ -284,6 +287,7 @@ export class WorkerConnection {
       browserChanged: (browser) => handlers.browser?.(browser),
       browserFrame: (frame) => handlers.browserFrame?.(frame),
       jobsChanged: (jobs) => handlers.jobs?.(jobs),
+      watchesChanged: (watches) => handlers.watches?.(watches),
       sessionsChanged: () => handlers.sessions?.(),
       rootsChanged: (map) => {
         for (const listener of this.rootsListeners) listener(map);
@@ -943,6 +947,27 @@ export class WorkerConnection {
   /** Cancels one of the project's batch jobs. */
   cancelJob(id: string): Promise<BatchJob | undefined> {
     return this.bridge.cancelJob(id);
+  }
+
+  /** Whether the agents have watches here (codeflower-watch), as the worker's status said. */
+  get watchesFeature(): boolean {
+    return this.workerStatus.watches !== undefined;
+  }
+
+  /** The project's watches; none from workers without them. */
+  async watches(): Promise<Watch[]> {
+    if (!this.watchesFeature) return [];
+    return this.bridge.watches().catch(() => []);
+  }
+
+  /** Runs a watch's command now (Check now). */
+  checkWatch(id: string): Promise<{ watch?: Watch; run?: { exitCode: number; verdict: string; timedOut?: boolean } }> {
+    return this.bridge.checkWatch(id);
+  }
+
+  /** Stops one of the project's watches. */
+  stopWatch(id: string): Promise<Watch | undefined> {
+    return this.bridge.stopWatch(id);
   }
 
   /** A chat's subagents, running and recorded; none for agents without them. */

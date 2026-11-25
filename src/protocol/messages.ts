@@ -13,6 +13,7 @@ import type {
 import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from './subagents.ts';
 import type { AgentCommand } from './commands.ts';
 import type { BatchJob } from './jobs.ts';
+import type { Watch } from './watches.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -235,6 +236,8 @@ export interface ChatState {
   commands?: AgentCommand[];
   /** The batch jobs this chat asked for (codeflower-job): active, and those that ended in the last day. */
   jobs?: BatchJob[];
+  /** The watches this chat's agent started (codeflower-watch): running, and those that ended in the last day. */
+  watches?: Watch[];
   /** A subagent's chat, which only shows what it does: its summary, and its parent's title. */
   subagent?: SubagentSummary & { parentTitle?: string };
   /** The chat's sandbox opens shells for the user: the header's terminal button (`openShell`). */
@@ -401,6 +404,10 @@ export type WebviewMessage =
   | { type: 'openCommand'; commandId: string }
   /** Cancel one of the chat's batch jobs (`jobs`); its output stays. */
   | { type: 'cancelJob'; id: string }
+  /** Stop one of the chat's watches (`watches`); the agent is told. */
+  | { type: 'stopWatch'; id: string }
+  /** Run one of the chat's watches now; if it is met, the agent is told. */
+  | { type: 'checkWatch'; id: string }
   /** Open a shell in the chat's sandbox, where the window keeps its terminals (`shells`). */
   | { type: 'openShell' }
   /** Show the chat's browser (`browser`). */
@@ -444,6 +451,8 @@ export interface PreviewState {
   interactive?: boolean;
   /** The batch job whose output the file is (jobOfFile): the tab says whether more is coming. */
   job?: BatchJob;
+  /** The watch whose output the file is (watchOfFile): the tab says whether more is coming. */
+  watch?: Watch;
 }
 
 export type PreviewHostMessage =

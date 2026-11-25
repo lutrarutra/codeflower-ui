@@ -1,6 +1,7 @@
 <script lang="ts">
   import DOMPurify from 'dompurify';
   import { jobActive, jobStatus } from '../protocol/jobs.ts';
+  import { formatInterval, watchStatus } from '../protocol/watches.ts';
   import type { FeedbackAnnotation, FeedbackFigure, PreviewHostMessage, PreviewState } from '../protocol/messages.ts';
   import Annotator, { type Note } from './lib/Annotator.svelte';
   import ErrorState from './lib/ErrorState.svelte';
@@ -75,8 +76,9 @@
         if (previous?.data && message.state.data && previous.file.mtimeMs !== message.state.file.mtimeMs && !ownSave) {
           assets = {};
           requested = new Set();
-          // A running job's output grows all the time: its strip says so, without a flash at each change.
-          if (!message.state.job || !jobActive(message.state.job)) {
+          // A running job's or watch's output grows all the time: its strip says so, without a flash at each change.
+          const growing = (message.state.job && jobActive(message.state.job)) || message.state.watch?.state === 'watching';
+          if (!growing) {
             updated = true;
             setTimeout(() => (updated = false), 4000);
           }
@@ -320,6 +322,56 @@
       ? `Batch job ${job.name} (${job.id}${job.schedulerId ? `, ${job.scheduler} ${job.schedulerId}` : ''}): ${jobStatus(job)}${taskState ? `; task ${task}: ${taskState}` : ''}`
       : ''
   );
+  // A watch's output (watchOfFile): whether it still runs, or how it ended. Shown like a job's.
+  const watch = $derived(preview?.watch);
+  const watchState = $derived.by(() => {
+    if (!watch) return null;
+    const every = formatInterval(watch.every);
+    const when = (iso?: string) => (iso ? ` (${new Date(iso).toLocaleTimeString([], { timeStyle: 'short' })})` : '');
+    switch (watch.state) {
+      case 'watching':
+        return {
+          noun: 'watch',
+          icon: 'loading codicon-modifier-spin',
+          label: 'watching',
+          tone: 'bg-teal-soft text-teal',
+          strip: `Watching: the command runs every ${every} until ${watch.until}, and each run's output shows here.`,
+          empty: ''
+        };
+      case 'met':
+        return {
+          noun: 'watch',
+          icon: 'pass-filled',
+          label: 'met',
+          tone: 'bg-teal-soft text-teal',
+          strip: `Its condition was met${when(watch.ended)} after ${watch.runs} runs: this is all of its output.`,
+          empty: 'It ended and wrote nothing here.'
+        };
+      case 'stopped':
+        return {
+          noun: 'watch',
+          icon: 'circle-slash',
+          label: 'stopped',
+          tone: 'bg-pink-soft text-pink',
+          strip: `It was stopped${when(watch.ended)}: no more runs come.`,
+          empty: 'It was stopped before it wrote anything here.'
+        };
+      default:
+        return {
+          noun: 'watch',
+          icon: 'error',
+          label: watch.state,
+          tone: 'bg-pink-soft text-pink',
+          strip: `It ended ${watch.state}${watch.reason ? ` (${watch.reason})` : ''}${when(watch.ended)}: no more runs come.`,
+          empty: `It ended ${watch.state} and wrote nothing here.`
+        };
+    }
+  });
+  // What the tab says of the job or watch whose output it shows.
+  const outputState = $derived(jobState ?? watchState);
+  const outputLive = $derived(job ? jobLive : watch?.state === 'watching');
+  const outputTitle = $derived(job ? jobTitle : watch ? `Watch ${watch.name} (${watch.id}): ${watchStatus(watch)}\n${watch.command}` : '');
+
   // How the scheduler stopped a job (time or memory limits) is in its own log, not the job's output:
   // an array task's own (scheduler-INDEX.log), which every profile but local writes, else the job's.
   const schedulerLog = $derived.by(() => {
@@ -400,9 +452,9 @@
           <span class="codicon codicon-refresh"></span> updated
         </span>
       {/if}
-      {#if jobState}
-        <span class="badge shrink-0 font-semibold {jobState.tone}" title={jobTitle} role="status">
-          <span class="codicon codicon-{jobState.icon}"></span> {jobState.noun} {jobState.label}
+      {#if outputState}
+        <span class="badge shrink-0 font-semibold {outputState.tone}" title={outputTitle} role="status">
+          <span class="codicon codicon-{outputState.icon}"></span> {outputState.noun} {outputState.label}
         </span>
       {/if}
       {#if kind === 'html' && text !== null}
@@ -506,11 +558,11 @@
           <ReportFrame html={text} title="{preview.title} (interactive)" kind={reportFrame} onMessage={fromReport} />
         </div>
       {/if}
-      {#if jobState && !preview.data && (jobLive || !preview.error)}
+      {#if outputState && !preview.data && (outputLive || !preview.error)}
         <!-- A job's output before it has any: not there yet, or empty. -->
         <div class="m-auto flex max-w-sm flex-col items-center gap-3 py-10 text-center text-muted" role="status">
-          <span class="codicon codicon-{jobLive ? 'loading codicon-modifier-spin' : jobState.icon} text-3xl!"></span>
-          <p class="m-0">{jobLive ? jobState.strip : jobState.empty}</p>
+          <span class="codicon codicon-{outputLive ? 'loading codicon-modifier-spin' : outputState.icon} text-3xl!"></span>
+          <p class="m-0">{outputLive ? outputState.strip : outputState.empty}</p>
         </div>
       {:else if preview.error}
         <ErrorState title="Cannot show this file" detail={preview.error} />
@@ -617,11 +669,11 @@
       {/if}
     </section>
 
-    {#if jobState && preview.data}
+    {#if outputState && preview.data}
       <!-- At the end of a job's output: more is coming, or that was all. -->
-      <div class="mx-4 mb-3 flex items-center gap-2 rounded-xl px-3 py-1.5 text-[0.85em] {jobState.tone}" role="status" title={jobTitle}>
-        <span class="codicon codicon-{jobState.icon}"></span>
-        <span class="min-w-0 flex-1">{jobState.strip}</span>
+      <div class="mx-4 mb-3 flex items-center gap-2 rounded-xl px-3 py-1.5 text-[0.85em] {outputState.tone}" role="status" title={outputTitle}>
+        <span class="codicon codicon-{outputState.icon}"></span>
+        <span class="min-w-0 flex-1">{outputState.strip}</span>
         {#if schedulerLog}
           <button
             class="chip shrink-0"

@@ -11,6 +11,7 @@ import type { ShowRequest } from '../../client/workerConnection.ts';
 import type { PreviewHostMessage, PreviewState, PreviewWebviewMessage, SandboxFile } from '../../protocol/messages.ts';
 import { feedbackAnnotations, feedbackFigure, feedbackText } from '../../chat/lib/feedback.ts';
 import { jobActive, jobOfFile } from '../../protocol/jobs.ts';
+import { watchOfFile } from '../../protocol/watches.ts';
 import { isBesideReport, isStorytellerReport } from '../../chat/lib/report.ts';
 import { basename, displayPath, resolvePath } from './report.ts';
 import type { WebWorker } from './worker.svelte.ts';
@@ -94,6 +95,7 @@ export class Preview {
     const agent = this.owner.page.agent(this.workerId);
     const chat = this.chatKey ? agent?.chats[this.chatKey] : undefined;
     const job = jobOfFile(agent?.jobs, this.file.path);
+    const watch = watchOfFile(agent?.watches, this.file.path);
     return {
       file: this.file,
       data: this.data,
@@ -103,7 +105,8 @@ export class Preview {
       chat: chat ? { title: chat.state.title, busy: chat.state.busy } : this.chatKey ? { title: 'the chat', busy: false } : null,
       live: agent?.state === 'connected',
       interactive: this.interactive,
-      ...(job ? { job } : {})
+      ...(job ? { job } : {}),
+      ...(watch ? { watch } : {})
     };
   });
 
