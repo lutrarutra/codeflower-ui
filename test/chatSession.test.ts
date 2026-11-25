@@ -56,7 +56,8 @@ function actions(
     restartAgent: async () => {},
     listChats: async () => {},
     openChat: () => {},
-    newChat: async () => {}
+    newChat: async () => {},
+    forkChat: async () => {}
   };
 }
 

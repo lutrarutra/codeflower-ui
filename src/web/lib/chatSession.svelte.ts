@@ -65,6 +65,8 @@ export interface ChatActions {
   openChat(chat: ChatSession, key: string): void;
   /** A new chat in the sandbox with the chat's agent, in front. */
   newChat(chat: ChatSession): Promise<void>;
+  /** A fork of the chat, before the user's message at transcript entry `beforeEntry` or all of it, in front. */
+  forkChat(chat: ChatSession, beforeEntry?: number): Promise<void>;
   restartAgent(chat: ChatSession): Promise<void>;
 }
 
@@ -383,6 +385,9 @@ export class ChatSession {
         break;
       case 'newChat':
         await this.failing('Could not start a chat', this.actions.newChat(this));
+        break;
+      case 'forkChat':
+        await this.failing('Could not fork the chat', this.actions.forkChat(this, message.beforeEntry));
         break;
     }
   }

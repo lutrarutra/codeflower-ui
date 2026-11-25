@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionUpdate, ToolCallUpdate } from '@agentclientprotocol/sdk';
-import { STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
+import { FORK_CONTEXT_META, STEER_NOTE, STEER_NOTE_META, type TranscriptEntry } from '../src/protocol/messages.ts';
 import { activity, buildItems, foldTurns, shownFiles, withKnownToolCall, type ChatItem, type Turn, type TurnPart } from '../src/chat/lib/transcript.ts';
 
 const update = (value: SessionUpdate): TranscriptEntry => ({ t: '', kind: 'update', update: value });
@@ -381,4 +381,19 @@ test("work the agent did on its own, and a page that starts mid-turn, stamp no d
 test('the stamp stays on the copy of a message sent twice that shows', () => {
   const items = buildItems([prompt('/context', 0), said('Some long output of the context command here', 1, 'a'), said('Some long output of the context command here', 1, 'b'), end(2)]);
   assert.deepEqual(stamps(items), [['Some long output of the context command here', { at: 2_000, took: 2_000 }]]);
+});
+
+test("shows a fork's first message without the earlier chat's history it brought the agent", () => {
+  const items = buildItems(
+    [
+      { t: '', kind: 'prompt', prompt: [{ type: 'text', text: 'make a plot' }] },
+      chunk('plot.png'),
+      { t: '', kind: 'prompt', prompt: [{ type: 'text', text: '<earlier-chat>…</earlier-chat>', _meta: { [FORK_CONTEXT_META]: true } }, { type: 'text', text: 'now in blue' }] }
+    ],
+    7
+  );
+  assert.deepEqual(
+    items.map((item) => [item.kind, item.id, item.kind === 'user' ? item.text : '']),
+    [['user', '7', 'make a plot'], ['assistant', '8', ''], ['user', '9', 'now in blue']]
+  );
 });

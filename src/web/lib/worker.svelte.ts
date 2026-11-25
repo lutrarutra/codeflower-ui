@@ -289,6 +289,8 @@ export class WebWorker {
         const chat = this.chats[session.key];
         if (chat && chat.state.title === 'Chat' && session.title) chat.setState({ title: session.title });
       }
+      // What the chats know of forks: whether the worker makes them, and where each came from.
+      for (const chat of Object.values(this.chats)) chat.setState(this.forking(chat.key));
     } catch (error) {
       this.error = describe(error);
     }
@@ -408,11 +410,38 @@ export class WebWorker {
     return { subtitle: `${agent.name ?? 'Agent'} · ${this.place || this.id}`, agent };
   }
 
+  /** Whether the chat forks (not a subagent's, on a worker that forks chats), and where it came from. */
+  private forking(key: string): Pick<ChatState, 'fork' | 'origin'> {
+    const titleOf = (other: string) => this.sessions.find((session) => session.key === other)?.title ?? other;
+    const origin = this.sessions.find((session) => session.key === key)?.origin;
+    return {
+      fork: this.status?.forkChats === true && !this.isSubagent(key),
+      origin: origin
+        ? {
+            kind: origin.kind,
+            key: origin.from,
+            title: titleOf(origin.from),
+            ...(origin.kind === 'fork' && origin.before ? { before: origin.before } : {}),
+            ...(origin.kind === 'fork' && origin.by && origin.by !== origin.from ? { by: { key: origin.by, title: titleOf(origin.by) } } : {})
+          }
+        : undefined
+    };
+  }
+
+  /** Forks a chat (before the user's message at entry `beforeEntry`, or all of it) and shows the fork, that message ready to send again. */
+  async forkChat(key: string, beforeEntry?: number): Promise<void> {
+    const forked = await this.require().forkSession(key, beforeEntry === undefined ? {} : { beforeEntry });
+    await this.listSessions().catch(() => false);
+    const chat = await this.open(forked.key);
+    if (forked.draft) chat.post({ type: 'draft', text: forked.draft });
+    this.events.openChat(this, forked.key);
+  }
+
   private create(key: string, title: string): ChatSession {
     const chat = new ChatSession(
       this.id,
       key,
-      { title, ...this.presentation(key), actions: this.availableActions, browser: this.chatBrowser(key) },
+      { title, ...this.presentation(key), ...this.forking(key), actions: this.availableActions, browser: this.chatBrowser(key) },
       this.actions
     );
     this.chats[key] = chat;
@@ -726,7 +755,8 @@ export class WebWorker {
       // Undefined when the agent has to sign in first: its sign-in opens instead.
       const key = await this.newChat(agentOfKey(chat.key));
       if (key) this.events.openChat(this, key);
-    }
+    },
+    forkChat: (chat, beforeEntry) => this.forkChat(chat.key, beforeEntry)
   };
 
   /** The sandbox's chats as a chat's header lists them; `current` is that chat. */
@@ -933,6 +963,8 @@ export class WebWorker {
       background: (key: string, background: BackgroundTask[]) => this.chats[key]?.setState({ background }),
       commands: (key: string, commands: AgentCommand[]) => this.setCommands(key, commands),
       jobs: (jobs: BatchJob[]) => this.setJobs(jobs),
+      // A chat was forked or an agent started one: the lists show it at once, not at the next poll.
+      sessions: () => void this.refresh(),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),
       elicitUrl: (request: UrlElicitation, agent?: AgentName) => this.events.elicitUrl(this, request, agent),
       elicitationComplete: (elicitationId: string) => this.events.elicitationComplete(this, elicitationId),

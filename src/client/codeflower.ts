@@ -121,6 +121,8 @@ export interface WorkerStatus {
   jobs?: JobsSummary;
   /** The worker keeps the project's map of ideas (`_codeflower/roots/*`); missing from older workers. */
   roots?: boolean;
+  /** The worker forks chats (`_codeflower/sessions/fork`), and tells of new ones (`sessions/changed`); missing from older workers. */
+  forkChats?: boolean;
   /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
   mounts?: Mount[];
   /** What the worker offers beyond chats; on an agent's connection also that agent's. */
@@ -260,6 +262,27 @@ export interface SessionRecord {
   openOn?: string;
   /** The session's tokens and cost so far; missing from older workers. */
   usage?: UsageTotals | null;
+  /** Where the chat came from: a fork of another, or a chat another chat started (codeflower-chat). */
+  origin?: SessionOrigin;
+}
+
+/**
+ * Where a chat came from (`_codeflower/sessions/list`): `fork`, of the chat `from` (before the
+ * user's message `before`, from 1, else all of it; `by` the chat that forked it, none for the
+ * user); `agent`, started by the chat `from`.
+ */
+export type SessionOrigin =
+  | { kind: 'fork'; from: string; before?: number; by?: string; native?: boolean }
+  | { kind: 'agent'; from: string };
+
+/** What `_codeflower/sessions/fork` made: the new chat, and the message it went before, to offer again. */
+export interface ForkedSession {
+  key: string;
+  agent: AgentName;
+  title: string;
+  /** Whether the agent forked it itself; else the chat brings the history with its first message. */
+  native: boolean;
+  draft?: string;
 }
 
 /** What the worker's agents are doing, sent by the worker whenever it changes. */
@@ -490,6 +513,8 @@ export interface CodeflowerHandlers {
   sessionReleased?(key: string, reason: SessionRelease): void;
   /** Another worker asked for a chat open here (`takeOver`): the worker lets go of it once its turn ended. */
   sessionRequested?(key: string): void;
+  /** A chat was forked or started (codeflower-chat): list the chats again. */
+  sessionsChanged?(): void;
 }
 
 /** Why a worker let go of a chat (`_codeflower/sessions/released`). */
@@ -586,6 +611,7 @@ export class CodeflowerExtensions {
       const { key } = params as { key?: string };
       if (typeof key === 'string') handlers.sessionRequested?.(key);
     });
+    rpc.on('_codeflower/sessions/changed', () => handlers.sessionsChanged?.());
     rpc.on('_codeflower/roots/open', (params) => {
       const { idea, key } = (params ?? {}) as { idea?: unknown; key?: unknown };
       handlers.rootsOpen?.({ ...(typeof idea === 'number' ? { idea } : {}), ...(typeof key === 'string' ? { key } : {}) });
@@ -745,6 +771,11 @@ export class CodeflowerExtensions {
 
   async renameSession(key: string, title: string): Promise<void> {
     await this.rpc.request('_codeflower/sessions/rename', { key, title });
+  }
+
+  /** Forks the chat before the user's message at transcript entry `beforeEntry`, or all of it. */
+  forkSession(key: string, options: { beforeEntry?: number; title?: string } = {}): Promise<ForkedSession> {
+    return this.rpc.request<ForkedSession>('_codeflower/sessions/fork', { key, ...options });
   }
 
   async deleteSession(key: string): Promise<void> {

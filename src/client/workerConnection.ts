@@ -53,6 +53,7 @@ import {
   type EndpointModel,
   type SavedCredentials,
   type FileTransfers,
+  type ForkedSession,
   type SessionRecord,
   type SessionRelease,
   type ShowRequest,
@@ -101,6 +102,7 @@ export {
   type SavedCredentials,
   type FileTransfers,
   type Mount,
+  type ForkedSession,
   type SessionRecord,
   type SessionRelease,
   type ShowRequest,
@@ -176,6 +178,8 @@ export interface WorkerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed (codeflower-job): one was submitted, or changed state. */
   jobs?(jobs: BatchJob[]): void;
+  /** A chat was forked, or an agent started one (codeflower-chat): the chat list changed. */
+  sessions?(): void;
   /** An agent asks to show the project's map of ideas (codeflower-roots open), on `idea` when given. */
   roots?(idea?: number): void;
   /** The worker let go of a chat open here (another worker asked for it): it is no longer attached. */
@@ -280,6 +284,7 @@ export class WorkerConnection {
       browserChanged: (browser) => handlers.browser?.(browser),
       browserFrame: (frame) => handlers.browserFrame?.(frame),
       jobsChanged: (jobs) => handlers.jobs?.(jobs),
+      sessionsChanged: () => handlers.sessions?.(),
       rootsChanged: (map) => {
         for (const listener of this.rootsListeners) listener(map);
       }
@@ -517,6 +522,11 @@ export class WorkerConnection {
 
   renameSession(key: string, title: string): Promise<void> {
     return this.bridge.renameSession(key, title);
+  }
+
+  /** Forks a chat before the user's message at transcript entry `beforeEntry`, or all of it. */
+  forkSession(key: string, options: { beforeEntry?: number; title?: string } = {}): Promise<ForkedSession> {
+    return this.bridge.forkSession(key, options);
   }
 
   deleteSession(key: string): Promise<void> {

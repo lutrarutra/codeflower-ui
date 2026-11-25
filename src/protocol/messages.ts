@@ -79,6 +79,8 @@ export const SHELL_CONTEXT_META = 'codeflower/shellContext';
 
 /** Marks the block before a message the user sent while the agent worked (ACP steering). */
 export const STEER_NOTE_META = 'codeflower/steerNote';
+/** The earlier chat's history that a forked chat's first prompt brings the agent (no native fork); not the user's. */
+export const FORK_CONTEXT_META = 'codeflower/forkContext';
 
 /**
  * What the agent reads before such a message: most add to the task rather than
@@ -92,7 +94,7 @@ export const STEER_NOTE =
 
 /** A block the client adds to a prompt for the agent, which the user did not write and the chat does not show. */
 export function hiddenBlock(block: { _meta?: Record<string, unknown> | null }): boolean {
-  return Boolean(block._meta?.[SHELL_CONTEXT_META] || block._meta?.[STEER_NOTE_META]);
+  return Boolean(block._meta?.[SHELL_CONTEXT_META] || block._meta?.[STEER_NOTE_META] || block._meta?.[FORK_CONTEXT_META]);
 }
 
 /** Work of the agent's that goes on after its turn ends, e.g. Claude Code's background commands. */
@@ -246,6 +248,20 @@ export interface ChatState {
   foldSteps?: boolean;
   /** The models the user pinned for this chat's agent, listed first in the model picker (VS Code keeps them). */
   favoriteModels?: string[];
+  /** The chat can be forked (`forkChat`): its worker forks chats, and it is not a subagent's. */
+  fork?: boolean;
+  /** Where the chat came from: the line atop it, which opens that chat (`openChat`). */
+  origin?: ChatOrigin;
+}
+
+/** A forked chat's (`fork`), or one another chat started (`agent`): that chat, and the user's message the fork went before. */
+export interface ChatOrigin {
+  kind: 'fork' | 'agent';
+  key: string;
+  title: string;
+  before?: number;
+  /** The chat that forked it, when an agent did. */
+  by?: { key: string; title: string };
 }
 
 export interface ChatAction {
@@ -397,7 +413,9 @@ export type WebviewMessage =
   /** Show another chat of the sandbox: bring its tab to the front, or open one. */
   | { type: 'openChat'; key: string }
   /** Start a new chat in the sandbox with this chat's agent, and show it. */
-  | { type: 'newChat' };
+  | { type: 'newChat' }
+  /** Fork this chat, before the user's message at transcript entry `beforeEntry` or all of it, and show the fork. */
+  | { type: 'forkChat'; beforeEntry?: number };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PermissionOption } from '@agentclientprotocol/sdk';
-  import type { TranscriptEntry } from '../../protocol/messages.ts';
+  import type { ChatOrigin, TranscriptEntry } from '../../protocol/messages.ts';
   import { highlighted } from './editor/highlight.ts';
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
@@ -32,7 +32,9 @@
     subagents = [],
     subagentFeatures,
     fold = false,
-    waiting = false
+    waiting = false,
+    fork = false,
+    origin
   }: {
     entries: TranscriptEntry[];
     /** The index of `entries[0]` in the chat's transcript; above 0, earlier entries load on scrolling up. */
@@ -49,6 +51,10 @@
     fold?: boolean;
     /** A permission or question waits for the user. */
     waiting?: boolean;
+    /** The user's messages offer to fork the chat from before them (`forkChat`). */
+    fork?: boolean;
+    /** Where the chat came from: a line atop it that opens that chat. */
+    origin?: ChatOrigin;
   } = $props();
   const summaries = $derived(new Map(subagents.map((subagent) => [subagent.sessionId, subagent])));
   const items = $derived(buildItems(entries, start));
@@ -244,7 +250,23 @@
           <div class="mt-2 border-t border-white/30 pt-2 whitespace-pre-wrap">{item.text}</div>
         </details>
       {/if}
-      {#if item.started !== null}{@render stamp(item.started)}{/if}
+      {#if item.started !== null || (fork && item.kind === 'user')}
+        <div class="group/stamp flex items-center gap-1.5">
+          {#if fork && item.kind === 'user'}
+            <!-- A copy of the chat up to before this message, to send it (or another) there instead. -->
+            <button
+              type="button"
+              class="link text-[0.72em] text-muted opacity-0 group-hover/stamp:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-70"
+              title="Fork the chat from before this message, to send it again or another"
+              aria-label="Fork from here"
+              onclick={() => send({ type: 'forkChat', beforeEntry: Number(item.id) })}
+            >
+              <span class="codicon codicon-repo-forked text-[11px]!"></span> Fork from here
+            </button>
+          {/if}
+          {#if item.started !== null}{@render stamp(item.started)}{/if}
+        </div>
+      {/if}
     </div>
   {:else if item.kind === 'notice'}
     <!-- The bridge's own message to the agent, not the user's: a line apart, its text folded. -->
@@ -507,6 +529,23 @@
     <div bind:this={earlier} class="flex items-center justify-center gap-2 py-1 text-[0.85em] text-muted" role="status">
       <span class="codicon codicon-loading codicon-modifier-spin"></span>
       Loading earlier messages…
+    </div>
+  {/if}
+  {#if origin && start === 0}
+    <!-- Where the chat came from, which opens that chat. -->
+    <div class="flex min-w-0 items-center justify-center gap-1.5 py-1 text-[0.8em] text-muted select-none">
+      <span class="codicon codicon-{origin.kind === 'fork' ? 'repo-forked' : 'sparkle'} shrink-0"></span>
+      <span class="shrink-0">{origin.kind === 'fork' ? 'Forked from' : 'Started by the chat'}</span>
+      <button type="button" class="link min-w-0 truncate" title="Open {origin.title}" onclick={() => send({ type: 'openChat', key: origin.key })}>
+        {origin.title}
+      </button>
+      {#if origin.before}<span class="shrink-0">· before message {origin.before}</span>{/if}
+      {#if origin.by}
+        <span class="shrink-0">· by</span>
+        <button type="button" class="link min-w-0 truncate" title="Open {origin.by.title}" onclick={() => send({ type: 'openChat', key: origin.by!.key })}>
+          {origin.by.title}
+        </button>
+      {/if}
     </div>
   {/if}
   {#if !items.length}

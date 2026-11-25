@@ -354,6 +354,7 @@
         list={() => send({ type: 'listChats' })}
         choose={(key) => send({ type: 'openChat', key })}
         create={() => send({ type: 'newChat' })}
+        fork={chat.fork === true && chat.live && !chat.subagent ? () => send({ type: 'forkChat' }) : undefined}
       />
     </h1>
     {#if subagent}
@@ -469,6 +470,8 @@
     subagentFeatures={subagentSettings?.features}
     fold={folded}
     waiting={!!permission || !!question}
+    fork={chat.fork === true && chat.live && !chat.subagent}
+    origin={chat.origin}
   />
 
   {#if permission}

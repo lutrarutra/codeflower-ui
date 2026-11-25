@@ -11,7 +11,8 @@
     chats,
     list,
     choose,
-    create
+    create,
+    fork
   }: {
     title: string;
     /** The sandbox's chats, once the host told them. */
@@ -21,6 +22,8 @@
     choose: (key: string) => void;
     /** Starts a new chat in the sandbox, with this chat's agent. */
     create: () => void;
+    /** Forks this chat, all of it; none when it cannot be forked. */
+    fork?: () => void;
   } = $props();
 
   /** A filter shows once the list is longer than this. */
@@ -118,6 +121,21 @@
     >
       <div class="flex items-center gap-2 pt-0.5 pr-0.5 pb-1 pl-2">
         <span class="eyebrow flex-1 text-teal">Chats in this sandbox</span>
+        {#if fork}
+          <button
+            type="button"
+            role="menuitem"
+            class="grid size-6 shrink-0 place-items-center rounded-lg border-none bg-transparent text-muted hover:bg-code hover:text-ink focus-visible:bg-code focus-visible:text-ink focus-visible:outline-none"
+            title="Fork this chat: a copy of it to go another way from"
+            aria-label="Fork this chat"
+            onclick={() => {
+              close();
+              fork();
+            }}
+          >
+            <span class="codicon codicon-repo-forked text-[14px]!"></span>
+          </button>
+        {/if}
         <button
           type="button"
           role="menuitem"
