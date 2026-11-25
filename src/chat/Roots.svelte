@@ -330,7 +330,13 @@
     dotsMenu = undefined;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    if (event.ctrlKey || event.metaKey) zoom(Math.exp(-event.deltaY * 0.01), event.clientX - rect.left, event.clientY - rect.top);
+    if (event.ctrlKey || event.metaKey) {
+      // A wheel notch is ~100px, a pinch a few: capping each event keeps a notch to a ~10% step
+      // without slowing the pinch down.
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1;
+      const delta = Math.max(-10, Math.min(10, event.deltaY * unit));
+      zoom(Math.exp(-delta * 0.01), event.clientX - rect.left, event.clientY - rect.top);
+    }
     else if (event.shiftKey) view = { ...view, x: view.x - event.deltaY };
     else view = { ...view, x: view.x - event.deltaX, y: view.y - event.deltaY };
     moved = true;
