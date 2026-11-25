@@ -12,6 +12,8 @@ const CHAT = 'chat:';
 const TERMINAL = 'terminal:';
 const COMMAND = 'command:';
 const BROWSER = 'browser:';
+/** A sandbox's map of ideas (Roots). */
+export const ROOTS = '#roots';
 
 /** The grid's tab for what a sandbox shows (a chat, its folders, a file). */
 export const tabOf = (workerId: string, local: string) => `${encodeURIComponent(workerId)}/${local}`;
@@ -43,7 +45,7 @@ const isTerminal = (tab: string) => {
   return local.startsWith(TERMINAL) || local.startsWith(COMMAND);
 };
 /** What opens again from a saved grid: the page's own tabs, and terminals, which run on in their sandboxes. */
-const isKept = (tab: string) => isPage(tab) || splitTab(tab).local.startsWith(TERMINAL);
+const isKept = (tab: string) => isPage(tab) || splitTab(tab).local.startsWith(TERMINAL) || splitTab(tab).local === ROOTS;
 
 /** A tab being dragged, from a group or from a list of chats. */
 export const dragging = $state<{ workerId: string | null; tab: string | null }>({ workerId: null, tab: null });
@@ -137,6 +139,14 @@ export class Workbench {
       this.layout.activate(tab);
       this.focusChanged();
     }
+  }
+
+  /** Opens a sandbox's map of ideas where files open (beside the chats), in front. */
+  openRoots(workerId: string): void {
+    const tab = tabOf(workerId, ROOTS);
+    if (!this.layout.has(tab)) this.openFile(workerId, ROOTS);
+    this.layout.activate(tab);
+    this.focusChanged();
   }
 
   /** Opens a shell's tab, in front, in the panel at the foot of the grid. */

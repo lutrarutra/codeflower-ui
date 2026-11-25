@@ -15,7 +15,7 @@
   import { favoriteModels, setFavoriteModel } from './lib/favoriteModels.svelte.ts';
   import type { Grid, TabLabel } from './lib/grid.ts';
   import type { Placement } from './lib/layout.svelte.ts';
-  import { browserKeyOf, chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
+  import { browserKeyOf, chatKeyOf, commandIdOf, draggedTab, dragging, endDrag, OVERVIEW, ROOTS, splitTab, terminalIdOf } from './lib/workbench.svelte.ts';
   import { commandTitle } from '../protocol/commands.ts';
   import WorkerOverview from './WorkerOverview.svelte';
   import { workerTitle } from './lib/format.ts';
@@ -99,7 +99,7 @@
   $effect(() => {
     for (const tab of layout.tabs()) {
       const { workerId, local } = splitTab(tab);
-      if (chatKeyOf(local) || local === OVERVIEW || terminalIdOf(local) || commandIdOf(local) || browserKeyOf(local)) continue;
+      if (chatKeyOf(local) || local === OVERVIEW || local === ROOTS || terminalIdOf(local) || commandIdOf(local) || browserKeyOf(local)) continue;
       if (!app.previews.find(workerId, local)) untrack(() => workbench.remove(tab));
     }
   });
@@ -143,6 +143,7 @@
     }
     const worker = app.worker(workerId);
     if (local === OVERVIEW) return { icon: 'home', label: worker ? workerTitle(worker)[0] : 'Sandbox', title: named(workerId, 'The sandbox: its chats and sign-in') };
+    if (local === ROOTS) return { icon: 'type-hierarchy', label: 'Roots', title: named(workerId, "The project's map of ideas") };
     const terminalId = terminalIdOf(local);
     if (terminalId) {
       // Numbered as the sidebar numbers the sandbox's shells.
@@ -312,6 +313,10 @@
     <!-- xterm.js loads with the first terminal. -->
     {#await import('./ShellTerminal.svelte') then { default: ShellTerminal }}
       <ShellTerminal {workerId} terminalId={terminalIdOf(local)!} />
+    {/await}
+  {:else if local === ROOTS}
+    {#await import('./RootsTab.svelte') then { default: RootsTab }}
+      <RootsTab {workerId} />
     {/await}
   {:else if browserKeyOf(local)}
     {#await import('./BrowserTab.svelte') then { default: BrowserTab }}

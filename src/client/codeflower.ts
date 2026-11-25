@@ -15,6 +15,7 @@ import type {
 } from '../protocol/messages.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob, JobsSummary } from '../protocol/jobs.ts';
+import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserInputEvent, BrowserNavigation, BrowserState } from '../protocol/browser.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
@@ -118,6 +119,8 @@ export interface WorkerStatus {
   allocationEnd?: string;
   /** Batch jobs the agents may ask for (codeflower-job); missing when the worker has none. */
   jobs?: JobsSummary;
+  /** The worker keeps the project's map of ideas (`_codeflower/roots/*`); missing from older workers. */
+  roots?: boolean;
   /** Folders the app mounted, e.g. /data/input/study42; missing from older workers. */
   mounts?: Mount[];
   /** What the worker offers beyond chats; on an agent's connection also that agent's. */
@@ -476,6 +479,8 @@ export interface CodeflowerHandlers {
   browserFrame?(frame: BrowserFrame): void;
   /** The project's batch jobs changed: one was submitted, or changed state. */
   jobsChanged?(jobs: BatchJob[]): void;
+  /** The project's map of ideas changed: an agent or a window changed an idea. */
+  rootsChanged?(map: RootsMap): void;
   /**
    * The worker let go of a chat open here, which the window no longer has: another worker asked for it
    * (`takeover`), or no window had it open (`idle`).
@@ -578,6 +583,10 @@ export class CodeflowerExtensions {
     rpc.on('_codeflower/sessions/requested', (params) => {
       const { key } = params as { key?: string };
       if (typeof key === 'string') handlers.sessionRequested?.(key);
+    });
+    rpc.on('_codeflower/roots/changed', (params) => {
+      const map = params as RootsMap;
+      if (Array.isArray(map?.ideas)) handlers.rootsChanged?.({ ideas: map.ideas, errors: Array.isArray(map.errors) ? map.errors : [] });
     });
     rpc.on('_codeflower/jobs/changed', (params) => {
       const { jobs } = params as { jobs?: BatchJob[] };
@@ -987,6 +996,24 @@ export class CodeflowerExtensions {
   /** The commands a chat's agent runs, and the last few that ended. */
   async commands(key: string): Promise<AgentCommand[]> {
     return (await this.rpc.request<{ commands?: AgentCommand[] }>('_codeflower/commands/list', { key })).commands ?? [];
+  }
+
+  // ---- roots: the map of ideas ----
+
+  /** The project's map of ideas, and the workspace its files are in. */
+  async roots(): Promise<RootsMap> {
+    const map = await this.rpc.request<Partial<RootsMap>>('_codeflower/roots/list', {});
+    return { ideas: map.ideas ?? [], errors: map.errors ?? [], ...(map.workspace ? { workspace: map.workspace } : {}) };
+  }
+
+  /** The user's change to an idea. */
+  async updateIdea(id: number, patch: IdeaPatch): Promise<Idea> {
+    return (await this.rpc.request<{ idea: Idea }>('_codeflower/roots/update', { id, patch })).idea;
+  }
+
+  /** The user's comment on an idea; `told` is the chat the worker tells, if any. */
+  async commentIdea(id: number, text: string): Promise<{ idea: Idea; told?: string }> {
+    return this.rpc.request<{ idea: Idea; told?: string }>('_codeflower/roots/comment', { id, text });
   }
 
   // ---- batch jobs ----

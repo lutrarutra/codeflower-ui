@@ -151,6 +151,13 @@
           title="The sandbox: its chats, the agent's sign-in, how to reach it from VS Code, and its name and address"
           onclick={() => inGrid(() => app.workbench.openOverview(browsed.id))}><span class="codicon codicon-settings-gear"></span>Manage</button
         >
+        {#if browsable(browsed)}
+          <button
+            class="pill pill-small"
+            title="The project's map of ideas: what each line of work builds on, its todos, what it found, and the chats on it"
+            onclick={() => inGrid(() => app.workbench.openRoots(browsed.id))}><span class="codicon codicon-type-hierarchy"></span>Roots</button
+          >
+        {/if}
         {#if browsable(browsed) && !app.elsewhere(browsed)}
           <button
             class="pill pill-small"

@@ -32,6 +32,7 @@ import {
 import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettingsState, SubagentSummary } from '../protocol/subagents.ts';
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob } from '../protocol/jobs.ts';
+import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../protocol/browser.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
 import { AcpClient, mcpNotice, type AttachedSession, type ClientIdentity, type UrlElicitation } from './acp.ts';
@@ -242,6 +243,7 @@ export class WorkerConnection {
   /** Shell commands the agent has not been told about yet, by session. */
   private readonly shellContext = new Map<string, string[]>();
   private readonly pluginListeners = new Set<(agent: AgentName) => void>();
+  private readonly rootsListeners = new Set<(map: RootsMap) => void>();
   private agentList: AgentState[];
 
   private constructor(control: RpcConnection, status: WorkerStatus, open: OpenTransport, handlers: WorkerHandlers, client: ClientIdentity) {
@@ -275,7 +277,10 @@ export class WorkerConnection {
       subagentSettingsChanged: (agent, state) => handlers.subagentSettings?.(agent, state),
       browserChanged: (browser) => handlers.browser?.(browser),
       browserFrame: (frame) => handlers.browserFrame?.(frame),
-      jobsChanged: (jobs) => handlers.jobs?.(jobs)
+      jobsChanged: (jobs) => handlers.jobs?.(jobs),
+      rootsChanged: (map) => {
+        for (const listener of this.rootsListeners) listener(map);
+      }
     });
     // The agents' connections go with it; one that is closing for the same reason says so first.
     control.onClose((reason, code) => {
@@ -975,6 +980,31 @@ export class WorkerConnection {
 
   subagentSettings(agent: AgentName, settings?: Partial<SubagentSettings>): Promise<SubagentSettingsState> {
     return this.bridge.forAgent(agent).subagentSettings(settings);
+  }
+
+  // ---- the project's ideas (Roots) ----
+
+  /** Whether the worker keeps the project's map of ideas. */
+  get hasRoots(): boolean {
+    return this.workerStatus.roots === true;
+  }
+
+  roots(): Promise<RootsMap> {
+    return this.bridge.roots();
+  }
+
+  updateIdea(id: number, patch: IdeaPatch): Promise<Idea> {
+    return this.bridge.updateIdea(id, patch);
+  }
+
+  commentIdea(id: number, text: string): Promise<{ idea: Idea; told?: string }> {
+    return this.bridge.commentIdea(id, text);
+  }
+
+  /** The project's map of ideas changed. */
+  onRootsChanged(listener: (map: RootsMap) => void): () => void {
+    this.rootsListeners.add(listener);
+    return () => this.rootsListeners.delete(listener);
   }
 
   // ---- the agents' plugins ----

@@ -14,7 +14,7 @@ import { SignIn } from './signIn.svelte.ts';
 import { TerminalViews } from './terminalViews.ts';
 import { Attention } from './attention.svelte.ts';
 import { Focus } from './focus.svelte.ts';
-import { Workbench, browserKeyOf, browserTab, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
+import { ROOTS, Workbench, browserKeyOf, browserTab, chatKeyOf, chatTab, commandIdOf, splitTab, tabOf, terminalIdOf } from './workbench.svelte.ts';
 import { WebWorker, type WorkerEvents } from './worker.svelte.ts';
 
 export type View = 'chat' | 'focus' | 'server';
@@ -222,7 +222,7 @@ class AppState {
   constructor() {
     this.workbench.mayClose = (tab) => {
       const { workerId, local } = splitTab(tab);
-      return !!chatKeyOf(local) || !!terminalIdOf(local) || !!commandIdOf(local) || !!browserKeyOf(local) || this.previews.mayClose(workerId, local);
+      return !!chatKeyOf(local) || local === ROOTS || !!terminalIdOf(local) || !!commandIdOf(local) || !!browserKeyOf(local) || this.previews.mayClose(workerId, local);
     };
     this.workbench.onClose = (tab) => {
       const { workerId, local } = splitTab(tab);
