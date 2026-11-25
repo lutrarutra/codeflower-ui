@@ -58,6 +58,8 @@ export const PROTOCOL_VERSION = 1;
 export const AUTH_REQUIRED = -32000;
 
 const REPLAYED_META = 'codeflower/replayed';
+/** A request of the worker's own (the bridge's), not the agent's. */
+const BRIDGE_META = 'codeflower/bridge';
 const REQUEST_KEY_META = 'codeflower/requestKey';
 const MULTI_CLIENT_META = 'codeflower/multiClient';
 const FILES_META = 'codeflower/files';
@@ -630,7 +632,14 @@ export class AcpClient {
       this.handlers.entry(key, { t: now(), kind: 'permission', toolCall: request.toolCall ?? null, options: request.options });
     }
     return new Promise<RequestPermissionResponse>((resolve) => {
-      const pending = { requestId, toolCall: request.toolCall ?? null, options: request.options, ...(chat.subagent ? { subagent: chat.subagent } : {}) };
+      const details = request._meta?.[BRIDGE_META] === true ? toolCallText(request.toolCall) : '';
+      const pending: PendingPermission = {
+        requestId,
+        toolCall: request.toolCall ?? null,
+        options: request.options,
+        ...(chat.subagent ? { subagent: chat.subagent } : {}),
+        ...(details ? { details } : {})
+      };
       this.permissions.set(requestId, { resolve, sessionKey: key, request: pending, ...requestKeyOf(request._meta) });
       if (this.autoApprovedSessions.has(key) && this.autoApprovePermission(requestId, pending)) return;
       // After the one it shows, if any.
@@ -710,6 +719,14 @@ interface AsyncTaskUpdate {
   taskType?: string;
   description?: string;
   state?: string;
+}
+
+/** The text a tool call carries in its content. */
+function toolCallText(toolCall: RequestPermissionRequest['toolCall'] | null | undefined): string {
+  return (toolCall?.content ?? [])
+    .map((item) => (item.type === 'content' && item.content.type === 'text' ? item.content.text : ''))
+    .join('\n\n')
+    .trim();
 }
 
 function requestKeyOf(meta: Record<string, unknown> | null | undefined): { requestKey?: string } {

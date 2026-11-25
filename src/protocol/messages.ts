@@ -206,6 +206,11 @@ export interface PendingPermission {
   options: PermissionOption[];
   /** Asked by one of the chat's subagents, shown in the chat the user works in. */
   subagent?: RequestingSubagent;
+  /**
+   * The worker's own request (`_meta['codeflower/bridge']`, e.g. a batch job to submit): the text of
+   * its tool call, which says what it asks for (the job's resources) and is shown under the command.
+   */
+  details?: string;
 }
 
 export interface ChatState {

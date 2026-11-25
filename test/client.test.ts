@@ -203,6 +203,35 @@ test('shows requests that come at once one after the other, the oldest first', a
   assert.deepEqual((await second).result, { outcome: { outcome: 'selected', optionId: 'second' } });
 });
 
+test("the worker's own request shows its text; an agent's does not", async () => {
+  // A batch job to submit lists its resources in the tool call's content.
+  const agent = new FakeAgent({
+    initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),
+    'session/new': () => ({ sessionId: 'one' })
+  });
+  const shown: (string | undefined)[] = [];
+  const { handlers } = recorder();
+  const connection = await WorkerConnection.connect(agent.open, { ...handlers, permission: (_key, request) => void (request && shown.push(request.details)) }, client);
+  const key = await connection.newSession('pi');
+  const ask = (meta?: Record<string, unknown>) =>
+    agent.request('session/request_permission', {
+      sessionId: 'one',
+      toolCall: { toolCallId: 'job', title: 'Submit', content: [{ type: 'content', content: { type: 'text', text: 'CPUs: 4\nMemory: 8G' } }] },
+      options: [{ optionId: 'allow', name: 'Submit', kind: 'allow_once' }],
+      ...(meta ? { _meta: meta } : {})
+    });
+  const worker = ask({ 'codeflower/bridge': true });
+  await tick();
+  assert.deepEqual(shown, ['CPUs: 4\nMemory: 8G']);
+  connection.answerPermission(key, 1, 'allow');
+  await worker;
+  const own = ask();
+  await tick();
+  assert.equal(shown.at(-1), undefined);
+  connection.answerPermission(key, 2, 'allow');
+  await own;
+});
+
 test('a chat that waits for the user without a turn running takes a prompt', async () => {
   const agent = new FakeAgent({
     initialize: () => ({ protocolVersion: 1, agentInfo: { name: 'pi', version: '1' } }),

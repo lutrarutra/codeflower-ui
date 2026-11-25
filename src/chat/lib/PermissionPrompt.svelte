@@ -77,10 +77,14 @@
       <Markdown text={plan} {openFile} />
     </div>
   {:else}
-    <p class="m-0">The agent wants to run</p>
+    <p class="m-0">{request.details && request.toolCall?.title ? request.toolCall.title : 'The agent wants to run'}</p>
     <pre class="m-0 overflow-x-auto rounded-xl border-[1.5px] border-soft-line bg-card px-3 py-2 font-mono text-[0.88em] whitespace-pre-wrap">{command ??
         request.toolCall?.title ??
         'a tool'}</pre>
+    {#if request.details}
+      <!-- The worker's own request (a batch job) says what it asks for: its resources. -->
+      <p class="m-0 text-[0.92em] whitespace-pre-wrap">{request.details}</p>
+    {/if}
   {/if}
   <div class="flex flex-wrap items-center gap-2 pt-1">
     {#each request.options as option (option.optionId)}
