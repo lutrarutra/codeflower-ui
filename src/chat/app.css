@@ -279,6 +279,22 @@ textarea:focus-visible {
   }
 }
 
+/* A label with an icon (a file's state, read-only): the icon and text centred on one line. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.badge > .codicon {
+  font-size: 11px !important;
+}
+
 /* A small selector button in the composer's settings row. */
 .chip {
   display: inline-flex;

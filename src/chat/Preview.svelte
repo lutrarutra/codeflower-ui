@@ -396,13 +396,13 @@
         </div>
       </div>
       {#if updated}
-        <span class="shrink-0 rounded-full bg-teal-soft px-2 py-0.5 text-[0.8em] font-semibold text-teal">
-          <span class="codicon codicon-refresh text-[11px]!"></span> updated
+        <span class="badge shrink-0 bg-teal-soft font-semibold text-teal">
+          <span class="codicon codicon-refresh"></span> updated
         </span>
       {/if}
       {#if jobState}
-        <span class="shrink-0 rounded-full px-2 py-0.5 text-[0.8em] font-semibold {jobState.tone}" title={jobTitle} role="status">
-          <span class="codicon codicon-{jobState.icon} text-[11px]!"></span> {jobState.noun} {jobState.label}
+        <span class="badge shrink-0 font-semibold {jobState.tone}" title={jobTitle} role="status">
+          <span class="codicon codicon-{jobState.icon}"></span> {jobState.noun} {jobState.label}
         </span>
       {/if}
       {#if kind === 'html' && text !== null}
@@ -454,8 +454,8 @@
       {/if}
       {#if editing}
         {#if readOnlyReason}
-          <span class="shrink-0 rounded-full bg-code px-2 py-0.5 text-[0.8em] text-muted" title={readOnlyReason}>
-            <span class="codicon codicon-lock text-[11px]!"></span> read-only
+          <span class="badge shrink-0 bg-code text-muted" title={readOnlyReason}>
+            <span class="codicon codicon-lock"></span> read-only
           </span>
         {:else}
           <button
