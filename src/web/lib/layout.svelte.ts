@@ -46,7 +46,7 @@ export class Layout {
   /** The group the user worked in last; new tabs go there unless placed. */
   focused = $state('');
   /** Group ids, the most recently focused first. */
-  private recent: string[] = [];
+  private recent = $state<string[]>([]);
 
   constructor(saved?: unknown) {
     const root = saved ? restore(saved) : undefined;
