@@ -33,6 +33,7 @@ import type { OpenedSubagent, SubagentFeatures, SubagentSettings, SubagentSettin
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob } from '../protocol/jobs.ts';
 import type { Watch } from '../protocol/watches.ts';
+import type { Orchestrator, OrchestratorAccess } from '../protocol/orchestrators.ts';
 import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../protocol/browser.ts';
 import type { WorkerUsage } from '../protocol/usage.ts';
@@ -59,6 +60,7 @@ import {
   type SessionRelease,
   type ShowRequest,
   type ShownNotice,
+  type SentNotice,
   type TakeOverResult,
   type TranscriptPage,
   type UploadTarget,
@@ -181,6 +183,8 @@ export interface WorkerHandlers {
   jobs?(jobs: BatchJob[]): void;
   /** The project's watches changed (codeflower-watch): one started, ran, or ended. */
   watches?(watches: Watch[]): void;
+  /** The project's orchestrators changed: one started or was disconnected, its access, its exchange. */
+  orchestrators?(orchestrators: Orchestrator[]): void;
   /** A chat was forked, or an agent started one (codeflower-chat): the chat list changed. */
   sessions?(): void;
   /** An agent asks to show the project's map of ideas (codeflower-roots open), on `idea` when given. */
@@ -263,7 +267,7 @@ export class WorkerConnection {
     this.handlers = handlers;
     this.client = client;
     // A chat's `!command` output goes to its agent's windows only.
-    const { shellOutput: _, shellStarted: __, shellEnded: ___, shown: ____, ...shared } = this.sharedHandlers();
+    const { shellOutput: _, shellStarted: __, shellEnded: ___, shown: ____, sent: _____, ...shared } = this.sharedHandlers();
     this.bridge = new CodeflowerExtensions(control, {
       ...shared,
       shellOutput: () => undefined,
@@ -288,6 +292,7 @@ export class WorkerConnection {
       browserFrame: (frame) => handlers.browserFrame?.(frame),
       jobsChanged: (jobs) => handlers.jobs?.(jobs),
       watchesChanged: (watches) => handlers.watches?.(watches),
+      orchestratorsChanged: (orchestrators) => handlers.orchestrators?.(orchestrators),
       sessionsChanged: () => handlers.sessions?.(),
       rootsChanged: (map) => {
         for (const listener of this.rootsListeners) listener(map);
@@ -358,6 +363,12 @@ export class WorkerConnection {
         const current = link?.();
         if (!current || typeof key !== 'string' || !Array.isArray(files) || !current.acp.isAttached(key)) return;
         handlers.entry(key, { t: now(), kind: 'show', files, ...(message ? { message } : {}) });
+      },
+      // What the chat sent its orchestrator, noted in its record by the worker.
+      sent: ({ key, entry }: SentNotice) => {
+        const current = link?.();
+        if (!current || typeof key !== 'string' || entry?.kind !== 'sent' || !current.acp.isAttached(key)) return;
+        handlers.entry(key, entry);
       },
       terminalOutput: (terminalId: string, data: string, replayed?: boolean) => handlers.terminalOutput(terminalId, data, replayed),
       terminalExit: (terminalId: string, exitCode: number) => handlers.terminalExit(terminalId, exitCode)
@@ -947,6 +958,33 @@ export class WorkerConnection {
   /** Cancels one of the project's batch jobs. */
   cancelJob(id: string): Promise<BatchJob | undefined> {
     return this.bridge.cancelJob(id);
+  }
+
+  /** The agents that can be orchestrators here, as the worker's status said; none from older workers. */
+  get orchestratorAgents(): string[] {
+    return this.workerStatus.orchestrators?.agents ?? [];
+  }
+
+  /** The project's orchestrators; none from workers without them. */
+  async orchestrators(): Promise<Orchestrator[]> {
+    if (!this.workerStatus.orchestrators) return [];
+    return this.bridge.orchestrators().catch(() => []);
+  }
+
+  createOrchestrator(executor: string, options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}) {
+    return this.bridge.createOrchestrator(executor, options);
+  }
+
+  setOrchestratorAccess(key: string, access: Partial<OrchestratorAccess>) {
+    return this.bridge.setOrchestratorAccess(key, access);
+  }
+
+  shareWithOrchestrator(executor: string, path: string, orchestrator?: string): Promise<void> {
+    return this.bridge.shareWithOrchestrator(executor, path, orchestrator);
+  }
+
+  disconnectOrchestrator(key: string): Promise<void> {
+    return this.bridge.disconnectOrchestrator(key);
   }
 
   /** Whether the agents have watches here (codeflower-watch), as the worker's status said. */

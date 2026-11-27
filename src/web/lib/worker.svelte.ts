@@ -19,6 +19,7 @@ import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentS
 import type { AgentCommand } from '../../protocol/commands.ts';
 import { jobsOfChat, type BatchJob } from '../../protocol/jobs.ts';
 import { watchesOfChat, type Watch } from '../../protocol/watches.ts';
+import { orchestration, type Orchestrator } from '../../protocol/orchestrators.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
@@ -112,6 +113,8 @@ export class WebWorker {
   jobs = $state<BatchJob[]>([]);
   /** The project's watches (codeflower-watch), running and of the last day; each chat shows its own. */
   watches = $state<Watch[]>([]);
+  /** The project's orchestrator chats; each chat shows those directing it, or the chat it directs. */
+  orchestrators = $state<Orchestrator[]>([]);
   /** Chats open in the agent's own terminal UI (`codeflower attach`), by key. */
   terminals = $state<Record<string, ChatTerminal>>({});
   /** The user's shells running in the sandbox (the page's Terminal). */
@@ -293,7 +296,7 @@ export class WebWorker {
         if (chat && chat.state.title === 'Chat' && session.title) chat.setState({ title: session.title });
       }
       // What the chats know of forks: whether the worker makes them, and where each came from.
-      for (const chat of Object.values(this.chats)) chat.setState(this.forking(chat.key));
+      for (const chat of Object.values(this.chats)) chat.setState({ ...this.forking(chat.key), ...this.orchestrating(chat.key) });
     } catch (error) {
       this.error = describe(error);
     }
@@ -431,6 +434,37 @@ export class WebWorker {
     };
   }
 
+  /** The orchestrators directing a chat, or the one it is, and whether one can start on it. */
+  private orchestrating(key: string): Pick<ChatState, 'orchestrators' | 'orchestrator' | 'orchestrate'> {
+    const known = orchestration(this.orchestrators, key);
+    const session = this.sessions.find((candidate) => candidate.key === key);
+    return {
+      ...known,
+      orchestrate: Boolean(this.connection?.orchestratorAgents.length) && !this.isSubagent(key) && !known.orchestrator && session?.role !== 'orchestrator'
+    };
+  }
+
+  private async loadOrchestrators(): Promise<void> {
+    const connection = this.connection;
+    if (!connection?.orchestratorAgents.length) return;
+    const orchestrators = await connection.orchestrators();
+    if (this.connection === connection) this.setOrchestrators(orchestrators);
+  }
+
+  private setOrchestrators(orchestrators: Orchestrator[]): void {
+    this.orchestrators = orchestrators;
+    for (const [key, chat] of Object.entries(this.chats)) chat?.setState(this.orchestrating(key));
+  }
+
+  /** Starts an orchestrator on a chat and shows it. */
+  async createOrchestrator(key: string): Promise<void> {
+    const created = await this.require().createOrchestrator(key);
+    await this.listSessions().catch(() => false);
+    await this.loadOrchestrators().catch(() => undefined);
+    await this.open(created.key);
+    this.events.openChat(this, created.key);
+  }
+
   /** Forks a chat (before the user's message at entry `beforeEntry`, or all of it) and shows the fork, that message ready to send again. */
   async forkChat(key: string, beforeEntry?: number): Promise<void> {
     const forked = await this.require().forkSession(key, beforeEntry === undefined ? {} : { beforeEntry });
@@ -444,7 +478,7 @@ export class WebWorker {
     const chat = new ChatSession(
       this.id,
       key,
-      { title, ...this.presentation(key), ...this.forking(key), actions: this.availableActions, browser: this.chatBrowser(key) },
+      { title, ...this.presentation(key), ...this.forking(key), ...this.orchestrating(key), actions: this.availableActions, browser: this.chatBrowser(key) },
       this.actions
     );
     this.chats[key] = chat;
@@ -501,6 +535,7 @@ export class WebWorker {
       void this.loadCommands(chat);
       void this.loadJobs(chat);
       void this.loadWatches(chat);
+      void this.loadOrchestrators();
     } catch (error) {
       chat.loaded(await connection.transcriptPage(chat.key).catch(() => EMPTY_TRANSCRIPT));
       this.report(chat, error);
@@ -781,7 +816,14 @@ export class WebWorker {
       const key = await this.newChat(agentOfKey(chat.key));
       if (key) this.events.openChat(this, key);
     },
-    forkChat: (chat, beforeEntry) => this.forkChat(chat.key, beforeEntry)
+    forkChat: (chat, beforeEntry) => this.forkChat(chat.key, beforeEntry),
+    createOrchestrator: (chat) => this.createOrchestrator(chat.key),
+    setOrchestratorAccess: async (chat, key, access) => {
+      const changed = await this.require().setOrchestratorAccess(key, access);
+      if (changed.restartNeeded) chat.notify('info', "The orchestrator's web access changes when its chat starts again, e.g. after its agent restarts.");
+    },
+    disconnectOrchestrator: (_chat, key) => this.require().disconnectOrchestrator(key),
+    shareWithOrchestrator: (chat, path) => this.require().shareWithOrchestrator(chat.key, path)
   };
 
   /** The sandbox's chats as a chat's header lists them; `current` is that chat. */
@@ -989,6 +1031,7 @@ export class WebWorker {
       commands: (key: string, commands: AgentCommand[]) => this.setCommands(key, commands),
       jobs: (jobs: BatchJob[]) => this.setJobs(jobs),
       watches: (watches: Watch[]) => this.setWatches(watches),
+      orchestrators: (orchestrators: Orchestrator[]) => this.setOrchestrators(orchestrators),
       // A chat was forked or an agent started one: the lists show it at once, not at the next poll.
       sessions: () => void this.refresh(),
       config: (key: string, options: SessionConfigOption[]) => this.chats[key]?.post({ type: 'config', options }),

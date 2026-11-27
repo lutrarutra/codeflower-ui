@@ -14,6 +14,7 @@ import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from '.
 import type { AgentCommand } from './commands.ts';
 import type { BatchJob } from './jobs.ts';
 import type { Watch } from './watches.ts';
+import type { Orchestrator, OrchestratorAccess } from './orchestrators.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -73,7 +74,20 @@ export type TranscriptEntry =
   | { t: string; kind: 'shell_end'; runId: string; exitCode: number; timedOut: boolean; output?: string }
   | { t: string; kind: 'question_outcome'; action: QuestionAction; content: FormContent | null }
   // Files the agent showed the user with `codeflower-show`; the client records which chat they belong to.
-  | { t: string; kind: 'show'; files: string[]; message?: string };
+  | { t: string; kind: 'show'; files: string[]; message?: string }
+  // What went from this chat to an orchestrator (orchestrators.js): its reply or question, or that the user withheld it.
+  | SentEntry;
+
+/** A reply or question this chat sent to its orchestrator `to`: the exact text it got. */
+export interface SentEntry {
+  t: string;
+  kind: 'sent';
+  to: string;
+  what: 'reply' | 'question';
+  text: string;
+  withheld?: boolean;
+  stopReason?: string | null;
+}
 
 /** Marks the prompt block that tells the agent about the user's shell commands. */
 export const SHELL_CONTEXT_META = 'codeflower/shellContext';
@@ -93,9 +107,26 @@ export const STEER_NOTE =
   'Take it into account and carry on with what you were doing, including waiting for background tasks ' +
   'and subagents, unless the message asks you to stop, wait, or change course.';
 
-/** A block the client adds to a prompt for the agent, which the user did not write and the chat does not show. */
+/**
+ * A message of another chat's (orchestrators.js): an orchestrator's to the chat it directs, or that
+ * chat's question to its orchestrator. On its text block; the chat shows it apart from the user's.
+ */
+export const FROM_META = 'codeflower/from';
+/** The note the bridge puts before such a message, for the agent to read; not shown. */
+export const ORCHESTRATOR_NOTE_META = 'codeflower/orchestratorNote';
+
+export interface FromMeta {
+  kind: 'orchestrator' | 'executor';
+  key: string;
+  title?: string;
+  agent?: AgentName;
+}
+
+/** A block the client or bridge adds to a prompt for the agent, which the user did not write and the chat does not show. */
 export function hiddenBlock(block: { _meta?: Record<string, unknown> | null }): boolean {
-  return Boolean(block._meta?.[SHELL_CONTEXT_META] || block._meta?.[STEER_NOTE_META] || block._meta?.[FORK_CONTEXT_META]);
+  return Boolean(
+    block._meta?.[SHELL_CONTEXT_META] || block._meta?.[STEER_NOTE_META] || block._meta?.[FORK_CONTEXT_META] || block._meta?.[ORCHESTRATOR_NOTE_META]
+  );
 }
 
 /** Work of the agent's that goes on after its turn ends, e.g. Claude Code's background commands. */
@@ -255,6 +286,12 @@ export interface ChatState {
   fork?: boolean;
   /** Where the chat came from: the line atop it, which opens that chat (`openChat`). */
   origin?: ChatOrigin;
+  /** The orchestrators directing this chat (its footer's badge), connected ones first. */
+  orchestrators?: Orchestrator[];
+  /** This chat is an orchestrator: the chat it directs, and what it may do. */
+  orchestrator?: Orchestrator;
+  /** An orchestrator can be started on this chat (`createOrchestrator`): the worker has them, and it is an ordinary chat. */
+  orchestrate?: boolean;
 }
 
 /** A forked chat's (`fork`), or one another chat started (`agent`): that chat, and the user's message the fork went before. */
@@ -424,7 +461,15 @@ export type WebviewMessage =
   /** Start a new chat in the sandbox with this chat's agent, and show it. */
   | { type: 'newChat' }
   /** Fork this chat, before the user's message at transcript entry `beforeEntry` or all of it, and show the fork. */
-  | { type: 'forkChat'; beforeEntry?: number };
+  | { type: 'forkChat'; beforeEntry?: number }
+  /** Start an orchestrator on this chat, for good, and show it. */
+  | { type: 'createOrchestrator' }
+  /** Change what an orchestrator may do (this chat's, or one directing it). */
+  | { type: 'setOrchestratorAccess'; key: string; access: Partial<OrchestratorAccess> }
+  /** End an orchestrator's link to its chat: it becomes read-only. */
+  | { type: 'disconnectOrchestrator'; key: string }
+  /** Let this chat's orchestrators set to ask see a figure or report it showed. */
+  | { type: 'shareWithOrchestrator'; path: string };
 
 /** A file in the sandbox, as `_codeflower/files/stat` and `codeflower-show` report it. */
 export interface SandboxFile {

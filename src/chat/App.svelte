@@ -18,6 +18,7 @@
   import CommandMenu from './lib/CommandMenu.svelte';
   import AgentIcon from './lib/AgentIcon.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
+  import OrchestratorAccess from './lib/OrchestratorAccess.svelte';
   import ShownFilesMenu from './lib/ShownFilesMenu.svelte';
   import ChatSwitcher from './lib/ChatSwitcher.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
@@ -190,7 +191,8 @@
   });
 
   // `!command` runs in the sandbox instead of going to the agent, as in Claude Code.
-  const shellMode = $derived(draft.trimStart().startsWith('!'));
+  // An orchestrator's chat runs no commands: their output would go to its hosted model.
+  const shellMode = $derived(!chat.orchestrator && draft.trimStart().startsWith('!'));
 
   // The agent's slash commands, as it last listed them for this session.
   const commands = $derived.by(() => {
@@ -336,6 +338,16 @@
   );
   const runningNote = $derived(runningCount ? ` · ${runningCount} running in the background` : '');
 
+  // An orchestrator's chat, and the chat it directs; and what the user may share with this chat's orchestrators.
+  const orchestrator = $derived(chat.orchestrator);
+  const shareWith = $derived.by(() => {
+    const connected = (chat.orchestrators ?? []).filter((one) => !one.disconnected);
+    return [
+      ...(connected.some((one) => one.access.figures === 'ask') ? (['figure'] as const) : []),
+      ...(connected.some((one) => one.access.report === 'ask') ? (['report'] as const) : [])
+    ];
+  });
+
   // "Claude Code · 127.0.0.1:7710": the agent, then where it runs.
   const [agentLabel, location] = $derived(chat.subtitle.split(' · '));
   /** The header's icon buttons: the box of the Tools button, so their icons line up. */
@@ -354,7 +366,7 @@
         list={() => send({ type: 'listChats' })}
         choose={(key) => send({ type: 'openChat', key })}
         create={() => send({ type: 'newChat' })}
-        fork={chat.fork === true && chat.live && !chat.subagent ? () => send({ type: 'forkChat' }) : undefined}
+        fork={chat.fork === true && chat.live && !chat.subagent && !orchestrator ? () => send({ type: 'forkChat' }) : undefined}
       />
     </h1>
     {#if subagent}
@@ -377,12 +389,13 @@
         <span class="hidden @xs:inline">{agentLabel}</span>
       </span>
     {/if}
-    {#if chat.actions?.length}
+    {#if (chat.actions?.length && !orchestrator) || (chat.orchestrate && !subagent)}
       <ActionsMenu
-        actions={chat.actions}
+        actions={orchestrator ? [] : (chat.actions ?? [])}
         busy={chat.busy}
         live={chat.live}
         choose={(id) => send({ type: 'action', id })}
+        orchestrate={chat.orchestrate && !subagent ? () => send({ type: 'createOrchestrator' }) : undefined}
       />
     {/if}
     {#if shown.length}
@@ -467,6 +480,32 @@
     </div>
   {/if}
 
+  {#if orchestrator}
+    <!-- The chat it directs, for good; and what it may do, which the user changes here. -->
+    <details class="group border-b-[1.5px] border-soft-line bg-violet-soft/40 px-3 py-1.5 text-[0.85em]">
+      <summary class="flex min-w-0 cursor-pointer list-none items-center gap-1.5 select-none">
+        <span class="codicon codicon-compass shrink-0 text-violet"></span>
+        <span class="shrink-0 font-semibold">Orchestrator of</span>
+        <button
+          type="button"
+          class="link min-w-0 truncate"
+          title="Open the chat it directs"
+          onclick={(event) => {
+            event.preventDefault();
+            send({ type: 'openChat', key: orchestrator.executor });
+          }}>{orchestrator.executorTitle}</button
+        >
+        <span class="min-w-0 truncate text-muted max-[640px]:hidden">
+          · {orchestrator.disconnected ? 'disconnected: read-only' : 'it may not see the data, only what that chat sends it'}
+        </span>
+        <span class="ml-auto flex shrink-0 items-center gap-1 text-muted">
+          What it may do <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
+        </span>
+      </summary>
+      <div class="mt-2 pb-1"><OrchestratorAccess {orchestrator} disabled={orchestrator.disconnected} /></div>
+    </details>
+  {/if}
+
   <Transcript
     {entries}
     {start}
@@ -479,8 +518,9 @@
     subagentFeatures={subagentSettings?.features}
     fold={folded}
     waiting={!!permission || !!question}
-    fork={chat.fork === true && chat.live && !chat.subagent}
+    fork={chat.fork === true && chat.live && !chat.subagent && !orchestrator}
     origin={chat.origin}
+    {shareWith}
   />
 
   {#if permission}
@@ -617,16 +657,18 @@
       class="max-h-60 min-h-[2.8em] resize-none pointer-coarse:text-base border-none bg-transparent p-0.5 outline-none placeholder:text-muted disabled:cursor-not-allowed {shellMode
         ? 'font-mono'
         : ''}"
-      placeholder={!chat.live
+      placeholder={!chat.live || orchestrator?.disconnected
         ? 'This session is read-only here'
-        : touch
-          ? chat.busy
-            ? 'Follow up…'
-            : 'Ask the agent…'
-          : chat.busy
-            ? `Follow up… Enter sends it when the agent is done, ${modKey}+Enter now`
-            : `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`}
-      disabled={!chat.live}
+        : orchestrator
+          ? 'Ask the orchestrator… it sees what you write here, so write no data'
+          : touch
+            ? chat.busy
+              ? 'Follow up…'
+              : 'Ask the agent…'
+            : chat.busy
+              ? `Follow up… Enter sends it when the agent is done, ${modKey}+Enter now`
+              : `Ask the agent…  (${commands.length ? '/ for commands, ' : ''}! runs a command in the sandbox)`}
+      disabled={!chat.live || orchestrator?.disconnected}
       bind:value={draft}
       oninput={fitInput}
       onkeydown={(event) => {
@@ -726,5 +768,6 @@
     {background}
     jobs={subagent ? [] : (chat.jobs ?? [])}
     watches={subagent ? [] : (chat.watches ?? [])}
+    orchestrators={subagent ? [] : (chat.orchestrators ?? [])}
   />
 </main>

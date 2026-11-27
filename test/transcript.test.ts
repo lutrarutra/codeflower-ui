@@ -397,3 +397,34 @@ test("shows a fork's first message without the earlier chat's history it brought
     [['user', '7', 'make a plot'], ['assistant', '8', ''], ['user', '9', 'now in blue']]
   );
 });
+
+test("shows an orchestrator's message apart from the user's, its note hidden, and what went back to it", () => {
+  const at = (seconds: number) => new Date(seconds * 1000).toISOString();
+  const from = { kind: 'orchestrator' as const, key: 'claude-1', title: 'Review', agent: 'claude' };
+  const items = buildItems([
+    {
+      t: at(0),
+      kind: 'prompt',
+      prompt: [
+        { type: 'text', text: 'You work for an orchestrator.', _meta: { 'codeflower/orchestratorNote': true } },
+        { type: 'text', text: 'Fit a Cox model.', _meta: { 'codeflower/from': from } }
+      ]
+    },
+    chunk('HR 1.4.'),
+    { t: at(9), kind: 'turn_end', stopReason: 'end_turn' },
+    { t: at(9), kind: 'sent', to: 'claude-1', what: 'reply', text: "The executor's reply:\nHR 1.4." },
+    { t: at(20), kind: 'sent', to: 'claude-1', what: 'question', text: '', withheld: true }
+  ]);
+  assert.deepEqual(items[0], { kind: 'peer', id: '0', from, text: 'Fit a Cox model.', started: 0, ended: 9000 });
+  assert.deepEqual(items.slice(2), [
+    { kind: 'sent', id: '3', to: 'claude-1', what: 'reply', text: "The executor's reply:\nHR 1.4.", withheld: false },
+    { kind: 'sent', id: '4', to: 'claude-1', what: 'question', text: '', withheld: true }
+  ]);
+  // It starts a turn, and what went back shows in it.
+  const [turn] = foldTurns(items);
+  assert.equal(turn.prompt?.kind, 'peer');
+  assert.deepEqual(
+    turn.parts.map((part) => (part.kind === 'item' ? part.item.kind : 'steps')),
+    ['assistant', 'sent', 'sent']
+  );
+});

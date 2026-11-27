@@ -3,9 +3,11 @@ import type { ContentBlock, PermissionOption, PlanEntry, ToolCallContent, ToolCa
 import { looksLikeFile } from './files.ts';
 import {
   ACTION_PROMPT_META,
+  FROM_META,
   NOTICE_PROMPT_META,
   hiddenBlock,
   type ActionPromptMeta,
+  type FromMeta,
   formFields,
   type FormContent,
   type FormField,
@@ -33,6 +35,10 @@ export type ChatItem =
   | ({ kind: 'action'; id: string; title: string; text: string } & TurnTimes)
   /** A prompt of the bridge's own (e.g. a batch job ended): not the user's message, shown apart and folded. */
   | ({ kind: 'notice'; id: string; title: string; summary: string | null; text: string } & TurnTimes)
+  /** Another chat's message (orchestrators.js): an orchestrator's to this chat, or its executor's question. */
+  | ({ kind: 'peer'; id: string; from: FromMeta; text: string } & TurnTimes)
+  /** What this chat sent its orchestrator: the exact text it got, or that the user withheld it. */
+  | { kind: 'sent'; id: string; to: string; what: 'reply' | 'question'; text: string; withheld: boolean }
   | { kind: 'assistant'; id: string; text: string; messageId?: string | null; at: number | null; stamp?: TurnStamp }
   | { kind: 'thought'; id: string; text: string }
   | {
@@ -139,6 +145,23 @@ function promptNotice(prompt: ContentBlock[]): { title: string; summary: string 
     if (typeof meta === 'object' && meta !== null && 'title' in meta && typeof meta.title === 'string') {
       const summary = 'summary' in meta && typeof meta.summary === 'string' && meta.summary.trim() ? meta.summary : null;
       return { title: meta.title, summary };
+    }
+  }
+}
+
+/** The other chat a prompt comes from, from its text block's `codeflower/from`. */
+export function promptFrom(prompt: ContentBlock[]): FromMeta | undefined {
+  for (const block of prompt) {
+    const meta = block._meta?.[FROM_META];
+    if (
+      typeof meta === 'object' &&
+      meta !== null &&
+      'kind' in meta &&
+      (meta.kind === 'orchestrator' || meta.kind === 'executor') &&
+      'key' in meta &&
+      typeof meta.key === 'string'
+    ) {
+      return meta as FromMeta;
     }
   }
 }
@@ -252,7 +275,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
   let pendingPermission: Extract<ChatItem, { kind: 'permission' }> | undefined;
   let pendingQuestion: Extract<ChatItem, { kind: 'question' }> | undefined;
   // The prompts of the agent's current turn: the first, and any sent while it worked.
-  let prompted: Extract<ChatItem, { kind: 'user' | 'action' | 'notice' }>[] = [];
+  let prompted: Extract<ChatItem, { kind: PromptKind }>[] = [];
   // Where the current turn's items start.
   let turnStart = 0;
   const shells = new Map<string, Extract<ChatItem, { kind: 'shell' }>>();
@@ -268,14 +291,17 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
           // commands, which the chat shows as their own cards.
           const prompt = entry.prompt.filter((block) => !hiddenBlock(block));
           const text = prompt.map(blockText).join('\n');
-          const action = promptAction(prompt);
-          const notice = action ? undefined : promptNotice(prompt);
+          const from = promptFrom(prompt);
+          const action = from ? undefined : promptAction(prompt);
+          const notice = from || action ? undefined : promptNotice(prompt);
           const times = { started: time(entry.t), ended: null };
-          const item: (typeof prompted)[number] = action
-            ? { kind: 'action', id, title: action.title, text, ...times }
-            : notice
-              ? { kind: 'notice', id, title: notice.title, summary: notice.summary, text, ...times }
-              : { kind: 'user', id, text, ...times };
+          const item: (typeof prompted)[number] = from
+            ? { kind: 'peer', id, from, text, ...times }
+            : action
+              ? { kind: 'action', id, title: action.title, text, ...times }
+              : notice
+                ? { kind: 'notice', id, title: notice.title, summary: notice.summary, text, ...times }
+                : { kind: 'user', id, text, ...times };
           prompted.push(item);
           items.push(item);
         }
@@ -336,6 +362,9 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
       }
       case 'show':
         items.push({ kind: 'show', id, files: entry.files, message: entry.message ?? null });
+        break;
+      case 'sent':
+        items.push({ kind: 'sent', id, to: entry.to, what: entry.what, text: entry.text ?? '', withheld: entry.withheld === true });
         break;
       case 'question':
         // The question card replaces the row of the tool call that asked it (e.g. AskUserQuestion).
@@ -489,7 +518,7 @@ export type TurnPart = { kind: 'item'; item: ChatItem } | { kind: 'steps'; id: s
 export interface Turn {
   /** The prompt's id, or `start` for the first page's entries from before its first prompt. */
   id: string;
-  prompt: Extract<ChatItem, { kind: 'user' | 'action' | 'notice' }> | null;
+  prompt: Extract<ChatItem, { kind: PromptKind }> | null;
   /**
    * Everything after the prompt, in order. The agent's messages, files shown to
    * the user, their own commands, a turn that stopped and a failed call that
@@ -503,7 +532,12 @@ export interface Turn {
   work: ChatItem[];
 }
 
-const SHOWN = new Set<ChatItem['kind']>(['assistant', 'show', 'shell', 'stop', 'task']);
+const SHOWN = new Set<ChatItem['kind']>(['assistant', 'show', 'shell', 'stop', 'task', 'sent']);
+
+/** What starts a turn: the user's message, an action, a notice of the bridge's, another chat's message. */
+export type PromptKind = 'user' | 'action' | 'notice' | 'peer';
+export const isPrompt = (item: ChatItem): item is Extract<ChatItem, { kind: PromptKind }> =>
+  item.kind === 'user' || item.kind === 'action' || item.kind === 'notice' || item.kind === 'peer';
 
 /**
  * Splits the chat at each prompt, and each turn at what shows, so the agent's
@@ -532,8 +566,8 @@ export function foldTurns(items: ChatItem[]): Turn[] {
     turns.push({ id: prompt?.id ?? 'start', prompt, parts, steps, work });
   };
   for (const item of items) {
-    // A notice of the bridge's starts a turn as the user's prompt does: the agent works on it.
-    if (item.kind === 'user' || item.kind === 'action' || item.kind === 'notice') {
+    // A notice of the bridge's, or another chat's message, starts a turn as the user's prompt does: the agent works on it.
+    if (isPrompt(item)) {
       close(true);
       prompt = item;
       work = [];

@@ -20,6 +20,8 @@
   import JobsBadge from './JobsBadge.svelte';
   import SubagentBadge from './SubagentBadge.svelte';
   import WatchesBadge from './WatchesBadge.svelte';
+  import OrchestratorBadge from './OrchestratorBadge.svelte';
+  import type { Orchestrator } from '../../protocol/orchestrators.ts';
 
   // Under the composer, mostly icons with the details on hover: how full the
   // context is, what this chat used, how much of the worker's subscription
@@ -31,7 +33,8 @@
     commands = [],
     background = [],
     jobs = [],
-    watches = []
+    watches = [],
+    orchestrators = []
   }: {
     usage: ChatUsage;
     subagents?: SubagentSummary[];
@@ -39,6 +42,8 @@
     background?: BackgroundWork[];
     jobs?: BatchJob[];
     watches?: Watch[];
+    /** The orchestrators directing this chat. */
+    orchestrators?: Orchestrator[];
   } = $props();
 
   // Resets count down; a minute is fine enough.
@@ -105,6 +110,7 @@
     <JobsBadge {jobs} />
     <WatchesBadge {watches} />
     <SubagentBadge {subagents} />
+    <OrchestratorBadge {orchestrators} />
   </span>
 </div>
 

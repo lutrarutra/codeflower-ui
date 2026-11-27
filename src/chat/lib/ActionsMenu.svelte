@@ -5,12 +5,15 @@
     actions,
     busy,
     live,
-    choose
+    choose,
+    orchestrate
   }: {
     actions: ChatAction[];
     busy: boolean;
     live: boolean;
     choose: (id: string) => void;
+    /** Starts an orchestrator on this chat; none when it cannot have one. */
+    orchestrate?: () => void;
   } = $props();
 
   let open = $state(false);
@@ -89,6 +92,28 @@
       aria-label="Chat actions"
       class="card absolute top-full right-0 z-30 mt-2 flex max-h-96 w-80 max-w-[calc(100vw-2rem)] flex-col overflow-y-auto p-1.5"
     >
+      {#if orchestrate}
+        <!-- Not a prompt to the agent: it starts a chat of its own beside this one. -->
+        <button
+          type="button"
+          role="menuitem"
+          class="flex w-full items-start gap-2 rounded-lg border-none bg-transparent px-2 py-2 text-left hover:bg-code focus-visible:bg-code focus-visible:outline-none"
+          onclick={() => {
+            open = false;
+            root?.querySelector<HTMLElement>('button')?.focus();
+            orchestrate();
+          }}
+        >
+          <span class="codicon codicon-compass mt-0.5 text-violet"></span>
+          <span class="min-w-0 flex-1">
+            <span class="block font-semibold">Add an orchestrator</span>
+            <span class="block text-[0.8em] text-muted">
+              A Claude chat that directs and checks this one without seeing its data: it gets only what this chat sends it
+            </span>
+          </span>
+        </button>
+        {#if actions.length}<div class="mx-2 my-1 h-px bg-soft-line" role="separator"></div>{/if}
+      {/if}
       {#each actions as action (action.id)}
         <button
           type="button"

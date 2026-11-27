@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { PermissionOption } from '@agentclientprotocol/sdk';
-  import type { ChatOrigin, TranscriptEntry } from '../../protocol/messages.ts';
+  import { agentPresentation, type ChatOrigin, type TranscriptEntry } from '../../protocol/messages.ts';
+  import { shareable } from '../../protocol/orchestrators.ts';
   import { highlighted } from './editor/highlight.ts';
   import Markdown from './Markdown.svelte';
   import { chatHost, type ChatHost } from './host.ts';
-  import { activity, buildItems, foldTurns, type ChatItem } from './transcript.ts';
+  import { activity, buildItems, foldTurns, isPrompt, type ChatItem } from './transcript.ts';
   import Elapsed from './Elapsed.svelte';
   import type { SubagentFeatures, SubagentSummary } from '../../protocol/subagents.ts';
   import SubagentCard from './SubagentCard.svelte';
@@ -34,7 +35,8 @@
     fold = false,
     waiting = false,
     fork = false,
-    origin
+    origin,
+    shareWith = []
   }: {
     entries: TranscriptEntry[];
     /** The index of `entries[0]` in the chat's transcript; above 0, earlier entries load on scrolling up. */
@@ -55,7 +57,15 @@
     fork?: boolean;
     /** Where the chat came from: a line atop it that opens that chat. */
     origin?: ChatOrigin;
+    /** What the user may share with this chat's orchestrators (those set to ask): a button on such files shown. */
+    shareWith?: ('figure' | 'report')[];
   } = $props();
+  // Files shared from this view, which say so.
+  let shared = $state<string[]>([]);
+  const share = (path: string) => {
+    shared = [...shared, path];
+    send({ type: 'shareWithOrchestrator', path });
+  };
   const summaries = $derived(new Map(subagents.map((subagent) => [subagent.sessionId, subagent])));
   const items = $derived(buildItems(entries, start));
   const turns = $derived(fold ? foldTurns(items) : []);
@@ -64,7 +74,7 @@
     const labels = new Map<string, string>();
     let previous: number = Date.now();
     for (const item of items) {
-      if ((item.kind !== 'user' && item.kind !== 'action' && item.kind !== 'notice') || item.started === null) continue;
+      if (!isPrompt(item) || item.started === null) continue;
       if (!sameDay(item.started, previous)) labels.set(item.id, day(item.started));
       previous = item.started;
     }
@@ -226,7 +236,7 @@
 {/snippet}
 
 {#snippet row(item: ChatItem, previous: ChatItem | undefined, open = false)}
-  {#if (item.kind === 'user' || item.kind === 'action' || item.kind === 'notice') && days.has(item.id)}
+  {#if isPrompt(item) && days.has(item.id)}
     <div class="flex items-center gap-3 py-1 text-[0.72em] text-muted opacity-70 select-none" role="separator">
       <span class="h-px flex-1 bg-soft-line"></span>{days.get(item.id)}<span class="h-px flex-1 bg-soft-line"></span>
     </div>
@@ -268,6 +278,38 @@
         </div>
       {/if}
     </div>
+  {:else if item.kind === 'peer'}
+    <!-- Another chat's message to this one (its orchestrator's, or its executor's question): not the user's. -->
+    {@const sender = agentPresentation(item.from.agent)}
+    <div
+      class="flex max-w-[85%] min-w-0 flex-col gap-1 self-start rounded-xl border-[1.5px] border-l-4 border-soft-line bg-card px-3 py-2 max-[640px]:max-w-[92%]"
+      style:border-left-color={sender?.color ?? 'var(--cf-violet)'}
+    >
+      <div class="flex min-w-0 items-center gap-1.5 text-[0.85em]">
+        <span class="codicon codicon-{item.from.kind === 'orchestrator' ? 'compass' : 'question'} shrink-0" style:color={sender?.color}></span>
+        <span class="eyebrow shrink-0" style:color={sender?.color}>{item.from.kind === 'orchestrator' ? 'Orchestrator' : 'Executor asks'}</span>
+        <button
+          type="button"
+          class="link min-w-0 truncate text-muted"
+          title="Open the chat it came from"
+          onclick={() => send({ type: 'openChat', key: item.from.key })}>{item.from.title ?? item.from.key}</button
+        >
+        {#if item.started !== null}<span class="ml-auto shrink-0">{@render stamp(item.started)}</span>{/if}
+      </div>
+      <div class="min-w-0 wrap-anywhere"><Markdown text={item.text} openFile={(path) => send({ type: 'openFile', path })} /></div>
+    </div>
+  {:else if item.kind === 'sent'}
+    <!-- Exactly what went to the orchestrator, or that the user withheld it. -->
+    <details class="group min-w-0 self-start text-muted">
+      <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[0.8em] select-none hover:text-ink">
+        <span class="codicon codicon-{item.withheld ? 'circle-slash' : 'arrow-small-right'}"></span>
+        {item.withheld ? `Withheld from the orchestrator` : item.what === 'question' ? 'Asked the orchestrator' : 'Sent to the orchestrator'}
+        {#if !item.withheld}<span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>{/if}
+      </summary>
+      {#if !item.withheld}
+        <div class="mt-1.5 ml-2 max-h-80 overflow-auto border-l-2 border-soft-line pl-3 font-mono text-[0.78em] wrap-anywhere whitespace-pre-wrap">{item.text}</div>
+      {/if}
+    </details>
   {:else if item.kind === 'notice'}
     <!-- The bridge's own message to the agent, not the user's: a line apart, its text folded. -->
     <details class="group min-w-0 self-stretch text-muted" {open}>
@@ -474,6 +516,20 @@
               <span class="codicon codicon-file shrink-0"></span>
               <span class="min-w-0 truncate font-mono">{name}</span>
             </button>
+          {/each}
+        </div>
+      {/if}
+      {#if shareWith.length && item.files.some((path) => shareWith.includes(shareable(path)!))}
+        <!-- The orchestrator sees what the user shares, when it may only see those. -->
+        <div class="flex flex-wrap items-center gap-1.5 border-t-[1.5px] border-soft-line pt-2 text-[0.8em] text-muted">
+          <span class="codicon codicon-compass"></span>Share with the orchestrator:
+          {#each item.files.filter((path) => shareWith.includes(shareable(path)!)) as path (path)}
+            {@const name = path.split('/').pop()}
+            {#if shared.includes(path)}
+              <span class="chip opacity-70"><span class="codicon codicon-check"></span>{name}</span>
+            {:else}
+              <button class="chip" title="Let the orchestrator see {path}" onclick={() => share(path)}>{name}</button>
+            {/if}
           {/each}
         </div>
       {/if}

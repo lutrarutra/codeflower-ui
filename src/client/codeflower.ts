@@ -16,6 +16,8 @@ import type {
 import type { AgentCommand } from '../protocol/commands.ts';
 import type { BatchJob, JobsSummary } from '../protocol/jobs.ts';
 import type { Watch, WatchesSummary } from '../protocol/watches.ts';
+import type { Orchestrator, OrchestratorAccess, OrchestratorsSummary } from '../protocol/orchestrators.ts';
+import type { SentEntry } from '../protocol/messages.ts';
 import type { Idea, IdeaPatch, RootsMap } from '../protocol/roots.ts';
 import type { BrowserFrame, BrowserInputEvent, BrowserNavigation, BrowserState } from '../protocol/browser.ts';
 import type { UsageTotals, WorkerUsage } from '../protocol/usage.ts';
@@ -122,6 +124,8 @@ export interface WorkerStatus {
   jobs?: JobsSummary;
   /** The agents' watches (codeflower-watch); missing from older workers. */
   watches?: WatchesSummary;
+  /** Orchestrator chats (`_codeflower/orchestrators/*`), of these agents; missing from older workers. */
+  orchestrators?: OrchestratorsSummary;
   /** The worker keeps the project's map of ideas (`_codeflower/roots/*`); missing from older workers. */
   roots?: boolean;
   /** The worker forks chats (`_codeflower/sessions/fork`), and tells of new ones (`sessions/changed`); missing from older workers. */
@@ -267,6 +271,11 @@ export interface SessionRecord {
   usage?: UsageTotals | null;
   /** Where the chat came from: a fork of another, or a chat another chat started (codeflower-chat). */
   origin?: SessionOrigin;
+  /** An orchestrator's chat: the chat it directs, and what it may do. */
+  role?: 'orchestrator';
+  executor?: string;
+  access?: OrchestratorAccess;
+  disconnected?: boolean;
 }
 
 /**
@@ -358,7 +367,7 @@ export interface FoundInChat {
   /** How many times the chat has it. */
   count: number;
   /** The first few, with who said it and the transcript entry it starts on. */
-  places: (FoundText & { role: 'user' | 'agent'; entry: number })[];
+  places: (FoundText & { role: 'user' | 'agent' | 'peer'; entry: number })[];
 }
 
 /** What a bridge says in `initialize` (`_meta['codeflower/files']`) about sending files both ways. */
@@ -419,6 +428,13 @@ export interface ShowRequest {
   sessionKey?: string;
 }
 
+/** What a chat open here sent its orchestrator (`_codeflower/sent`). */
+export interface SentNotice {
+  key: string;
+  sessionId: string;
+  entry: SentEntry;
+}
+
 /** Files the agent showed in a chat open here, which another window opened (`_codeflower/shown`). */
 export interface ShownNotice {
   key: string;
@@ -475,6 +491,10 @@ export interface CodeflowerHandlers {
   show(request: ShowRequest): void;
   /** Another window opened files the agent showed in a chat open here; the worker noted them in it. */
   shown?(notice: ShownNotice): void;
+  /** A chat open here sent its orchestrator a reply or question. */
+  sent?(notice: SentNotice): void;
+  /** The project's orchestrators changed: one started, its access, its exchange. */
+  orchestratorsChanged?(orchestrators: Orchestrator[]): void;
   activity(activity: WorkerActivity): void;
   /** Token counts, cost, or the login's quota of `agent` changed. */
   usage(agent: AgentName, usage: WorkerUsage): void;
@@ -569,6 +589,11 @@ export class CodeflowerExtensions {
     );
     rpc.on('_codeflower/show', (params) => handlers.show(params as ShowRequest));
     rpc.on('_codeflower/shown', (params) => handlers.shown?.(params as ShownNotice));
+    rpc.on('_codeflower/sent', (params) => handlers.sent?.(params as SentNotice));
+    rpc.on('_codeflower/orchestrators/changed', (params) => {
+      const { orchestrators } = params as { orchestrators?: Orchestrator[] };
+      if (Array.isArray(orchestrators)) handlers.orchestratorsChanged?.(orchestrators);
+    });
     rpc.on('_codeflower/activity', (params) => handlers.activity(params as WorkerActivity));
     rpc.on('_codeflower/usage', (params) => {
       const { agent, ...usage } = params as ForAgent<WorkerUsage>;
@@ -1072,6 +1097,33 @@ export class CodeflowerExtensions {
   /** Cancels one of the project's batch jobs. */
   async cancelJob(id: string): Promise<BatchJob | undefined> {
     return (await this.rpc.request<{ job?: BatchJob }>('_codeflower/jobs/cancel', { id })).job;
+  }
+
+  // ---- orchestrators ----
+
+  /** The project's orchestrators. */
+  async orchestrators(): Promise<Orchestrator[]> {
+    return (await this.rpc.request<{ orchestrators?: Orchestrator[] }>('_codeflower/orchestrators/list', {})).orchestrators ?? [];
+  }
+
+  /** Starts an orchestrator (of `agent`, Claude Code by default) on the chat `executor`, for good. */
+  createOrchestrator(executor: string, options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}): Promise<{ key: string; agent: string; title: string; executor: string }> {
+    return this.rpc.request('_codeflower/orchestrators/create', { executor, ...options });
+  }
+
+  /** Changes what an orchestrator may do; `restartNeeded` when the web changed, which applies at its session's next start. */
+  setOrchestratorAccess(key: string, access: Partial<OrchestratorAccess>): Promise<{ access: OrchestratorAccess; restartNeeded?: boolean }> {
+    return this.rpc.request('_codeflower/orchestrators/setAccess', { key, access });
+  }
+
+  /** Lets the orchestrators of `executor` (or the one `orchestrator`) see a figure or report it showed. */
+  async shareWithOrchestrator(executor: string, path: string, orchestrator?: string): Promise<void> {
+    await this.rpc.request('_codeflower/orchestrators/share', { executor, path, ...(orchestrator ? { orchestrator } : {}) });
+  }
+
+  /** Ends an orchestrator's link to its chat. */
+  async disconnectOrchestrator(key: string): Promise<void> {
+    await this.rpc.request('_codeflower/orchestrators/disconnect', { key });
   }
 
   // ---- watches ----

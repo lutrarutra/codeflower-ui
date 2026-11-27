@@ -23,6 +23,7 @@ import type { ChatUsage } from '../../protocol/usage.ts';
 import { ChatQueue } from '../../client/chatQueue.ts';
 import type { TranscriptPage, WorkerQueue } from '../../client/codeflower.ts';
 import type { ChatWorkerQueue } from '../../client/workerConnection.ts';
+import type { OrchestratorAccess } from '../../protocol/orchestrators.ts';
 
 /** What a chat asks of the sandbox it runs on. */
 export interface ChatActions {
@@ -73,6 +74,12 @@ export interface ChatActions {
   newChat(chat: ChatSession): Promise<void>;
   /** A fork of the chat, before the user's message at transcript entry `beforeEntry` or all of it, in front. */
   forkChat(chat: ChatSession, beforeEntry?: number): Promise<void>;
+  /** An orchestrator started on the chat, in front. */
+  createOrchestrator(chat: ChatSession): Promise<void>;
+  setOrchestratorAccess(chat: ChatSession, key: string, access: Partial<OrchestratorAccess>): Promise<void>;
+  disconnectOrchestrator(chat: ChatSession, key: string): Promise<void>;
+  /** A figure or report the chat showed, for its orchestrators set to ask. */
+  shareWithOrchestrator(chat: ChatSession, path: string): Promise<void>;
   restartAgent(chat: ChatSession): Promise<void>;
 }
 
@@ -403,6 +410,18 @@ export class ChatSession {
         break;
       case 'forkChat':
         await this.failing('Could not fork the chat', this.actions.forkChat(this, message.beforeEntry));
+        break;
+      case 'createOrchestrator':
+        await this.failing('Could not start an orchestrator', this.actions.createOrchestrator(this));
+        break;
+      case 'setOrchestratorAccess':
+        await this.failing("Could not change what the orchestrator may do", this.actions.setOrchestratorAccess(this, message.key, message.access));
+        break;
+      case 'disconnectOrchestrator':
+        await this.failing('Could not disconnect the orchestrator', this.actions.disconnectOrchestrator(this, message.key));
+        break;
+      case 'shareWithOrchestrator':
+        await this.failing('Could not share it with the orchestrator', this.actions.shareWithOrchestrator(this, message.path));
         break;
     }
   }

@@ -204,7 +204,7 @@
                     {@render where(item, item.count > 1 ? plural(item.count, 'match', 'matches') : '')}
                   </span>
                   <span class="truncate pl-6 text-[0.85em] text-muted">
-                    <span class="font-semibold">{item.place.role === 'user' ? 'You' : 'Agent'}:</span>
+                    <span class="font-semibold">{item.place.role === 'user' ? 'You' : item.place.role === 'peer' ? 'Other chat' : 'Agent'}:</span>
                     {@render excerpt(item.place.text, item.place.start, item.place.length)}
                   </span>
                 {:else}
