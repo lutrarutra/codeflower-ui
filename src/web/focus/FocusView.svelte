@@ -57,9 +57,28 @@
     return () => (app.focus.narrow = false);
   });
 
+  // An orchestrator and the chat it directs show side by side: the pane shows the other one,
+  // unless the user picks what the agent showed instead. The other chat opens with this one.
+  const partnerKey = $derived(selected ? app.focus.partnerOf(selected) : undefined);
+  const partnerChat = $derived(partnerKey && agent ? agent.chats[partnerKey] : undefined);
+  // The chat shown is the orchestrator: the other one is its executor.
+  const partnerIsExecutor = $derived(!!partnerKey && agent?.sessions.find((session) => session.key === selected?.key)?.role === 'orchestrator');
+  let paneView = $state<'partner' | 'shown'>('partner');
+  $effect(() => {
+    if (!partnerKey || !worker || !agent || agent.chats[partnerKey] || worker.status !== 'ready' || elsewhere) return;
+    const key = partnerKey;
+    untrack(() => void agent.open(key));
+  });
+  // The executor waits for the user (a permission): its chat comes to the pane, where it is answered.
+  $effect(() => {
+    if (partnerChat?.status === 'waiting') untrack(() => (paneView = 'partner'));
+  });
+
   // The chat's browser takes the pane while the agent waits for the user in it, or the user has it.
   const browser = $derived(selected && agent ? agent.browsers[selected.key] : undefined);
   const paneBrowser = $derived(Boolean(browser?.running && (browser.handoff || browser.yours)));
+  const showPartner = $derived(!!partnerKey && paneView === 'partner' && !paneBrowser);
+  const partnerLabel = $derived(partnerIsExecutor ? 'Executor' : 'Orchestrator');
   $effect(() => {
     if (!browser?.handoff || browser.yours) return;
     untrack(() => {
@@ -169,6 +188,8 @@
         <button role="tab" class="chip" aria-selected={front === 'pane'} aria-expanded={front === 'pane'} onclick={() => (app.focus.front = 'pane')}>
           {#if paneBrowser}
             <span class="codicon codicon-globe"></span>Browser
+          {:else if showPartner}
+            <span class="codicon codicon-compass"></span>{partnerLabel}
           {:else}
             <span class="codicon codicon-preview"></span>Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}
           {/if}
@@ -218,25 +239,64 @@
         </div>
       {/if}
       {#if narrow ? front === 'pane' : pane}
-        <div class="min-w-0 flex-1">
-          {#key selected.workerId + '/' + selected.key}
-            {#if paneBrowser}
+        <div class="flex min-w-0 flex-1 flex-col">
+          {#if partnerKey && !paneBrowser}
+            <!-- A pair: the other chat, or what this one's agent showed. -->
+            <div class="flex shrink-0 items-center gap-1 border-b-[1.5px] border-soft-line px-2 py-1" role="tablist" aria-label="Beside the chat">
+              <button role="tab" class="chip" aria-selected={paneView === 'partner'} onclick={() => (paneView = 'partner')}>
+                <span class="codicon codicon-compass"></span>{partnerLabel}
+              </button>
+              <button role="tab" class="chip" aria-selected={paneView === 'shown'} onclick={() => (paneView = 'shown')}>
+                <span class="codicon codicon-preview"></span>Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}
+              </button>
+              <span class="flex-1"></span>
+              <button
+                class="grid size-6 place-items-center rounded-md text-muted hover:bg-sunken hover:text-ink"
+                title="Show only this chat in Focus, the other one beside it"
+                aria-label="Bring the {partnerLabel.toLowerCase()} to the front"
+                onclick={() => app.focus.select({ workerId: selected.workerId, key: partnerKey })}
+              >
+                <span class="codicon codicon-arrow-swap text-[13px]!"></span>
+              </button>
+              {#if !narrow}
+                <button class="grid size-6 place-items-center rounded-md text-muted hover:bg-sunken hover:text-ink" title="Hide the pane" aria-label="Hide the pane" onclick={togglePane}>
+                  <span class="codicon codicon-layout-sidebar-right-off text-[13px]!"></span>
+                </button>
+              {/if}
+            </div>
+          {/if}
+          <div class="min-h-0 flex-1">
+          {#key selected.workerId + '/' + selected.key + '/' + (showPartner ? 'partner' : 'shown')}
+            {#if showPartner}
+              {#if partnerChat}
+                <App
+                  host={partnerChat.host}
+                  fold={foldSteps.focus}
+                  onFold={(fold) => setFoldSteps('focus', fold)}
+                  favoriteModels={favoriteModels[partnerChat.state.agent?.id ?? ''] ?? []}
+                  onFavoriteModel={(value, pinned) => setFavoriteModel(partnerChat.state.agent?.id, value, pinned)}
+                />
+              {:else}
+                <div class="p-4"><Skeleton lines={['40%', '90%', '75%']} /></div>
+              {/if}
+            {:else if paneBrowser}
               {#await import('../BrowserTab.svelte') then { default: BrowserTab }}
                 <BrowserTab workerId={selected.workerId} chatKey={selected.key} visible />
               {/await}
             {:else}
-              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow ? undefined : togglePane} />
+              <ShowPane workerId={selected.workerId} chatKey={selected.key} onCollapse={narrow || partnerKey ? undefined : togglePane} />
             {/if}
           {/key}
+          </div>
         </div>
       {/if}
       {#if !narrow && !pane}
         <button
           class="chip absolute top-2 right-3 z-10"
-          title="Show what the agent showed you"
+          title={partnerKey ? `Show the ${partnerLabel.toLowerCase()} beside this chat` : 'Show what the agent showed you'}
           onclick={togglePane}
         >
-          <span class="codicon codicon-layout-sidebar-right"></span>Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}
+          <span class="codicon codicon-layout-sidebar-right"></span>{#if partnerKey}{partnerLabel}{:else}Shown{#if chat?.shown.length}<span class="text-muted">{chat.shown.length}</span>{/if}{/if}
         </button>
       {/if}
     </div>

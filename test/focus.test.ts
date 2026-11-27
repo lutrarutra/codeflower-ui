@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { arrange, chatPhase, listed, nextUp, older, RECENT_MS, step, type FocusChat } from '../src/web/lib/focusList.ts';
+import { arrange, chatPhase, joinPair, listed, nextUp, older, pairs, partnerOf, RECENT_MS, same, step, type FocusChat } from '../src/web/lib/focusList.ts';
 
 Reflect.set(globalThis, '$state', Object.assign(<T>(value: T) => value, { snapshot: <T>(value: T): T => structuredClone(value) }));
 const { shownFiles } = await import('../src/web/lib/chatSession.svelte.ts');
@@ -111,4 +111,39 @@ test('shown files keep the latest last, each once', () => {
   ];
   assert.deepEqual(shownFiles(entries as never, []), ['/b.html', '/a.png']);
   assert.deepEqual(shownFiles([{ t: '4', kind: 'show', files: ['/b.html'] }], ['/b.html', '/a.png']), ['/a.png', '/b.html']);
+});
+
+test('an orchestrator and the chat it directs share one row, the more urgent phase showing', () => {
+  const sessions = [
+    { key: 'claude-o', role: 'orchestrator', executor: 'dsh-e' },
+    { key: 'claude-old', role: 'orchestrator', executor: 'dsh-x', disconnected: true },
+    { key: 'claude-second', role: 'orchestrator', executor: 'dsh-e' },
+    { key: 'dsh-e' },
+    { key: 'dsh-x' }
+  ];
+  assert.deepEqual([...pairs(sessions)], [['claude-o', 'dsh-e'], ['claude-second', 'dsh-e']]);
+  assert.equal(partnerOf(sessions, 'claude-o'), 'dsh-e');
+  assert.equal(partnerOf(sessions, 'dsh-e'), 'claude-o');
+  assert.equal(partnerOf(sessions, 'dsh-x'), undefined);
+  const row = (key: string, phase: FocusChat['phase'], since: number, waitingFor?: FocusChat['waitingFor']): FocusChat => ({
+    workerId: 'w',
+    key,
+    title: key,
+    sandbox: 's',
+    phase,
+    since,
+    pinned: false,
+    unseen: false,
+    ...(waitingFor ? { waitingFor } : {})
+  });
+  // The executor waits for a permission while the orchestrator waits on it: the row needs the user.
+  const joined = joinPair(row('claude-o', 'working', 1), row('dsh-e', 'waiting', 5, 'permission'));
+  assert.equal(joined.phase, 'waiting');
+  assert.equal(joined.waitingFor, 'permission');
+  assert.equal(joined.since, 5);
+  assert.deepEqual(joined.partner, { key: 'dsh-e', title: 'dsh-e', phase: 'waiting', waitingFor: 'permission' });
+  // The executor working for it, the orchestrator waiting for the user: the orchestrator's state.
+  assert.equal(joinPair(row('claude-o', 'waiting', 1, 'question'), row('dsh-e', 'working', 5)).waitingFor, 'question');
+  // The executor's chat is the row's too.
+  assert.equal(same(joined, { workerId: 'w', key: 'dsh-e' }), true);
 });

@@ -4,7 +4,7 @@
 // at the top of the page names it, and opens it on a click.
 import type { ChatActivity, Worker } from './api.ts';
 import { workerTitle } from './format.ts';
-import { chatPhase, type ChatPhase } from './focusList.ts';
+import { chatPhase, pairs, type ChatPhase } from './focusList.ts';
 import { chatTab, tabOf } from './workbench.svelte.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -92,6 +92,8 @@ export class Attention {
       const active = new Map((worker.activity?.chats ?? []).map((chat) => [chat.key, chat]));
       // Open chats say their state at once; the others as the app polls the sandbox.
       const keys = new Set([...active.keys(), ...Object.keys(agent?.chats ?? {})]);
+      // Chats an orchestrator directs: their turns are its, and it is the one that finishes.
+      const directed = new Set(pairs(agent?.sessions ?? []).values());
       for (const key of keys) {
         const chat = agent?.chats[key];
         const status = chat?.status;
@@ -118,7 +120,7 @@ export class Attention {
           continue;
         }
         const need: Need | undefined =
-          phase === 'waiting' && before !== undefined && before !== 'waiting' ? 'waiting' : finished ? 'done' : undefined;
+          phase === 'waiting' && before !== undefined && before !== 'waiting' ? 'waiting' : finished && !directed.has(key) ? 'done' : undefined;
         if (!need) continue;
         this.unseen[tab] = need;
         const session = agent?.sessions.find((candidate) => candidate.key === key);

@@ -44,6 +44,45 @@ export interface FocusChat {
   unseen: boolean;
   /** Its computer does not answer: the list shows it as last seen. */
   unreachable?: boolean;
+  /**
+   * An orchestrator's row also stands for the chat it directs, which has no row of its own: its
+   * key, title and phase. The row's phase is the more urgent of the two.
+   */
+  partner?: { key: string; title: string; phase: ChatPhase; waitingFor?: ChatActivity['waitingFor'] };
+}
+
+/** What a chat record says of orchestrators (`_codeflower/sessions/list`). */
+interface PairRecord {
+  key: string;
+  role?: string;
+  executor?: string;
+  disconnected?: boolean;
+}
+
+/** Each connected orchestrator's executor, by the orchestrator's key; an executor may have several. */
+export function pairs(sessions: PairRecord[]): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const session of sessions) {
+    if (session.role === 'orchestrator' && !session.disconnected && session.executor) found.set(session.key, session.executor);
+  }
+  return found;
+}
+
+/** The chat paired with `key`: an orchestrator's executor, or an executor's (first) orchestrator. */
+export function partnerOf(sessions: PairRecord[], key: string): string | undefined {
+  const own = sessions.find((session) => session.key === key);
+  if (own?.role === 'orchestrator') return own.disconnected ? undefined : own.executor;
+  return sessions.find((session) => session.role === 'orchestrator' && !session.disconnected && session.executor === key)?.key;
+}
+
+const URGENCY: Record<ChatPhase, number> = { idle: 0, working: 1, waiting: 2 };
+
+/** An orchestrator's row with its executor's folded in: the more urgent phase of the two shows. */
+export function joinPair(orchestrator: FocusChat, executor: FocusChat): FocusChat {
+  const partner = { key: executor.key, title: executor.title, phase: executor.phase, ...(executor.waitingFor ? { waitingFor: executor.waitingFor } : {}) };
+  if (URGENCY[executor.phase] <= URGENCY[orchestrator.phase]) return { ...orchestrator, partner };
+  const { waitingFor: _, ...rest } = orchestrator;
+  return { ...rest, phase: executor.phase, since: executor.since, ...(executor.waitingFor ? { waitingFor: executor.waitingFor } : {}), partner };
 }
 
 export type FocusGroupId = 'waiting' | 'working' | 'done' | 'idle';
@@ -61,8 +100,9 @@ export function groupOf(chat: FocusChat): FocusGroupId {
   return chat.unseen ? 'done' : 'idle';
 }
 
-const same = (chat: FocusChat, other: { workerId: string; key: string } | null | undefined) =>
-  !!other && chat.workerId === other.workerId && chat.key === other.key;
+/** The row is the chat's: its own, or (a pair's) its executor's. */
+export const same = (chat: FocusChat, other: { workerId: string; key: string } | null | undefined) =>
+  !!other && chat.workerId === other.workerId && (chat.key === other.key || chat.partner?.key === other.key);
 
 /** Whether the chat belongs in the list: active, unseen, pinned, or changed recently. */
 export function listed(chat: FocusChat, now: number): boolean {

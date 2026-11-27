@@ -6,7 +6,7 @@ import { untrack } from 'svelte';
 import type { Worker } from './api.ts';
 import type { Need } from './attention.svelte.ts';
 import { workerTitle } from './format.ts';
-import { arrange, chatPhase, nextUp, older, step, type ChatPhase, type FocusChat, type FocusGroup } from './focusList.ts';
+import { arrange, chatPhase, joinPair, nextUp, older, pairs, partnerOf, step, type ChatPhase, type FocusChat, type FocusGroup } from './focusList.ts';
 import { chatTab, tabOf } from './workbench.svelte.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
@@ -131,6 +131,11 @@ export class Focus {
     }
   }
 
+  /** The chat paired with this one (an orchestrator's executor, or an executor's orchestrator), if any. */
+  partnerOf(chat: ChatRef): string | undefined {
+    return partnerOf(this.owner.agent(chat.workerId).sessions, chat.key);
+  }
+
   /** The tab of the file shown beside the chat, if any. */
   shownTab(): string | undefined {
     const chat = this.selected;
@@ -156,6 +161,9 @@ export class Focus {
       const where = machine ? (place ? `${machine}: ${place}` : machine) : place;
       const sandbox = names.filter((other) => other === name).length > 1 && where ? `${name} · ${where}` : name;
       const unreachable = !this.owner.reachable(worker.id);
+      // An orchestrator and the chat it directs share one row.
+      const paired = pairs(agent.sessions);
+      const rows = new Map<string, FocusChat>();
       for (const key of keys) {
         // A subagent's chat, opened from its parent's, is no chat of the list.
         if (!sessions.has(key) && !polled.has(key) && agent.isSubagent(key)) continue;
@@ -172,7 +180,7 @@ export class Focus {
         const since = before?.phase === phase ? before.since : !before && phase === 'idle' ? (updatedAt ?? now) : now;
         this.phases.set(tab, { phase, since });
         const waitingFor = activity?.waitingFor ?? (chat?.permission ? 'permission' : chat?.question ? 'question' : undefined);
-        chats.push({
+        rows.set(key, {
           workerId: worker.id,
           key,
           title: (chat?.state.title !== 'Chat' && chat?.state.title) || activity?.title || session?.title || 'Untitled chat',
@@ -186,6 +194,17 @@ export class Focus {
           ...(unreachable ? { unreachable } : {})
         });
       }
+      // Each of an executor's orchestrators shows it; it has no row of its own.
+      const directed = new Map<string, FocusChat>();
+      for (const [orchestrator, executor] of paired) {
+        const own = rows.get(orchestrator);
+        const executorRow = directed.get(executor) ?? rows.get(executor);
+        if (!own || !executorRow) continue;
+        directed.set(executor, executorRow);
+        rows.set(orchestrator, joinPair(own, executorRow));
+        rows.delete(executor);
+      }
+      chats.push(...rows.values());
     }
     for (const tab of this.phases.keys()) if (!present.has(tab)) this.phases.delete(tab);
     const shown = this.selected;

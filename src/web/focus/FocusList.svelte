@@ -7,6 +7,7 @@
   import NewChatDialog from '../NewChatDialog.svelte';
   import { agentOfKey } from '../../client/workerConnection.ts';
   import { chatty } from '../lib/focus.svelte.ts';
+  import { same } from '../lib/focusList.ts';
   import { WAITING_FOR, workerTitle } from '../lib/format.ts';
   import StatusDot from '../lib/StatusDot.svelte';
   import { age, PHASE_DOT } from './phase.ts';
@@ -102,7 +103,7 @@
       </div>
       <ul class="m-0 flex list-none flex-col gap-0.5 p-0">
         {#each group.chats as chat (chat.workerId + '/' + chat.key)}
-          {@const selected = app.focus.selected?.workerId === chat.workerId && app.focus.selected.key === chat.key}
+          {@const selected = same(chat, app.focus.selected)}
           <li class="group relative">
             <button
               class="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left text-[0.9em] pointer-coarse:py-2.5 {selected
@@ -122,8 +123,19 @@
                   <span class="shrink-0 text-[0.8em] text-muted tabular-nums" title="For {age(now - chat.since)}">{age(now - chat.since)}</span>
                 {/if}
               </span>
+              {#if chat.partner}
+                <!-- The chat it directs, which has no row of its own. -->
+                <span class="flex w-full min-w-0 items-center gap-2 pl-4 text-[0.85em] text-muted" title="The chat this orchestrator directs">
+                  <span class="codicon codicon-arrow-small-right shrink-0 text-[12px]!"></span>
+                  <span class="size-1.5 shrink-0 rounded-full {PHASE_DOT[chat.partner.phase]}" class:animate-pulse={chat.partner.phase === 'working'}></span>
+                  <AgentIcon agent={chatAgent(chat.workerId, chat.partner.key)} size="0.9em" title={chatAgent(chat.workerId, chat.partner.key)?.name} />
+                  <span class="min-w-0 flex-1 truncate">{chat.partner.title}</span>
+                </span>
+              {/if}
               <span class="truncate pl-4 text-[0.85em] text-muted">
-                {chat.sandbox}{#if chat.waitingFor}{' · '}<span class="text-orange">{WAITING_FOR[chat.waitingFor]}</span>{/if}
+                {chat.sandbox}{#if chat.waitingFor}{' · '}<span class="text-orange"
+                    >{chat.partner?.waitingFor === chat.waitingFor && chat.partner.phase === 'waiting' ? 'executor: ' : ''}{WAITING_FOR[chat.waitingFor]}</span
+                  >{/if}
               </span>
             </button>
             <button
