@@ -4,8 +4,12 @@
 // lists the project's watches, running and of the last day; a chat shows its
 // own. Must match sandbox/dsh-plugins/acp-ws/src/watches.js (`publicOf`).
 
-export type WatchState = 'watching' | 'met' | 'timeout' | 'stopped' | 'failing' | 'lost';
-export type WatchVerdict = 'met' | 'waiting' | 'error';
+/**
+ * failed: its output matched `--fail` (what it watched failed); exited: the processes it followed
+ * (`--pid`) ended; failing: its own command kept failing.
+ */
+export type WatchState = 'watching' | 'met' | 'failed' | 'exited' | 'timeout' | 'stopped' | 'failing' | 'lost';
+export type WatchVerdict = 'met' | 'failed' | 'waiting' | 'error';
 
 export interface WatchRun {
   run: number;
@@ -25,8 +29,12 @@ export interface Watch {
   /** How often it runs, and how long it may run, in milliseconds. */
   every: number;
   timeout: number;
-  /** `exit`, `match:REGEX` or `change`. */
+  /** `exit`, `match:REGEX`, `change` or `exited` (only the end of its `pids`). */
   until: string;
+  /** `match:REGEX`: the output that means what it watched failed. */
+  fail?: string;
+  /** The processes it follows (`--pid`): it ends when none runs. */
+  pids?: number[];
   state: WatchState;
   /** A run is going on now. */
   running: boolean;
@@ -77,13 +85,13 @@ export function formatInterval(ms: number): string {
   return parts.slice(0, 2).join('');
 }
 
-const VERDICT: Record<WatchVerdict, string> = { met: 'met', waiting: 'not yet', error: 'error' };
+const VERDICT: Record<WatchVerdict, string> = { met: 'met', failed: 'failed', waiting: 'not yet', error: 'error' };
 
 /** Its state for people: what it waits for while it runs, how it ended after. */
 export function watchStatus(watch: Watch): string {
   if (watchActive(watch)) {
     const last = watch.lastRun ? `last ${watch.lastRun.timedOut ? 'timed out' : `exit ${watch.lastRun.exitCode}`}, ${VERDICT[watch.lastRun.verdict]}` : '';
-    return [`every ${formatInterval(watch.every)} until ${watch.until}`, `run ${watch.runs}`, last].filter(Boolean).join(' · ');
+    return [`every ${formatInterval(watch.every)} until ${watch.until}${watch.fail ? `, fail ${watch.fail}` : ''}${watch.pids?.length ? `, while process ${watch.pids.join(', ')} runs` : ''}`, `run ${watch.runs}`, last].filter(Boolean).join(' · ');
   }
   return `${watch.state}${watch.reason ? `: ${watch.reason}` : ''} · ${watch.runs} run${watch.runs === 1 ? '' : 's'}`;
 }

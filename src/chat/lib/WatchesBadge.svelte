@@ -69,6 +69,8 @@
     met: 'bg-[#3fbf57]',
     stopped: 'bg-pink',
     timeout: 'bg-[#ff9f1c]',
+    failed: 'bg-red',
+    exited: 'bg-[#3fbf57]',
     failing: 'bg-red',
     lost: 'bg-red'
   };

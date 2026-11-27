@@ -1205,6 +1205,8 @@
   .mark.watch.met {
     color: var(--cf-green);
   }
+  .mark.watch.s-failed,
+  .mark.watch.s-exited,
   .mark.watch.s-failing,
   .mark.watch.s-lost,
   .mark.watch.s-timeout,

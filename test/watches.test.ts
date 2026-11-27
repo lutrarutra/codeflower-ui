@@ -48,6 +48,18 @@ test("a watch's state for people, and the watch a file belongs to", () => {
     'every 2m until match:MERGED|CLOSED · run 3 · last exit 0, not yet'
   );
   assert.equal(watchStatus(watch('w-00000001', { state: 'failing', reason: '3 runs in a row failed (exit 2)' })), 'failing: 3 runs in a row failed (exit 2) · 3 runs');
+  assert.equal(
+    watchStatus(watch('w-00000001', { fail: 'match:Error in rule', lastRun: { run: 3, at: '', exitCode: 0, verdict: 'waiting', ms: 400 } })),
+    'every 2m until match:MERGED|CLOSED, fail match:Error in rule · run 3 · last exit 0, not yet'
+  );
+  assert.equal(
+    watchStatus(watch('w-00000001', { until: 'exited', pids: [4242, 4243], lastRun: { run: 3, at: '', exitCode: 0, verdict: 'waiting', ms: 400 } })),
+    'every 2m until exited, while process 4242, 4243 runs · run 3 · last exit 0, not yet'
+  );
+  assert.equal(
+    watchStatus(watch('w-00000001', { state: 'failed', reason: 'its output matched match:Error in rule' })),
+    'failed: its output matched match:Error in rule · 3 runs'
+  );
   const list = [watch('w-0000000a')];
   // By the id in the path: the sandbox may give the real path, under another folder.
   assert.equal(watchOfFile(list, '/private/state/watches/w-0000000a/output.log')?.id, 'w-0000000a');
