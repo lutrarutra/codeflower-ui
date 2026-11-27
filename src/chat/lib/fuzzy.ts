@@ -1,6 +1,6 @@
-// Fuzzy matching for the search (Ctrl+K): chat titles here, file paths in the
-// sandbox, which ranks them with the same rules (the bridge's src/search.js)
-// and sends the best, ranked again here so every sandbox's count alike.
+// Fuzzy matching: chat titles and file paths for the search (Ctrl+K), whose
+// files the sandbox ranks with the same rules (the bridge's src/search.js), and Roots' find
+// (rootsSearch.ts). The sandbox sends its best, ranked again so every sandbox's count alike.
 
 const MATCH = 16;
 const BOUNDARY = 8;

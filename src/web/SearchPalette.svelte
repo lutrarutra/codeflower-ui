@@ -7,7 +7,7 @@
   import { agentPresentation, type AgentName } from '../protocol/messages.ts';
   import { app } from './lib/app.svelte.ts';
   import { ago, plural, workerTitle } from './lib/format.ts';
-  import { markRuns } from './lib/fuzzy.ts';
+  import { markRuns } from '../chat/lib/fuzzy.ts';
   import { Search, TEXT_FROM, type SearchItem } from './lib/search.svelte.ts';
 
   let { shortcut }: { shortcut: string } = $props();

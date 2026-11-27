@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fuzzyMatch, markRuns, pathMatch } from '../src/web/lib/fuzzy.ts';
+import { fuzzyMatch, markRuns, pathMatch } from '../src/chat/lib/fuzzy.ts';
 
 test('matches a subsequence, preferring word starts and runs', () => {
   assert.equal(fuzzyMatch('xyz', 'Clustering of PBMCs'), null);

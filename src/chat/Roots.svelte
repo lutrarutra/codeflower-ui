@@ -19,9 +19,11 @@
     type RootsWebviewMessage
   } from '../protocol/roots.ts';
   import ErrorState from './lib/ErrorState.svelte';
+  import { markRuns } from './lib/fuzzy.ts';
   import type { Host } from './lib/host.ts';
   import Markdown from './lib/Markdown.svelte';
   import { layoutIdeas } from './lib/rootsLayout.ts';
+  import { searchIdeas } from './lib/rootsSearch.ts';
   import Skeleton from './lib/Skeleton.svelte';
 
   let { host }: { host: Host<RootsWebviewMessage, RootsHostMessage> } = $props();
@@ -344,7 +346,7 @@
 
   function pointerDown(event: PointerEvent): void {
     if (!(event.target as HTMLElement).closest('.dots-menu, .chats')) dotsMenu = undefined;
-    if ((event.target as HTMLElement).closest('.node, button')) return;
+    if ((event.target as HTMLElement).closest('.node, button, .find')) return;
     drag = { x: event.clientX - view.x, y: event.clientY - view.y };
     canvas?.setPointerCapture(event.pointerId);
   }
@@ -364,6 +366,67 @@
     observer.observe(canvas);
     return () => observer.disconnect();
   });
+
+  // ---- find (Ctrl+F): the ideas that match, one at a time like an editor's find ----
+
+  let root = $state<HTMLElement | undefined>();
+  let finding = $state(false);
+  let query = $state('');
+  let hitIndex = $state(0);
+  let findInput = $state<HTMLInputElement | undefined>();
+  /** The last click on the page was in this view: Ctrl+F is its find, not the page's. */
+  let engaged = true;
+
+  const hits = $derived(finding ? searchIdeas(ideas, query, placed) : []);
+  const hitIds = $derived(new Set(hits.map((hit) => hit.id)));
+  const hit = $derived(hits.length ? hits[Math.min(hitIndex, hits.length - 1)] : undefined);
+  const FIELD: Record<string, string> = { id: 'number', title: 'title', conclusion: 'conclusion', comment: 'comment', todo: 'todo', need: 'need', file: 'file' };
+
+  function openFind(): void {
+    finding = true;
+    requestAnimationFrame(() => {
+      findInput?.focus();
+      findInput?.select();
+    });
+  }
+
+  function closeFind(): void {
+    finding = false;
+  }
+
+  /** Shows the current hit: in the middle, and in the panel when it is open. */
+  function reveal(): void {
+    if (!hit) return;
+    const id = hit.id;
+    if (selected !== undefined && selected !== id) select(id);
+    requestAnimationFrame(() => center(id));
+  }
+
+  function step(by: number): void {
+    if (!hits.length) return;
+    hitIndex = (Math.min(hitIndex, hits.length - 1) + by + hits.length) % hits.length;
+    reveal();
+  }
+
+  function findKey(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      step(event.shiftKey ? -1 : 1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeFind();
+    }
+  }
+
+  function windowKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && dotsMenu) dotsMenu = undefined;
+    const mod = /mac/i.test(navigator.platform) ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (event.key.toLowerCase() !== 'f' || !mod || event.altKey || event.shiftKey || !map || !ideas.length) return;
+    // In the app's page, Roots is a tab among others: only when it shows and was last clicked.
+    if (!root?.checkVisibility() || !(engaged || root.contains(document.activeElement))) return;
+    event.preventDefault();
+    openFind();
+  }
 
   // ---- what an idea shows ----
 
@@ -398,9 +461,9 @@
   };
 </script>
 
-<svelte:window onkeydown={(event) => event.key === 'Escape' && dotsMenu && (dotsMenu = undefined)} />
+<svelte:window onkeydown={windowKey} onpointerdowncapture={(event) => (engaged = !!root?.contains(event.target as Node))} />
 
-<div class="roots">
+<div class="roots" bind:this={root}>
   <header class="bar">
     <h1 class="m-0 flex items-center gap-2 font-display text-lg font-medium">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="h-5 w-5 text-teal">
@@ -428,7 +491,12 @@
       </div>
     {/if}
     <span class="flex-1"></span>
-    {#if ideas.length}<button class="pill pill-small" onclick={() => ((moved = false), fit())}>Fit</button>{/if}
+    {#if ideas.length}
+      <button class="pill pill-small" aria-pressed={finding} title="Find in the ideas ({/mac/i.test(navigator.platform) ? '⌘' : 'Ctrl+'}F)" onclick={() => (finding ? closeFind() : openFind())}>
+        <span class="codicon codicon-search"></span>Find
+      </button>
+      <button class="pill pill-small" onclick={() => ((moved = false), fit())}>Fit</button>
+    {/if}
   </header>
 
   {#if loadError}
@@ -489,11 +557,19 @@
             {@const watching = idea.needs.filter((need) => need.watch && !need.met && !need.ended)}
             {@const asks = unansweredComments(idea).length}
             {@const dots = dotsOf(idea)}
-            <div class="node-at" class:dim={hidden.has(idea.status)} style:left="{at?.x ?? 0}px" style:top="{at?.y ?? 0}px">
+            <div
+              class="node-at"
+              class:dim={hidden.has(idea.status)}
+              class:miss={hits.length > 0 && !hitIds.has(idea.id)}
+              style:left="{at?.x ?? 0}px"
+              style:top="{at?.y ?? 0}px"
+            >
             <button
               class="node {idea.status}"
               class:origin={!idea.from.length}
               class:selected={idea.id === selected}
+              class:hit={hitIds.has(idea.id)}
+              class:current={hit?.id === idea.id}
               onclick={() => select(idea.id === selected ? undefined : idea.id)}
             >
               <span class="top">
@@ -559,6 +635,48 @@
               {/each}
             </div>
           {/if}
+        {/if}
+        {#if finding}
+          <div class="find" role="search">
+            <div class="flex items-center gap-1.5">
+              <span class="codicon codicon-search text-muted"></span>
+              <input
+                bind:this={findInput}
+                class="find-input"
+                type="text"
+                placeholder="Find in titles, conclusions, comments…"
+                aria-label="Find in the ideas"
+                spellcheck="false"
+                value={query}
+                oninput={(event) => {
+                  query = event.currentTarget.value;
+                  hitIndex = 0;
+                  reveal();
+                }}
+                onkeydown={findKey}
+              />
+              <span class="find-count" aria-live="polite">
+                {#if !query.trim()}{:else if hits.length}{Math.min(hitIndex, hits.length - 1) + 1} of {hits.length}{:else}No results{/if}
+              </span>
+              <button class="find-button" aria-label="Previous match (Shift+Enter)" title="Previous match (Shift+Enter)" disabled={!hits.length} onclick={() => step(-1)}>
+                <span class="codicon codicon-arrow-up"></span>
+              </button>
+              <button class="find-button" aria-label="Next match (Enter)" title="Next match (Enter)" disabled={!hits.length} onclick={() => step(1)}>
+                <span class="codicon codicon-arrow-down"></span>
+              </button>
+              <button class="find-button" aria-label="Close find (Escape)" title="Close (Escape)" onclick={closeFind}>
+                <span class="codicon codicon-close"></span>
+              </button>
+            </div>
+            {#if hit}
+              <button class="find-where" title="Open idea {hit.id}" onclick={() => (select(hit.id), requestAnimationFrame(() => center(hit.id)))}>
+                <span class="find-field">#{hit.id} {FIELD[hit.field]}{hit.exact ? '' : ' (fuzzy)'}</span>
+                <span class="find-excerpt"
+                  >{hit.cutStart ? '…' : ''}{#each markRuns(hit.excerpt, hit.positions) as run, index (index)}{#if run.marked}<mark>{run.text}</mark>{:else}{run.text}{/if}{/each}{hit.cutEnd ? '…' : ''}</span
+                >
+              </button>
+            {/if}
+          </div>
         {/if}
         <div class="legend">
           <span><svg width="26" height="8" aria-hidden="true"><line x1="0" y1="4" x2="26" y2="4" stroke="var(--cf-muted)" stroke-width="2" /></svg>builds on</span>
@@ -873,6 +991,110 @@
   .node.selected {
     border-color: var(--cf-indigo);
     box-shadow: 0 0 0 2px var(--cf-indigo), var(--cf-hover);
+  }
+  .node-at.miss {
+    opacity: 0.3;
+  }
+  .node.hit {
+    border-color: var(--cf-yellow);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--cf-yellow) 45%, transparent), var(--cf-elevation);
+  }
+  .node.current {
+    border-color: var(--cf-yellow);
+    box-shadow: 0 0 0 4px var(--cf-yellow), var(--cf-hover);
+  }
+  .find {
+    position: absolute;
+    z-index: 6;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: min(420px, calc(100% - 24px));
+    padding: 6px 8px;
+    background: var(--cf-card);
+    border: 1px solid var(--cf-soft-line);
+    border-radius: 12px;
+    box-shadow: var(--cf-hover);
+    cursor: default;
+  }
+  .find-input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    font: inherit;
+    font-size: 0.9em;
+    color: inherit;
+    background: var(--cf-paper);
+    border: 1px solid var(--cf-line);
+    border-radius: 8px;
+  }
+  .find-input:focus {
+    outline: 2px solid var(--cf-indigo);
+    outline-offset: -1px;
+  }
+  .find-count {
+    flex: none;
+    min-width: 4.5em;
+    font-size: 0.8em;
+    text-align: center;
+    color: var(--cf-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .find-button {
+    display: inline-flex;
+    padding: 3px;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .find-button:hover:not(:disabled) {
+    background: var(--cf-sunken);
+  }
+  .find-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .find-where {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 4px 6px;
+    font: inherit;
+    font-size: 0.82em;
+    text-align: left;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .find-where:hover {
+    background: var(--cf-sunken);
+  }
+  .find-field {
+    font-size: 0.85em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--cf-muted);
+  }
+  .find-excerpt {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .find-excerpt mark {
+    color: var(--cf-ink);
+    background: color-mix(in srgb, var(--cf-yellow) 55%, transparent);
+    border-radius: 3px;
   }
   .node.origin::before {
     content: 'origin';

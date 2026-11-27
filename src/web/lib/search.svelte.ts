@@ -5,7 +5,7 @@
 // asked with: a slower one for an older query is dropped.
 import type { FoundInChat, FoundInFile, FoundText } from '../../client/workerConnection.ts';
 import type { Worker } from './api.ts';
-import { fuzzyMatch, pathMatch } from './fuzzy.ts';
+import { fuzzyMatch, pathMatch } from '../../chat/lib/fuzzy.ts';
 import type { WebWorker } from './worker.svelte.ts';
 
 /** File names are asked for after this long without typing; contents after the longer. */
