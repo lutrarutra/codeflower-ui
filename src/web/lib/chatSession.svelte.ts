@@ -75,7 +75,8 @@ export interface ChatActions {
   /** A fork of the chat, before the user's message at transcript entry `beforeEntry` or all of it, in front. */
   forkChat(chat: ChatSession, beforeEntry?: number): Promise<void>;
   /** An orchestrator started on the chat, in front. */
-  createOrchestrator(chat: ChatSession): Promise<void>;
+  /** A chat action of the orchestrator's (the report) chosen in its executor's chat: it runs in the orchestrator's chat. */
+  runOrchestratorAction(chat: ChatSession, id: string): Promise<void>;
   setOrchestratorAccess(chat: ChatSession, key: string, access: Partial<OrchestratorAccess>): Promise<void>;
   disconnectOrchestrator(chat: ChatSession, key: string): Promise<void>;
   /** A figure or report the chat showed, for its orchestrators set to ask. */
@@ -174,6 +175,15 @@ export class ChatSession {
     const action = this.state.actions?.find((candidate) => candidate.id === id);
     if (!action) {
       this.notify('error', 'This action is unavailable on this worker. Reconnect to an updated sandbox.');
+      return;
+    }
+    // The orchestrator's to do (the report): in its chat, or from its executor's, in its chat.
+    if (action.orchestratorPrompt !== undefined && this.state.orchestrator) {
+      this.queue.action({ ...action, prompt: action.orchestratorPrompt });
+      return;
+    }
+    if (action.orchestratorPrompt !== undefined && this.state.executor && !this.state.executor.disconnected) {
+      void this.failing(`Could not ask the orchestrator: ${action.title}`, this.actions.runOrchestratorAction(this, action.id));
       return;
     }
     this.queue.action(action);
@@ -410,9 +420,6 @@ export class ChatSession {
         break;
       case 'forkChat':
         await this.failing('Could not fork the chat', this.actions.forkChat(this, message.beforeEntry));
-        break;
-      case 'createOrchestrator':
-        await this.failing('Could not start an orchestrator', this.actions.createOrchestrator(this));
         break;
       case 'setOrchestratorAccess':
         await this.failing("Could not change what the orchestrator may do", this.actions.setOrchestratorAccess(this, message.key, message.access));

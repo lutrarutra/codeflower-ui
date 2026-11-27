@@ -14,7 +14,7 @@ import type { SubagentSettings, SubagentSettingsState, SubagentSummary } from '.
 import type { AgentCommand } from './commands.ts';
 import type { BatchJob } from './jobs.ts';
 import type { Watch } from './watches.ts';
-import type { Orchestrator, OrchestratorAccess } from './orchestrators.ts';
+import type { ExecutorInfo, Orchestrator, OrchestratorAccess } from './orchestrators.ts';
 import type { ChatUsage } from './usage.ts';
 
 /** The agent's id, as its worker reports it (claude, codex, dsh, …). The chat knows no agent by name. */
@@ -78,16 +78,20 @@ export type TranscriptEntry =
   // What went from this chat to an orchestrator (orchestrators.js): its reply or question, or that the user withheld it.
   | SentEntry;
 
-/** A reply or question this chat sent to its orchestrator `to`: the exact text it got. */
+/** What this chat sent its orchestrator `to`: a reply, a question, a script it read, or the map of ideas it read; the exact text it got. */
 export interface SentEntry {
   t: string;
   kind: 'sent';
   to: string;
-  what: 'reply' | 'question';
+  what: SentWhat;
+  /** The script's path, for `code`. */
+  path?: string;
   text: string;
   withheld?: boolean;
   stopReason?: string | null;
 }
+
+export type SentWhat = 'reply' | 'question' | 'code' | 'roots';
 
 /** Marks the prompt block that tells the agent about the user's shell commands. */
 export const SHELL_CONTEXT_META = 'codeflower/shellContext';
@@ -290,8 +294,8 @@ export interface ChatState {
   orchestrators?: Orchestrator[];
   /** This chat is an orchestrator: the chat it directs, and what it may do. */
   orchestrator?: Orchestrator;
-  /** An orchestrator can be started on this chat (`createOrchestrator`): the worker has them, and it is an ordinary chat. */
-  orchestrate?: boolean;
+  /** This chat is an orchestrator's executor: the line under its header. */
+  executor?: ExecutorInfo;
 }
 
 /** A forked chat's (`fork`), or one another chat started (`agent`): that chat, and the user's message the fork went before. */
@@ -311,6 +315,8 @@ export interface ChatAction {
   icon: string;
   mode: 'queue' | 'interrupt';
   prompt: string;
+  /** The prompt it takes in an orchestrator's chat; in its executor's chat, it goes to the orchestrator. */
+  orchestratorPrompt?: string;
 }
 
 export interface ActionPromptMeta {
@@ -368,6 +374,8 @@ export interface SandboxChat {
   status?: SessionStatus;
   /** The chat that shows the list. */
   current?: boolean;
+  /** One half of an orchestrated pair: the list marks it with a compass. */
+  role?: 'orchestrator' | 'executor';
 }
 
 export type HostMessage =
@@ -462,8 +470,6 @@ export type WebviewMessage =
   | { type: 'newChat' }
   /** Fork this chat, before the user's message at transcript entry `beforeEntry` or all of it, and show the fork. */
   | { type: 'forkChat'; beforeEntry?: number }
-  /** Start an orchestrator on this chat, for good, and show it. */
-  | { type: 'createOrchestrator' }
   /** Change what an orchestrator may do (this chat's, or one directing it). */
   | { type: 'setOrchestratorAccess'; key: string; access: Partial<OrchestratorAccess> }
   /** End an orchestrator's link to its chat: it becomes read-only. */

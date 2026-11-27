@@ -19,6 +19,7 @@
   import AgentIcon from './lib/AgentIcon.svelte';
   import ActionsMenu from './lib/ActionsMenu.svelte';
   import OrchestratorAccess from './lib/OrchestratorAccess.svelte';
+  import PairLine from './lib/PairLine.svelte';
   import ShownFilesMenu from './lib/ShownFilesMenu.svelte';
   import ChatSwitcher from './lib/ChatSwitcher.svelte';
   import { provideChatHost, type ChatHost } from './lib/host.ts';
@@ -340,6 +341,11 @@
 
   // An orchestrator's chat, and the chat it directs; and what the user may share with this chat's orchestrators.
   const orchestrator = $derived(chat.orchestrator);
+  // An executor chat: the orchestrator it works for, and what it got.
+  const executor = $derived(chat.executor);
+  const workingExecutor = $derived(executor && !executor.disconnected ? executor : undefined);
+  // An orchestrator's chat offers the actions that are its to do (the report), with their own prompt.
+  const chatActions = $derived(orchestrator ? (chat.actions ?? []).filter((action) => action.orchestratorPrompt !== undefined) : (chat.actions ?? []));
   const shareWith = $derived.by(() => {
     const connected = (chat.orchestrators ?? []).filter((one) => !one.disconnected);
     return [
@@ -389,13 +395,13 @@
         <span class="hidden @xs:inline">{agentLabel}</span>
       </span>
     {/if}
-    {#if (chat.actions?.length && !orchestrator) || (chat.orchestrate && !subagent)}
+    {#if chatActions.length && !orchestrator?.disconnected}
       <ActionsMenu
-        actions={orchestrator ? [] : (chat.actions ?? [])}
+        actions={chatActions}
         busy={chat.busy}
         live={chat.live}
         choose={(id) => send({ type: 'action', id })}
-        orchestrate={chat.orchestrate && !subagent ? () => send({ type: 'createOrchestrator' }) : undefined}
+        toOrchestrator={Boolean(workingExecutor)}
       />
     {/if}
     {#if shown.length}
@@ -482,28 +488,53 @@
 
   {#if orchestrator}
     <!-- The chat it directs, for good; and what it may do, which the user changes here. -->
-    <details class="group border-b-[1.5px] border-soft-line bg-violet-soft/40 px-3 py-1.5 text-[0.85em]">
-      <summary class="flex min-w-0 cursor-pointer list-none items-center gap-1.5 select-none">
-        <span class="codicon codicon-compass shrink-0 text-violet"></span>
-        <span class="shrink-0 font-semibold">Orchestrator of</span>
-        <button
-          type="button"
-          class="link min-w-0 truncate"
-          title="Open the chat it directs"
-          onclick={(event) => {
-            event.preventDefault();
-            send({ type: 'openChat', key: orchestrator.executor });
-          }}>{orchestrator.executorTitle}</button
-        >
-        <span class="min-w-0 truncate text-muted max-[640px]:hidden">
-          · {orchestrator.disconnected ? 'disconnected: read-only' : 'it may not see the data, only what that chat sends it'}
-        </span>
-        <span class="ml-auto flex shrink-0 items-center gap-1 text-muted">
-          What it may do <span class="codicon codicon-chevron-right transition-transform group-open:rotate-90"></span>
-        </span>
-      </summary>
-      <div class="mt-2 pb-1"><OrchestratorAccess {orchestrator} disabled={orchestrator.disconnected} /></div>
-    </details>
+    <PairLine
+      label="Orchestrator of"
+      other={orchestrator.executor}
+      otherTitle={orchestrator.executorTitle}
+      openTitle="Open the chat it directs"
+      note={orchestrator.disconnected ? 'disconnected: read-only' : 'it may not see the data, only what that chat sends it'}
+      more="What it may do"
+    >
+      <OrchestratorAccess {orchestrator} disabled={orchestrator.disconnected} />
+    </PairLine>
+  {:else if executor}
+    <!-- The orchestrator it works for: a chat of its own role, with a short prompt and, where its agent allows, fewer tools. -->
+    <PairLine
+      tone="executor"
+      label="Executor of"
+      other={executor.orchestrator}
+      otherTitle={executor.orchestratorTitle}
+      openTitle="Open the orchestrator's chat"
+      note={executor.disconnected
+        ? 'disconnected: an ordinary chat again'
+        : executor.limited
+          ? 'a limited chat: one step at a time, short prompt, fewer tools'
+          : "a limited chat: one step at a time, short prompt; full tools: this agent can't be limited"}
+      more="What it has"
+    >
+      <div class="flex flex-col gap-2 text-[0.9em]">
+        <div>
+          <span class="font-semibold">Tools:</span>
+          {executor.tools ? `${executor.tools.join(', ')}; no web, no subagents` : "the agent's usual ones (its tools can't be limited per chat)"}
+        </div>
+        {#if executor.prompt}
+          <div>
+            <span class="font-semibold">Its prompt:</span>
+            <button type="button" class="link" title={executor.prompt} onclick={() => send({ type: 'openFile', path: executor.prompt! })}
+              >AGENTS.md of its folder</button
+            >, short and for executors only, with the sandbox's facts
+          </div>
+        {/if}
+        <div class="flex flex-col gap-1">
+          <span class="font-semibold">What the orchestrator may do <span class="font-normal text-muted">(change it in the orchestrator's chat)</span></span>
+          <OrchestratorAccess
+            orchestrator={{ key: executor.orchestrator, access: executor.access }}
+            disabled
+          />
+        </div>
+      </div>
+    </PairLine>
   {/if}
 
   <Transcript
@@ -661,7 +692,9 @@
         ? 'This session is read-only here'
         : orchestrator
           ? 'Ask the orchestrator… it sees what you write here, so write no data'
-          : touch
+          : workingExecutor
+            ? "Message the executor… your messages come before the orchestrator's"
+            : touch
             ? chat.busy
               ? 'Follow up…'
               : 'Ask the agent…'
@@ -769,5 +802,6 @@
     jobs={subagent ? [] : (chat.jobs ?? [])}
     watches={subagent ? [] : (chat.watches ?? [])}
     orchestrators={subagent ? [] : (chat.orchestrators ?? [])}
+    orchestrator={orchestrator}
   />
 </main>

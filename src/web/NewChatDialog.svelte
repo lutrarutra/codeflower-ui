@@ -22,6 +22,8 @@
   /** The agent the user chose here; else the one remembered for the project. */
   let chosen = $state<AgentName | undefined>();
   let title = $state('');
+  /** An orchestrated pair: the agent chosen is the executor, a Claude orchestrator directs it. */
+  let orchestrated = $state(false);
   let creating = $state(false);
   let error = $state('');
 
@@ -30,11 +32,13 @@
   const choice = $derived(sandbox ? newChatAgent(sandbox.agents, project, chosen) : undefined);
   /** The agents that could chat once signed in. */
   const signedOut = $derived(sandbox?.agents.filter((agent) => !agent.unavailable && !agent.signedIn) ?? []);
+  const canOrchestrate = $derived(Boolean(sandbox?.orchestratorAgents.includes('claude')));
 
   /** Asks for a new chat in the sandbox. */
   export function open(id: string): void {
     choosing = false;
     title = '';
+    orchestrated = false;
     pick(id);
     dialog?.showModal();
   }
@@ -43,6 +47,7 @@
   export function openAny(preferred?: string | null): void {
     choosing = true;
     title = '';
+    orchestrated = false;
     const id = ready.find((worker) => worker.id === preferred)?.id ?? (ready.length === 1 ? ready[0].id : undefined);
     if (id) pick(id);
     else {
@@ -78,6 +83,13 @@
     creating = true;
     error = '';
     try {
+      if (orchestrated && canOrchestrate) {
+        const key = await current.createOrchestrator({ agent: name }, { ...(title.trim() ? { title: title.trim() } : {}) });
+        onstarted(id, key);
+        dialog?.close();
+        onNavigate();
+        return;
+      }
       const key = await current.newChat(name);
       // Undefined when the agent turned out not to be signed in: its sign-in opens instead.
       if (key) {
@@ -155,6 +167,18 @@
         {/if}
       </div>
     {/if}
+    {#if workerId && canOrchestrate}
+      <label class="flex items-start gap-2 text-[0.9em]">
+        <input type="checkbox" class="mt-1" bind:checked={orchestrated} />
+        <span>
+          <span class="font-semibold">Orchestrated</span>
+          <span class="block text-muted">
+            A Claude orchestrator plans and checks the work without seeing the data; the agent above is its executor, which works
+            with the data one step at a time, with a short prompt and fewer tools. You can still write to both.
+          </span>
+        </span>
+      </label>
+    {/if}
     <label class="flex flex-col gap-1.5">
       <span class="text-[0.9em] text-muted">Title (optional)</span>
       <!-- svelte-ignore a11y_autofocus -->
@@ -164,7 +188,7 @@
     <footer class="flex justify-end gap-2">
       <button type="button" class="pill" onclick={() => dialog?.close()}>Cancel</button>
       <button type="submit" class="pill pill-primary" disabled={creating || !choice}>
-        {creating ? 'Starting…' : 'Start chat'}
+        {creating ? 'Starting…' : orchestrated && canOrchestrate ? 'Start the pair' : 'Start chat'}
       </button>
     </footer>
   </form>

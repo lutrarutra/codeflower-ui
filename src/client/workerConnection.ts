@@ -971,8 +971,15 @@ export class WorkerConnection {
     return this.bridge.orchestrators().catch(() => []);
   }
 
-  createOrchestrator(executor: string, options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}) {
+  createOrchestrator(
+    executor: { agent: string; settings?: { options?: Record<string, unknown> } },
+    options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}
+  ) {
     return this.bridge.createOrchestrator(executor, options);
+  }
+
+  runOrchestratorAction(executor: string, id: string) {
+    return this.bridge.runOrchestratorAction(executor, id);
   }
 
   setOrchestratorAccess(key: string, access: Partial<OrchestratorAccess>) {

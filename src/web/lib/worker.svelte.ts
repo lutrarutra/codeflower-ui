@@ -19,7 +19,7 @@ import { subagentTitle, withSubagent, type SubagentSettingsState, type SubagentS
 import type { AgentCommand } from '../../protocol/commands.ts';
 import { jobsOfChat, type BatchJob } from '../../protocol/jobs.ts';
 import { watchesOfChat, type Watch } from '../../protocol/watches.ts';
-import { orchestration, type Orchestrator } from '../../protocol/orchestrators.ts';
+import { orchestration, type Orchestrator, type OrchestratorAccess } from '../../protocol/orchestrators.ts';
 import type { BrowserFrame, BrowserHost, BrowserState } from '../../protocol/browser.ts';
 import type { ChatUsage, WorkerUsage } from '../../protocol/usage.ts';
 import {
@@ -99,6 +99,8 @@ export class WebWorker {
   status = $state<WorkerStatus | undefined>();
   /** The sandbox's agents: whether each can run, is signed in, runs. */
   agents = $state<AgentState[]>([]);
+  /** The agents that can be an orchestrator here (Claude): "New chat" offers an orchestrated pair. */
+  orchestratorAgents = $state<string[]>([]);
   sessions = $state<SessionRecord[]>([]);
   /** The chats were listed (or cannot be): until then the page shows them loading. */
   sessionsKnown = $state(false);
@@ -434,18 +436,15 @@ export class WebWorker {
     };
   }
 
-  /** The orchestrators directing a chat, or the one it is, and whether one can start on it. */
-  private orchestrating(key: string): Pick<ChatState, 'orchestrators' | 'orchestrator' | 'orchestrate'> {
+  /** The orchestrators directing a chat, the one it is, and, for an executor, its line. */
+  private orchestrating(key: string): Pick<ChatState, 'orchestrators' | 'orchestrator' | 'executor'> {
     const known = orchestration(this.orchestrators, key);
-    const session = this.sessions.find((candidate) => candidate.key === key);
-    return {
-      ...known,
-      orchestrate: Boolean(this.connection?.orchestratorAgents.length) && !this.isSubagent(key) && !known.orchestrator && session?.role !== 'orchestrator'
-    };
+    return { orchestrators: known.orchestrators, orchestrator: known.orchestrator, executor: known.executor };
   }
 
   private async loadOrchestrators(): Promise<void> {
     const connection = this.connection;
+    this.orchestratorAgents = connection?.orchestratorAgents ?? [];
     if (!connection?.orchestratorAgents.length) return;
     const orchestrators = await connection.orchestrators();
     if (this.connection === connection) this.setOrchestrators(orchestrators);
@@ -456,13 +455,23 @@ export class WebWorker {
     for (const [key, chat] of Object.entries(this.chats)) chat?.setState(this.orchestrating(key));
   }
 
-  /** Starts an orchestrator on a chat and shows it. */
-  async createOrchestrator(key: string): Promise<void> {
-    const created = await this.require().createOrchestrator(key);
+  /** Makes an orchestrated pair (an executor of `executor.agent`, an orchestrator directing it) and shows the orchestrator's chat. */
+  async createOrchestrator(
+    executor: { agent: string; settings?: { options?: Record<string, unknown> } },
+    options: { title?: string; access?: Partial<OrchestratorAccess> } = {}
+  ): Promise<string> {
+    const created = await this.require().createOrchestrator(executor, options);
     await this.listSessions().catch(() => false);
     await this.loadOrchestrators().catch(() => undefined);
     await this.open(created.key);
     this.events.openChat(this, created.key);
+    return created.key;
+  }
+
+  /** A chat action of the orchestrator's chosen in its executor's chat: it runs in the orchestrator's chat, which shows. */
+  async runOrchestratorAction(executor: string, id: string): Promise<void> {
+    const { key } = await this.require().runOrchestratorAction(executor, id);
+    this.events.openChat(this, key);
   }
 
   /** Forks a chat (before the user's message at entry `beforeEntry`, or all of it) and shows the fork, that message ready to send again. */
@@ -817,7 +826,7 @@ export class WebWorker {
       if (key) this.events.openChat(this, key);
     },
     forkChat: (chat, beforeEntry) => this.forkChat(chat.key, beforeEntry),
-    createOrchestrator: (chat) => this.createOrchestrator(chat.key),
+    runOrchestratorAction: (chat, id) => this.runOrchestratorAction(chat.key, id),
     setOrchestratorAccess: async (chat, key, access) => {
       const changed = await this.require().setOrchestratorAccess(key, access);
       if (changed.restartNeeded) chat.notify('info', "The orchestrator's web access changes when its chat starts again, e.g. after its agent restarts.");
@@ -839,7 +848,8 @@ export class WebWorker {
         agent: this.presentation(session.key).agent,
         updatedAt: session.updatedAt,
         ...(status ? { status } : {}),
-        ...(session.key === current ? { current: true } : {})
+        ...(session.key === current ? { current: true } : {}),
+        ...(session.role ? { role: session.role } : {})
       };
     });
   }

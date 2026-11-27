@@ -303,7 +303,15 @@
     <details class="group min-w-0 self-start text-muted">
       <summary class="inline-flex cursor-pointer list-none items-center gap-1.5 text-[0.8em] select-none hover:text-ink">
         <span class="codicon codicon-{item.withheld ? 'circle-slash' : 'arrow-small-right'}"></span>
-        {item.withheld ? `Withheld from the orchestrator` : item.what === 'question' ? 'Asked the orchestrator' : 'Sent to the orchestrator'}
+        {item.withheld
+          ? `Withheld from the orchestrator`
+          : item.what === 'question'
+            ? 'Asked the orchestrator'
+            : item.what === 'code'
+              ? `The orchestrator read ${item.path ?? 'a script'}`
+              : item.what === 'roots'
+                ? 'The orchestrator read the map of ideas'
+                : 'Sent to the orchestrator'}
         {#if !item.withheld}<span class="codicon codicon-chevron-right text-[11px]! transition-transform group-open:rotate-90"></span>{/if}
       </summary>
       {#if !item.withheld}

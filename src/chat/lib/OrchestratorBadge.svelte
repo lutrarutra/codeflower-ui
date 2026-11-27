@@ -16,7 +16,8 @@
   const stateText: Record<Orchestrator['state'], string> = {
     idle: 'idle',
     asking: 'this chat works on its message',
-    waiting: 'this chat waits for its answer'
+    waiting: 'this chat waits for its answer',
+    sharing: 'waits for you to share files'
   };
 
   let open = $state(false);

@@ -271,9 +271,10 @@ export interface SessionRecord {
   usage?: UsageTotals | null;
   /** Where the chat came from: a fork of another, or a chat another chat started (codeflower-chat). */
   origin?: SessionOrigin;
-  /** An orchestrator's chat: the chat it directs, and what it may do. */
-  role?: 'orchestrator';
+  /** An orchestrator's chat (the chat it directs, and what it may do), or its executor's (the orchestrator it works for). */
+  role?: 'orchestrator' | 'executor';
   executor?: string;
+  orchestrator?: string;
   access?: OrchestratorAccess;
   disconnected?: boolean;
 }
@@ -1106,9 +1107,20 @@ export class CodeflowerExtensions {
     return (await this.rpc.request<{ orchestrators?: Orchestrator[] }>('_codeflower/orchestrators/list', {})).orchestrators ?? [];
   }
 
-  /** Starts an orchestrator (of `agent`, Claude Code by default) on the chat `executor`, for good. */
-  createOrchestrator(executor: string, options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}): Promise<{ key: string; agent: string; title: string; executor: string }> {
+  /**
+   * Makes an orchestrated pair: an executor chat of `executor.agent` (any agent, with `settings`, e.g.
+   * its model), and an orchestrator (of `agent`, Claude Code by default) that directs it, for good.
+   */
+  createOrchestrator(
+    executor: { agent: string; settings?: { options?: Record<string, unknown> } },
+    options: { agent?: string; title?: string; access?: Partial<OrchestratorAccess> } = {}
+  ): Promise<{ key: string; agent: string; title: string; executor: string; executorAgent: string }> {
     return this.rpc.request('_codeflower/orchestrators/create', { executor, ...options });
+  }
+
+  /** Runs a chat action of the orchestrator's (the report), chosen in its executor's chat, in the orchestrator's chat. */
+  runOrchestratorAction(executor: string, id: string): Promise<{ key: string }> {
+    return this.rpc.request('_codeflower/orchestrators/runAction', { executor, id });
   }
 
   /** Changes what an orchestrator may do; `restartNeeded` when the web changed, which applies at its session's next start. */

@@ -179,6 +179,12 @@
               class:animate-pulse={chat.status === 'working'}
             ></span>
             {#if chat.agent}<AgentIcon agent={chat.agent} size="0.95em" title={chat.agent.name ?? chat.agent.id} />{/if}
+            {#if chat.role}
+              <span
+                class="codicon codicon-compass shrink-0 text-[13px]! {chat.role === 'orchestrator' ? 'text-violet' : 'text-teal'}"
+                title={chat.role === 'orchestrator' ? 'Orchestrator: plans and checks, without the data' : 'Executor: works with the data, one step at a time'}
+              ></span>
+            {/if}
             <span class="flex min-w-0 flex-1"><ChatTitle title={chat.title} /></span>
             {#if chat.current}
               <span class="shrink-0 text-[0.85em] font-normal text-muted">this chat</span>

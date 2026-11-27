@@ -11,6 +11,7 @@ import {
   formFields,
   type FormContent,
   type FormField,
+  type SentWhat,
   type TranscriptEntry
 } from '../../protocol/messages.ts';
 
@@ -38,7 +39,7 @@ export type ChatItem =
   /** Another chat's message (orchestrators.js): an orchestrator's to this chat, or its executor's question. */
   | ({ kind: 'peer'; id: string; from: FromMeta; text: string } & TurnTimes)
   /** What this chat sent its orchestrator: the exact text it got, or that the user withheld it. */
-  | { kind: 'sent'; id: string; to: string; what: 'reply' | 'question'; text: string; withheld: boolean }
+  | { kind: 'sent'; id: string; to: string; what: SentWhat; path?: string; text: string; withheld: boolean }
   | { kind: 'assistant'; id: string; text: string; messageId?: string | null; at: number | null; stamp?: TurnStamp }
   | { kind: 'thought'; id: string; text: string }
   | {
@@ -364,7 +365,7 @@ export function buildItems(entries: TranscriptEntry[], start = 0): ChatItem[] {
         items.push({ kind: 'show', id, files: entry.files, message: entry.message ?? null });
         break;
       case 'sent':
-        items.push({ kind: 'sent', id, to: entry.to, what: entry.what, text: entry.text ?? '', withheld: entry.withheld === true });
+        items.push({ kind: 'sent', id, to: entry.to, what: entry.what, ...(entry.path ? { path: entry.path } : {}), text: entry.text ?? '', withheld: entry.withheld === true });
         break;
       case 'question':
         // The question card replaces the row of the tool call that asked it (e.g. AskUserQuestion).

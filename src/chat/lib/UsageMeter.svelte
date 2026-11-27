@@ -21,6 +21,7 @@
   import SubagentBadge from './SubagentBadge.svelte';
   import WatchesBadge from './WatchesBadge.svelte';
   import OrchestratorBadge from './OrchestratorBadge.svelte';
+  import OrchestratorFilesBadge from './OrchestratorFilesBadge.svelte';
   import type { Orchestrator } from '../../protocol/orchestrators.ts';
 
   // Under the composer, mostly icons with the details on hover: how full the
@@ -34,7 +35,8 @@
     background = [],
     jobs = [],
     watches = [],
-    orchestrators = []
+    orchestrators = [],
+    orchestrator
   }: {
     usage: ChatUsage;
     subagents?: SubagentSummary[];
@@ -44,6 +46,8 @@
     watches?: Watch[];
     /** The orchestrators directing this chat. */
     orchestrators?: Orchestrator[];
+    /** This chat, if it is an orchestrator: what has been shared with it. */
+    orchestrator?: Orchestrator;
   } = $props();
 
   // Resets count down; a minute is fine enough.
@@ -111,6 +115,7 @@
     <WatchesBadge {watches} />
     <SubagentBadge {subagents} />
     <OrchestratorBadge {orchestrators} />
+    {#if orchestrator && !orchestrator.disconnected}<OrchestratorFilesBadge files={orchestrator.files ?? []} />{/if}
   </span>
 </div>
 

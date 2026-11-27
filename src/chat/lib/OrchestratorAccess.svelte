@@ -4,7 +4,7 @@
 
   // What an orchestrator may do beside talking to its executor, which the user
   // changes here (in the orchestrator's chat, and in its executor's badge).
-  let { orchestrator, disabled = false }: { orchestrator: Orchestrator; disabled?: boolean } = $props();
+  let { orchestrator, disabled = false }: { orchestrator: Pick<Orchestrator, 'key' | 'access'>; disabled?: boolean } = $props();
   const host = chatHost();
 
   const set = (access: Partial<OrchestratorAccess>) => host.send({ type: 'setOrchestratorAccess', key: orchestrator.key, access });
@@ -13,9 +13,11 @@
     { value: 'ask', label: 'Shared' },
     { value: 'always', label: 'All' }
   ];
-  const switches: { name: 'web' | 'files' | 'approve'; label: string; hint: string }[] = [
+  const switches: { name: 'web' | 'files' | 'code' | 'roots' | 'approve'; label: string; hint: string }[] = [
     { name: 'web', label: 'Web', hint: 'Search the web and read pages; applies when its chat starts again' },
     { name: 'files', label: 'File names', hint: 'List the folders the executor works in: names and sizes, never contents' },
+    { name: 'code', label: 'Code', hint: 'Read the scripts the executor wrote in its steps, to check them' },
+    { name: 'roots', label: 'Roots', hint: "Keep the project's map of ideas: the plan, its todos and the decisions made" },
     { name: 'approve', label: 'Ask me first', hint: 'You allow each reply and question before it goes to the orchestrator' }
   ];
 </script>

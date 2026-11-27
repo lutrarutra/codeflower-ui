@@ -61,7 +61,7 @@ function actions(
     openChat: () => {},
     newChat: async () => {},
     forkChat: async () => {},
-    createOrchestrator: async () => {},
+    runOrchestratorAction: async () => {},
     setOrchestratorAccess: async () => {},
     disconnectOrchestrator: async () => {},
     shareWithOrchestrator: async () => {}
